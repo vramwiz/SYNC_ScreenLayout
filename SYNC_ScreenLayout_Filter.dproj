@@ -1,0 +1,185 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{4B56112D-6EA3-47BF-B94D-1D70483AE918}</ProjectGuid>
+        <ProjectVersion>20.4</ProjectVersion>
+        <FrameworkType>None</FrameworkType>
+        <Config Condition="'$(Config)'==''">Debug</Config>
+        <Platform Condition="'$(Platform)'==''">Win64</Platform>
+        <ProjectName Condition="'$(ProjectName)'==''">SYNC_ScreenLayout_Filter</ProjectName>
+        <TargetedPlatforms>2</TargetedPlatforms>
+        <AppType>Library</AppType>
+        <MainSource>SYNC_ScreenLayout_Filter.dpr</MainSource>
+        <Base>True</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Debug' or '$(Cfg_1)'!=''">
+        <Cfg_1>true</Cfg_1>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win64' and '$(Cfg_1)'=='true') or '$(Cfg_1_Win64)'!=''">
+        <Cfg_1_Win64>true</Cfg_1_Win64>
+        <CfgParent>Cfg_1</CfgParent>
+        <Cfg_1>true</Cfg_1>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Release' or '$(Cfg_2)'!=''">
+        <Cfg_2>true</Cfg_2>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Base)'!=''">
+        <GenDll>true</GenDll>
+        <SanitizedProjectName>SYNC_ScreenLayout_Filter</SanitizedProjectName>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
+        <Debugger_HostApplication>D:\aviutl2_v2.1.3a\aviutl2.exe</Debugger_HostApplication>
+    </PropertyGroup>
+    <ItemGroup>
+        <DelphiCompile Include="$(MainSource)">
+            <MainSource>MainSource</MainSource>
+        </DelphiCompile>
+        <DCCReference Include="Lib\AviUtl2\AviUtl2FilterTypes.pas"/>
+        <DCCReference Include="Lib\AviUtl2\PluginFilterTable.pas"/>
+        <DCCReference Include="Lib\AviUtl2\PluginFilterContextManager.pas"/>
+        <DCCReference Include="Source\PlacementPlugin\ScreenLayoutFilterPlugin.pas"/>
+        <DCCReference Include="Source\PlacementPlugin\ScreenLayoutFrameCapture.pas"/>
+        <DCCReference Include="Source\PlacementPlugin\ScreenLayoutFilterContext.pas"/>
+        <DCCReference Include="Source\PlacementPlugin\ScreenLayoutEditorHost.pas"/>
+        <DCCReference Include="Lib\TextRenderer\TextRendererSkiaBootstrap.pas"/>
+        <DCCReference Include="Lib\TextRenderer\TextRendererTypes.pas"/>
+        <DCCReference Include="Lib\TextRenderer\TextRenderer.pas"/>
+        <DCCReference Include="Lib\TextRenderer\TextRendererSkiaRuntime.pas"/>
+        <DCCReference Include="Lib\TextRenderer\TextRendererSkia.pas"/>
+        <DCCReference Include="Lib\DarkMenu\VectArtDarkPopupMenu.pas"/>
+        <DCCReference Include="Lib\ShortcutAction\ShortcutAction.pas"/>
+        <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas"/>
+        <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas"/>
+        <DCCReference Include="Source\Shell\VectArtDesignerMainForm.pas">
+            <Form>MainForm</Form>
+        </DCCReference>
+        <DCCReference Include="Source\Shell\VectArtDesignerFileActionsUI.pas"/>
+        <DCCReference Include="Source\Shell\VectArtDesignerEditActionsUI.pas"/>
+        <DCCReference Include="Source\ObjectProperties\VectArtDesignerStrokeStyleCombo.pas"/>
+        <DCCReference Include="Source\Shell\VectArtDesignerLineToolbar.pas"/>
+        <DCCReference Include="Source\Shell\VectArtDesignerLineStyleControls.pas"/>
+        <DCCReference Include="Source\Shell\VectArtDesignerCanvasSettingsDialog.pas"/>
+        <DCCReference Include="Source\Core\VectArtDesignerDocument.pas"/>
+        <DCCReference Include="Source\Core\VectArtDesignerGeometry.pas"/>
+        <DCCReference Include="Source\Rendering\VectArtDesignerRenderer.pas"/>
+        <DCCReference Include="Source\Core\VectArtDesignerContext.pas"/>
+        <DCCReference Include="Source\Core\VectArtDesignerEditorState.pas"/>
+        <DCCReference Include="Source\Core\Commands\VectArtDesignerEditCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\VectArtDesignerLayerStructureCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\VectArtDesignerLayerBatchCommands.pas"/>
+        <DCCReference Include="Source\Core\VectArtDesignerEditHistory.pas"/>
+        <DCCReference Include="Source\Persistence\Mif\VectArtDesignerMifContainer.pas"/>
+        <DCCReference Include="Source\Persistence\Mif\VectArtDesignerMifDocument.pas"/>
+        <DCCReference Include="Source\Persistence\Mif\VectArtDesignerMifDebugLog.pas"/>
+        <DCCReference Include="Source\Persistence\Svg\VectArtDesignerSvgDocument.pas"/>
+        <DCCReference Include="Source\Persistence\VectArtDesignerDocumentJson.pas"/>
+        <DCCReference Include="Source\Editor\VectArtDesignerCanvas.pas"/>
+        <DCCReference Include="Source\Editor\VectArtDesignerCanvasInteraction.pas"/>
+        <DCCReference Include="Source\Editor\VectArtDesignerShapeCreation.pas"/>
+        <DCCReference Include="Source\Editor\VectArtDesignerKeyboardMovement.pas"/>
+        <DCCReference Include="Source\Editor\VectArtDesignerEditorWorkspaceFrame.pas">
+            <Form>EditorWorkspaceFrame</Form>
+            <DesignClass>TFrame</DesignClass>
+        </DCCReference>
+        <DCCReference Include="Source\Editor\VectArtDesignerSelectionGeometry.pas"/>
+        <DCCReference Include="Source\Layers\VectArtDesignerLayerList.pas"/>
+        <DCCReference Include="Source\Layers\VectArtDesignerLayerRenderer.pas"/>
+        <DCCReference Include="Source\Layers\VectArtDesignerLayerActions.pas"/>
+        <DCCReference Include="Source\Layers\VectArtDesignerLayerOperations.pas"/>
+        <DCCReference Include="Source\Layers\VectArtDesignerLayerDuplication.pas"/>
+        <DCCReference Include="Source\Layers\VectArtDesignerLayerPanelFrame.pas">
+            <Form>LayerPanelFrame</Form>
+            <DesignClass>TFrame</DesignClass>
+        </DCCReference>
+        <DCCReference Include="Source\Layout\VectArtDesignerDockManager.pas"/>
+        <DCCReference Include="Source\Layout\VectArtDesignerToolFrames.pas"/>
+        <DCCReference Include="Source\ObjectProperties\VectArtDesignerObjectPropertiesControl.pas"/>
+        <DCCReference Include="Source\ObjectProperties\VectArtDesignerObjectPropertiesFrame.pas">
+            <Form>ObjectPropertiesFrame</Form>
+            <DesignClass>TFrame</DesignClass>
+        </DCCReference>
+        <DCCReference Include="Source\ToolPalette\VectArtDesignerToolPaletteFrame.pas">
+            <Form>ToolPaletteFrame</Form>
+            <DesignClass>TFrame</DesignClass>
+        </DCCReference>
+        <DCCReference Include="Source\ToolPalette\VectArtDesignerToolPalette.pas"/>
+        <BuildConfiguration Include="Base">
+            <Key>Base</Key>
+        </BuildConfiguration>
+        <BuildConfiguration Include="Debug">
+            <Key>Cfg_1</Key>
+            <CfgParent>Base</CfgParent>
+        </BuildConfiguration>
+        <BuildConfiguration Include="Release">
+            <Key>Cfg_2</Key>
+            <CfgParent>Base</CfgParent>
+        </BuildConfiguration>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Delphi.Personality.12</Borland.Personality>
+        <Borland.ProjectType>Application</Borland.ProjectType>
+        <BorlandProject>
+            <Delphi.Personality>
+                <Source>
+                    <Source Name="MainSource">SYNC_ScreenLayout_Filter.dpr</Source>
+                </Source>
+            </Delphi.Personality>
+            <Platforms>
+                <Platform value="Win32">False</Platform>
+                <Platform value="Win64">True</Platform>
+            </Platforms>
+        </BorlandProject>
+        <ProjectFileVersion>12</ProjectFileVersion>
+    </ProjectExtensions>
+    <Import Project="$(BDS)\Bin\CodeGear.Delphi.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Delphi.Targets')"/>
+    <Import Project="$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj" Condition="Exists('$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj')"/>
+    <Import Project="$(MSBuildProjectName).deployproj" Condition="Exists('$(MSBuildProjectName).deployproj')"/>
+    <PropertyGroup Condition="'$(Platform)'=='Win64'">
+        <ScreenLayoutPluginDir>C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout</ScreenLayoutPluginDir>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Debug' And '$(Platform)'=='Win64'">
+        <ScreenLayoutBuildDir>$(MSBuildProjectDirectory)\Win64\SYNC_ScreenLayout_Filter\Debug</ScreenLayoutBuildDir>
+        <DCC_DcuOutput>$(ScreenLayoutBuildDir)\DCU</DCC_DcuOutput>
+        <DCC_ExeOutput>$(ScreenLayoutBuildDir)</DCC_ExeOutput>
+        <PreBuildEvent>if not exist &quot;$(ScreenLayoutPluginDir)&quot; mkdir &quot;$(ScreenLayoutPluginDir)&quot;
+if not exist &quot;$(DCC_DcuOutput)&quot; mkdir &quot;$(DCC_DcuOutput)&quot;
+if exist &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).dll&quot; del /Q &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).dll&quot;
+if exist &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).rsm&quot; del /Q &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).rsm&quot;
+if exist &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).exe&quot; del /Q &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).exe&quot;</PreBuildEvent>
+        <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
+        <PostBuildEvent>set ScreenLayoutCopyResult=0
+copy /Y &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).dll&quot; &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).auf2&quot; || set ScreenLayoutCopyResult=1
+copy /Y &quot;$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll&quot; &quot;$(ScreenLayoutPluginDir)\sk4d.dll&quot; || set ScreenLayoutCopyResult=1
+if exist &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).dll&quot; del /Q &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).dll&quot;
+if exist &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).rsm&quot; del /Q &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).rsm&quot;
+if exist &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).exe&quot; del /Q &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).exe&quot;
+exit /B %ScreenLayoutCopyResult%</PostBuildEvent>
+        <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Win64'">
+        <ScreenLayoutBuildDir>$(MSBuildProjectDirectory)\Win64\SYNC_ScreenLayout_Filter\Release</ScreenLayoutBuildDir>
+        <DCC_DcuOutput>$(ScreenLayoutBuildDir)\DCU</DCC_DcuOutput>
+        <DCC_ExeOutput>$(ScreenLayoutBuildDir)</DCC_ExeOutput>
+        <PreBuildEvent>if not exist &quot;$(ScreenLayoutPluginDir)&quot; mkdir &quot;$(ScreenLayoutPluginDir)&quot;
+if not exist &quot;$(DCC_DcuOutput)&quot; mkdir &quot;$(DCC_DcuOutput)&quot;
+if exist &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).dll&quot; del /Q &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).dll&quot;
+if exist &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).rsm&quot; del /Q &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).rsm&quot;
+if exist &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).exe&quot; del /Q &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).exe&quot;</PreBuildEvent>
+        <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
+        <PostBuildEvent>set ScreenLayoutCopyResult=0
+copy /Y &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).dll&quot; &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).auf2&quot; || set ScreenLayoutCopyResult=1
+copy /Y &quot;$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll&quot; &quot;$(ScreenLayoutPluginDir)\sk4d.dll&quot; || set ScreenLayoutCopyResult=1
+if exist &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).dll&quot; del /Q &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).dll&quot;
+if exist &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).rsm&quot; del /Q &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).rsm&quot;
+if exist &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).exe&quot; del /Q &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).exe&quot;
+exit /B %ScreenLayoutCopyResult%</PostBuildEvent>
+        <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
+    </PropertyGroup>
+</Project>
