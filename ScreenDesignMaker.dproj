@@ -62,54 +62,54 @@
         <DCCReference Include="Lib\ShortcutAction\ShortcutAction.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas"/>
-        <DCCReference Include="Source\Shell\VectArtDesignerMainForm.pas">
+        <DCCReference Include="Source\Shell\ScreenLayoutMainForm.pas">
             <Form>MainForm</Form>
         </DCCReference>
-        <DCCReference Include="Source\Shell\VectArtDesignerEditActionsUI.pas"/>
-        <DCCReference Include="Source\ObjectProperties\VectArtDesignerStrokeStyleCombo.pas"/>
-        <DCCReference Include="Source\Shell\VectArtDesignerLineToolbar.pas"/>
-        <DCCReference Include="Source\Shell\VectArtDesignerLineStyleControls.pas"/>
-        <DCCReference Include="Source\Shell\VectArtDesignerCanvasSettingsDialog.pas"/>
-        <DCCReference Include="Source\Core\VectArtDesignerDocument.pas"/>
-        <DCCReference Include="Source\Core\VectArtDesignerGeometry.pas"/>
-        <DCCReference Include="Source\Rendering\VectArtDesignerRenderer.pas"/>
-        <DCCReference Include="Source\Core\VectArtDesignerContext.pas"/>
-        <DCCReference Include="Source\Core\VectArtDesignerEditorState.pas"/>
-        <DCCReference Include="Source\Core\Commands\VectArtDesignerEditCommands.pas"/>
-        <DCCReference Include="Source\Core\Commands\VectArtDesignerLayerStructureCommands.pas"/>
-        <DCCReference Include="Source\Core\Commands\VectArtDesignerLayerBatchCommands.pas"/>
-        <DCCReference Include="Source\Core\VectArtDesignerEditHistory.pas"/>
-        <DCCReference Include="Source\Persistence\VectArtDesignerDocumentJson.pas"/>
-        <DCCReference Include="Source\Editor\VectArtDesignerCanvas.pas"/>
-        <DCCReference Include="Source\Editor\VectArtDesignerCanvasInteraction.pas"/>
-        <DCCReference Include="Source\Editor\VectArtDesignerShapeCreation.pas"/>
-        <DCCReference Include="Source\Editor\VectArtDesignerKeyboardMovement.pas"/>
-        <DCCReference Include="Source\Editor\VectArtDesignerEditorWorkspaceFrame.pas">
+        <DCCReference Include="Source\Shell\ScreenLayoutEditActionsUI.pas"/>
+        <DCCReference Include="Source\ObjectProperties\ScreenLayoutStrokeStyleCombo.pas"/>
+        <DCCReference Include="Source\Shell\ScreenLayoutLineToolbar.pas"/>
+        <DCCReference Include="Source\Shell\ScreenLayoutLineStyleControls.pas"/>
+        <DCCReference Include="Source\Shell\ScreenLayoutCanvasSettingsDialog.pas"/>
+        <DCCReference Include="Source\Core\ScreenLayoutDocument.pas"/>
+        <DCCReference Include="Source\Core\ScreenLayoutGeometry.pas"/>
+        <DCCReference Include="Source\Rendering\ScreenLayoutRenderer.pas"/>
+        <DCCReference Include="Source\Core\ScreenLayoutContext.pas"/>
+        <DCCReference Include="Source\Core\ScreenLayoutEditorState.pas"/>
+        <DCCReference Include="Source\Core\Commands\ScreenLayoutEditCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\ScreenLayoutLayerStructureCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\ScreenLayoutLayerBatchCommands.pas"/>
+        <DCCReference Include="Source\Core\ScreenLayoutEditHistory.pas"/>
+        <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJson.pas"/>
+        <DCCReference Include="Source\Editor\ScreenLayoutCanvas.pas"/>
+        <DCCReference Include="Source\Editor\ScreenLayoutCanvasInteraction.pas"/>
+        <DCCReference Include="Source\Editor\ScreenLayoutShapeCreation.pas"/>
+        <DCCReference Include="Source\Editor\ScreenLayoutKeyboardMovement.pas"/>
+        <DCCReference Include="Source\Editor\ScreenLayoutEditorWorkspaceFrame.pas">
             <Form>EditorWorkspaceFrame</Form>
             <DesignClass>TFrame</DesignClass>
         </DCCReference>
-        <DCCReference Include="Source\Editor\VectArtDesignerSelectionGeometry.pas"/>
-        <DCCReference Include="Source\Layers\VectArtDesignerLayerList.pas"/>
-        <DCCReference Include="Source\Layers\VectArtDesignerLayerRenderer.pas"/>
-        <DCCReference Include="Source\Layers\VectArtDesignerLayerActions.pas"/>
-        <DCCReference Include="Source\Layers\VectArtDesignerLayerOperations.pas"/>
-        <DCCReference Include="Source\Layers\VectArtDesignerLayerDuplication.pas"/>
-        <DCCReference Include="Source\Layers\VectArtDesignerLayerPanelFrame.pas">
+        <DCCReference Include="Source\Editor\ScreenLayoutSelectionGeometry.pas"/>
+        <DCCReference Include="Source\Layers\ScreenLayoutLayerList.pas"/>
+        <DCCReference Include="Source\Layers\ScreenLayoutLayerRenderer.pas"/>
+        <DCCReference Include="Source\Layers\ScreenLayoutLayerActions.pas"/>
+        <DCCReference Include="Source\Layers\ScreenLayoutLayerOperations.pas"/>
+        <DCCReference Include="Source\Layers\ScreenLayoutLayerDuplication.pas"/>
+        <DCCReference Include="Source\Layers\ScreenLayoutLayerPanelFrame.pas">
             <Form>LayerPanelFrame</Form>
             <DesignClass>TFrame</DesignClass>
         </DCCReference>
-        <DCCReference Include="Source\Layout\VectArtDesignerDockManager.pas"/>
-        <DCCReference Include="Source\Layout\VectArtDesignerToolFrames.pas"/>
-        <DCCReference Include="Source\ObjectProperties\VectArtDesignerObjectPropertiesControl.pas"/>
-        <DCCReference Include="Source\ObjectProperties\VectArtDesignerObjectPropertiesFrame.pas">
+        <DCCReference Include="Source\Layout\ScreenLayoutDockManager.pas"/>
+        <DCCReference Include="Source\Layout\ScreenLayoutToolFrames.pas"/>
+        <DCCReference Include="Source\ObjectProperties\ScreenLayoutObjectPropertiesControl.pas"/>
+        <DCCReference Include="Source\ObjectProperties\ScreenLayoutObjectPropertiesFrame.pas">
             <Form>ObjectPropertiesFrame</Form>
             <DesignClass>TFrame</DesignClass>
         </DCCReference>
-        <DCCReference Include="Source\ToolPalette\VectArtDesignerToolPaletteFrame.pas">
+        <DCCReference Include="Source\ToolPalette\ScreenLayoutToolPaletteFrame.pas">
             <Form>ToolPaletteFrame</Form>
             <DesignClass>TFrame</DesignClass>
         </DCCReference>
-        <DCCReference Include="Source\ToolPalette\VectArtDesignerToolPalette.pas"/>
+        <DCCReference Include="Source\ToolPalette\ScreenLayoutToolPalette.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

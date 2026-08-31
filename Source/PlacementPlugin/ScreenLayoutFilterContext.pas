@@ -5,7 +5,7 @@ interface
 
 uses
   AviUtl2FilterTypes, PluginFilterContextManager, ScreenLayoutFrameCapture,
-  System.SysUtils, VectArtDesignerDocument, VectArtDesignerRenderer;
+  System.SysUtils, ScreenLayoutDocument, ScreenLayoutRenderer;
 
 type
   TScreenLayoutFilterContext = class(TPluginFilterContextItem)
@@ -40,7 +40,7 @@ type
 implementation
 
 uses
-  VectArtDesignerDocumentJson;
+  ScreenLayoutDocumentJson;
 
 constructor TScreenLayoutFilterContext.Create;
 begin

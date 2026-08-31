@@ -13,8 +13,8 @@ function EditScreenLayout(const SerializedData: string;
 implementation
 
 uses
-  Vcl.Forms, VectArtDesignerDocumentJson,
-  VectArtDesignerMainForm;
+  Vcl.Forms, ScreenLayoutDocumentJson,
+  ScreenLayoutMainForm;
 
 function EditScreenLayout(const SerializedData: string;
   const BackgroundPixels: TBytes; BackgroundWidth, BackgroundHeight: Integer;
