@@ -76,7 +76,7 @@ implementation
 
 uses
   System.Math, Winapi.D2D1, Winapi.Windows, Vcl.Direct2D,
-  ScreenLayoutGeometry;
+  ScreenLayoutGeometry, ScreenLayoutShapeOperations;
 
 const
   CANVAS_MARGIN         = 32;
@@ -437,9 +437,11 @@ begin
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   if (Button = mbRight) and (FEditorState <> nil) and
-    (FEditorState.CurrentTool = vetPath) and FShapeCreation.Active then
+    (FEditorState.CurrentTool in [vetPath, vetShape]) and
+    FShapeCreation.Active then
   begin
-    if not FShapeCreation.FinishPath(False) then
+    if not FShapeCreation.FinishPath(
+      FEditorState.CurrentTool = vetShape) then
       FShapeCreation.CancelPath;
     Invalidate;
     Exit;
@@ -463,14 +465,15 @@ begin
     if FShapeCreation.MouseDown(Button, Shift, X, Y) then
     begin
       if (FEditorState <> nil) and
-        (FEditorState.CurrentTool <> vetPath) then
+        not (FEditorState.CurrentTool in [vetPath, vetShape]) then
         MouseCapture := True;
       Cursor := crCross;
       Invalidate;
       Exit;
     end;
     if (FEditorState <> nil) and
-      (FEditorState.CurrentTool in [vetRectangle, vetLine, vetPath]) then
+      (FEditorState.CurrentTool in [vetRectangle, vetLine, vetPath,
+        vetShape]) then
     begin
       Cursor := crCross;
       Exit;
@@ -515,7 +518,8 @@ begin
     Exit;
   end;
   if (FEditorState <> nil) and
-    (FEditorState.CurrentTool in [vetRectangle, vetLine, vetPath]) then
+    (FEditorState.CurrentTool in [vetRectangle, vetLine, vetPath,
+      vetShape]) then
   begin
     Cursor := crCross;
     Exit;
@@ -649,9 +653,11 @@ var
   LineStart: TPoint;
   PathPreview: TArray<TPoint>;
   PathVertexRects: TArray<TRect>;
+  ShapeVertexRects: TArray<TRect>;
   LogicalQuad: TVectArtQuad;
   PathLayer: TVectArtPathLayer;
   RectangleLayer: TVectArtRectangleLayer;
+  ShapeLayer: TScreenLayoutShapeLayer;
   RotatedBounds: TRectF;
   RangeRect: TRect;
   Row: Integer;
@@ -750,6 +756,7 @@ begin
           if not Layer.Visible or
             not ((Layer is TVectArtRectangleLayer) or
               (Layer is TVectArtPathLayer) or
+              (Layer is TScreenLayoutShapeLayer) or
               (Layer is TVectArtImageLayer)) then
             Continue;
           if Layer is TVectArtRectangleLayer then
@@ -765,6 +772,14 @@ begin
             if not PathLayer.Closed then
               SelectionFrameOffsetPixels := Max(SelectionFrameOffsetPixels,
                 SelectionFrameOffset(PathLayer.StrokeWidth, FZoom));
+          end
+          else if Layer is TScreenLayoutShapeLayer then
+          begin
+            ShapeLayer := TScreenLayoutShapeLayer(Layer);
+            RotatedBounds := ScreenLayoutShapeContoursBounds(
+              ShapeLayer.Contours);
+            SelectionFrameOffsetPixels := Max(SelectionFrameOffsetPixels,
+              SelectionFrameOffset(ShapeLayer.StrokeWidth, FZoom));
           end
           else
           begin
@@ -822,6 +837,12 @@ begin
             SelectionGeometry := BuildPathSelectionGeometry(
               SelectionLayerRect, SelectionFrameOffsetPixels);
         end
+        else if (FDocument.SelectionCount = 1) and
+          (FDocument.SelectedIndex > 0) and
+          (FDocument[FDocument.SelectedIndex] is
+            TScreenLayoutShapeLayer) then
+          SelectionGeometry := BuildPathSelectionGeometry(
+            SelectionLayerRect, SelectionFrameOffsetPixels)
         else if (FDocument.SelectionCount = 1) and
           (FDocument.SelectedIndex > 0) and
           (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) then
@@ -890,6 +911,14 @@ begin
         Direct2DCanvas.Brush.Color := COLOR_SELECTION;
         Direct2DCanvas.FrameRect(PathVertexRects[I]);
       end;
+      ShapeVertexRects := FInteraction.SelectedShapeVertexRects;
+      for I := 0 to High(ShapeVertexRects) do
+      begin
+        Direct2DCanvas.Brush.Color := TColor($00F0C060);
+        Direct2DCanvas.FillRect(ShapeVertexRects[I]);
+        Direct2DCanvas.Brush.Color := COLOR_SELECTION;
+        Direct2DCanvas.FrameRect(ShapeVertexRects[I]);
+      end;
       if FInteraction.RangeSelecting then
       begin
         RangeRect := FInteraction.RangeSelectionRect;
@@ -940,9 +969,11 @@ var
   LineStart: TPoint;
   PathPreview: TArray<TPoint>;
   PathVertexRects: TArray<TRect>;
+  ShapeVertexRects: TArray<TRect>;
   LogicalQuad: TVectArtQuad;
   PathLayer: TVectArtPathLayer;
   RectangleLayer: TVectArtRectangleLayer;
+  ShapeLayer: TScreenLayoutShapeLayer;
   RotatedBounds: TRectF;
   RangeRect: TRect;
   Row: Integer;
@@ -1020,6 +1051,7 @@ begin
       if not Layer.Visible or
         not ((Layer is TVectArtRectangleLayer) or
           (Layer is TVectArtPathLayer) or
+          (Layer is TScreenLayoutShapeLayer) or
           (Layer is TVectArtImageLayer)) then
         Continue;
       if Layer is TVectArtRectangleLayer then
@@ -1035,6 +1067,14 @@ begin
         if not PathLayer.Closed then
           SelectionFrameOffsetPixels := Max(SelectionFrameOffsetPixels,
             SelectionFrameOffset(PathLayer.StrokeWidth, FZoom));
+      end
+      else if Layer is TScreenLayoutShapeLayer then
+      begin
+        ShapeLayer := TScreenLayoutShapeLayer(Layer);
+        RotatedBounds := ScreenLayoutShapeContoursBounds(
+          ShapeLayer.Contours);
+        SelectionFrameOffsetPixels := Max(SelectionFrameOffsetPixels,
+          SelectionFrameOffset(ShapeLayer.StrokeWidth, FZoom));
       end
       else
       begin
@@ -1090,6 +1130,11 @@ begin
         SelectionGeometry := BuildPathSelectionGeometry(SelectionLayerRect,
           SelectionFrameOffsetPixels);
     end
+    else if (FDocument.SelectionCount = 1) and
+      (FDocument.SelectedIndex > 0) and
+      (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer) then
+      SelectionGeometry := BuildPathSelectionGeometry(SelectionLayerRect,
+        SelectionFrameOffsetPixels)
     else if (FDocument.SelectionCount = 1) and
       (FDocument.SelectedIndex > 0) and
       (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) then
@@ -1156,6 +1201,14 @@ begin
     Canvas.FillRect(PathVertexRects[I]);
     Canvas.Brush.Color := COLOR_SELECTION;
     Canvas.FrameRect(PathVertexRects[I]);
+  end;
+  ShapeVertexRects := FInteraction.SelectedShapeVertexRects;
+  for I := 0 to High(ShapeVertexRects) do
+  begin
+    Canvas.Brush.Color := TColor($00F0C060);
+    Canvas.FillRect(ShapeVertexRects[I]);
+    Canvas.Brush.Color := COLOR_SELECTION;
+    Canvas.FrameRect(ShapeVertexRects[I]);
   end;
   if FInteraction.RangeSelecting then
   begin

@@ -89,7 +89,7 @@ begin
     Canvas.MoveTo(CenterX - 11, CenterY + 8);
     Canvas.LineTo(CenterX + 11, CenterY - 8);
   end
-  else
+  else if Index = Ord(vetPath) then
   begin
     Canvas.MoveTo(CenterX - 11, CenterY + 8);
     Canvas.LineTo(CenterX - 4, CenterY - 8);
@@ -102,6 +102,21 @@ begin
     Canvas.Rectangle(CenterX - 6, CenterY - 10, CenterX - 2, CenterY - 6);
     Canvas.Rectangle(CenterX + 8, CenterY - 5, CenterX + 12, CenterY - 1);
     Canvas.Rectangle(CenterX + 3, CenterY + 8, CenterX + 7, CenterY + 12);
+  end
+  else
+  begin
+    Canvas.Ellipse(CenterX - 12, CenterY - 9, CenterX + 12,
+      CenterY + 9);
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := COLOR_ICON;
+    Canvas.Rectangle(CenterX - 2, CenterY - 12, CenterX + 2,
+      CenterY - 8);
+    Canvas.Rectangle(CenterX + 10, CenterY - 2, CenterX + 14,
+      CenterY + 2);
+    Canvas.Rectangle(CenterX - 2, CenterY + 8, CenterX + 2,
+      CenterY + 12);
+    Canvas.Rectangle(CenterX - 14, CenterY - 2, CenterX - 10,
+      CenterY + 2);
   end;
 end;
 
@@ -111,7 +126,7 @@ var
   I: Integer;
 begin
   if (Button = mbLeft) and (FEditorState <> nil) then
-    for I := 0 to 3 do
+    for I := 0 to Ord(High(TVectArtEditorTool)) do
       if PtInRect(ButtonRect(I), Point(X, Y)) then
       begin
         FEditorState.CurrentTool := TVectArtEditorTool(I);
@@ -126,7 +141,7 @@ var
 begin
   Canvas.Brush.Color := COLOR_BACKGROUND;
   Canvas.FillRect(ClientRect);
-  for I := 0 to 3 do
+  for I := 0 to Ord(High(TVectArtEditorTool)) do
     DrawButton(I);
 end;
 

@@ -122,6 +122,7 @@ var
   Data: TVectArtRectangleData;
   ImageData: TVectArtImageData;
   PathData: TVectArtPathData;
+  ShapeData: TScreenLayoutShapeData;
   I: Integer;
   SelectedIndices: TArray<Integer>;
   SelectionIndex: Integer;
@@ -166,6 +167,16 @@ begin
           if Command <> nil then
             Command.Add(TVectArtDeleteImageCommand.Create(FDocument, I,
               ImageData, BeforeSelection, AfterSelection));
+        end;
+      end
+      else if FDocument[I] is TScreenLayoutShapeLayer then
+      begin
+        if FDocument.RemoveShape(I, ShapeData) then
+        begin
+          AfterSelection := FDocument.GetSelectedLayerIndices;
+          if Command <> nil then
+            Command.Add(TScreenLayoutDeleteShapeCommand.Create(FDocument, I,
+              ShapeData, BeforeSelection, AfterSelection));
         end;
       end;
     end;
@@ -267,6 +278,7 @@ begin
       ((I = 0) or FDocument[I].Locked or
        not ((FDocument[I] is TVectArtRectangleLayer) or
          (FDocument[I] is TVectArtPathLayer) or
+         (FDocument[I] is TScreenLayoutShapeLayer) or
          (FDocument[I] is TVectArtImageLayer))) then
       Exit(False);
 end;

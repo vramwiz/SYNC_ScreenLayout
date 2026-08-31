@@ -49,7 +49,7 @@ implementation
 uses
   System.Math, System.Skia, System.Types, System.UITypes,
   TextRendererSkiaRuntime, Vcl.Graphics, Winapi.Windows,
-  ScreenLayoutGeometry;
+  ScreenLayoutGeometry, ScreenLayoutShapePath;
 
 const
   MAX_RENDER_DIMENSION = 16384;
@@ -134,6 +134,7 @@ var
   StrokeWidth: Single;
   StrokePaint: ISkPaint;
   Surface: ISkSurface;
+  ShapeLayer: TScreenLayoutShapeLayer;
 
 begin
   if Document = nil then
@@ -207,6 +208,37 @@ begin
           ImagePaint);
       finally
         Canvas.Restore;
+      end;
+      Continue;
+    end;
+    if Layer is TScreenLayoutShapeLayer then
+    begin
+      ShapeLayer := TScreenLayoutShapeLayer(Layer);
+      Path := BuildScreenLayoutShapePath(ShapeLayer);
+      Paint.AntiAlias := ShapeLayer.MifAntiAlias;
+      Paint.Color := VclColorToAlphaColor(ShapeLayer.FillColor,
+        ShapeLayer.Opacity);
+      Canvas.DrawPath(Path, Paint);
+      if ShapeLayer.StrokeWidth > 0 then
+      begin
+        StrokeWidth := Max(ShapeLayer.StrokeWidth, MinimumStrokeWidth);
+        StrokePaint.AntiAlias := ShapeLayer.MifAntiAlias;
+        StrokePaint.Color := VclColorToAlphaColor(ShapeLayer.StrokeColor,
+          ShapeLayer.Opacity);
+        StrokePaint.StrokeWidth := StrokeWidth;
+        DashIntervals := VectArtStrokeDashIntervals(ShapeLayer.StrokeStyle,
+          StrokeWidth);
+        if Length(DashIntervals) > 0 then
+          StrokePaint.PathEffect := TSkPathEffect.MakeDash(DashIntervals, 0)
+        else
+          StrokePaint.PathEffect := nil;
+        case ShapeLayer.StrokeJoin of
+          vljBevel: StrokePaint.StrokeJoin := TSkStrokeJoin.Bevel;
+          vljRound: StrokePaint.StrokeJoin := TSkStrokeJoin.Round;
+        else
+          StrokePaint.StrokeJoin := TSkStrokeJoin.Miter;
+        end;
+        Canvas.DrawPath(Path, StrokePaint);
       end;
       Continue;
     end;

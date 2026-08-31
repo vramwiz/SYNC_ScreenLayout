@@ -7,7 +7,8 @@ uses
   System.Classes, Vcl.Graphics, ScreenLayoutDocument;
 
 type
-  TVectArtEditorTool = (vetSelect, vetRectangle, vetLine, vetPath);
+  TVectArtEditorTool = (vetSelect, vetRectangle, vetLine, vetPath,
+    vetShape);
 
   TVectArtEditorState = class
   private

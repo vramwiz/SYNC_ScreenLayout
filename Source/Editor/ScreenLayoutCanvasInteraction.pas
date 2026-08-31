@@ -1,4 +1,4 @@
-// 編集キャンバス上の選択、移動、リサイズ、中心回り回転を管理する。
+// 編集キャンバス上の選択、範囲選択、変形、Path／Shape頂点編集を管理する。
 unit ScreenLayoutCanvasInteraction;
 
 interface
@@ -11,7 +11,7 @@ uses
 
 type
   TVectArtCanvasDragMode = (vcdmNone, vcdmMove, vcdmResize, vcdmRotate,
-    vcdmRangeSelect, vcdmPathVertex);
+    vcdmRangeSelect, vcdmPathVertex, vcdmShapeVertex);
 
   TVectArtCanvasInteraction = class
   private
@@ -22,6 +22,7 @@ type
     FDragLayerIndex: Integer;
     FDragIsImage: Boolean;
     FDragIsPath: Boolean;
+    FDragIsShape: Boolean; // 単一Shapeの輪郭を直接変形している状態。
     FDragMode: TVectArtCanvasDragMode;
     FMoveLayerIndices: TArray<Integer>;
     FMoveStartBounds: TArray<TRectF>;
@@ -29,10 +30,15 @@ type
     FMoveStartImagePoints: TArray<TVectArtImagePoints>;
     FMovePathLayerIndices: TArray<Integer>;
     FMoveStartPathPoints: TArray<TArray<TPointF>>;
+    FMoveShapeLayerIndices: TArray<Integer>; // 複数選択中のShapeレイヤー番号。
+    FMoveStartShapeContours: TArray<TArray<TScreenLayoutContour>>; // ドラッグ開始時の輪郭群。
     FDragStartBounds: TRectF;
     FDragStartImagePoints: TVectArtImagePoints;
     FDragStartPathPoints: TArray<TPointF>;
+    FDragStartShapeContours: TArray<TScreenLayoutContour>; // 単一Shapeの変更前輪郭。
     FPathVertexIndex: Integer;
+    FShapeContourIndex: Integer;
+    FShapeVertexIndex: Integer;
     FDragStartMouse: TPoint;
     FAxisAlignedSelection: Boolean;
     FMoveOccurred: Boolean;
@@ -52,6 +58,7 @@ type
     procedure CommitRotationCommand;
     procedure CommitImagePointsCommand;
     procedure CommitPathPointsCommand;
+    procedure CommitShapeContoursCommand;
     function AxisAlignedResizedBounds(X, Y: Integer;
       RotationDegrees: Single): TRectF;
     function GetDragging: Boolean;
@@ -59,6 +66,8 @@ type
     function GetRangeSelectionRect: TRect;
     function HitTestLayer(X, Y: Integer): Integer;
     function HitTestPathVertex(X, Y: Integer): Integer;
+    function HitTestShapeVertex(X, Y: Integer; out ContourIndex,
+      VertexIndex: Integer): Boolean;
     function LayerScreenRect(Index: Integer): TRect;
     function ResizedBounds(X, Y: Integer): TRectF;
     function SelectionContainsLockedLayer: Boolean;
@@ -73,16 +82,25 @@ type
     function ToScreenY(Value: Single): Integer;
   public
     constructor Create;
+    // 操作対象と論理座標変換に必要な現在のキャンバス状態を設定する。
     procedure Configure(ADocument: TVectArtDocument;
       const ACanvasBounds: TRect; AZoom: Single);
+    // 現在位置で開始できる編集操作に対応したカーソルを返す。
     function CursorAt(X, Y: Integer): TCursor;
+    // 修飾キーなしの押下を処理し、マウスキャプチャが必要ならTrueを返す。
     function MouseDown(Button: TMouseButton; X, Y: Integer): Boolean;
       overload;
+    // 選択変更またはドラッグを開始し、マウスキャプチャが必要ならTrueを返す。
     function MouseDown(Button: TMouseButton; Shift: TShiftState;
       X, Y: Integer): Boolean; overload;
+    // 進行中のドラッグをDocumentへ反映し、再描画が必要ならTrueを返す。
     function MouseMove(Shift: TShiftState; X, Y: Integer): Boolean;
+    // ドラッグ結果をUndo履歴へ確定し、操作を終了した場合にTrueを返す。
     function MouseUp(Button: TMouseButton): Boolean;
+    // 単一選択されたPathのアンカーを画面座標の矩形列として返す。
     function SelectedPathVertexRects: TArray<TRect>;
+    // 単一選択されたShapeの全輪郭アンカーを画面座標の矩形列として返す。
+    function SelectedShapeVertexRects: TArray<TRect>;
     property Dragging: Boolean read GetDragging;
     property AxisAlignedSelection: Boolean read FAxisAlignedSelection;
     property EditHistory: TVectArtEditHistory read FEditHistory
@@ -94,7 +112,9 @@ type
 implementation
 
 uses
-  System.Math, ScreenLayoutGeometry;
+  System.Math, System.Skia, ScreenLayoutGeometry,
+  ScreenLayoutShapeEditCommands, ScreenLayoutShapeOperations,
+  ScreenLayoutShapePath;
 
 const
   MIN_RECTANGLE_SIZE = 16.0;
@@ -152,6 +172,8 @@ begin
   inherited Create;
   FDragLayerIndex := -1;
   FPathVertexIndex := -1;
+  FShapeContourIndex := -1;
+  FShapeVertexIndex := -1;
   FSelectionModeLayerIndex := -1;
 end;
 
@@ -204,6 +226,8 @@ var
   Handle: TVectArtSelectionHandle;
   LayerIndex: Integer;
   SelectionRect: TRect;
+  ShapeContourIndex: Integer;
+  ShapeVertexIndex: Integer;
 begin
   Result := crDefault;
   if FDragMode = vcdmMove then
@@ -214,11 +238,13 @@ begin
     Exit(RotationHandleCursor);
   if FDragMode = vcdmRangeSelect then
     Exit(crCross);
-  if FDragMode = vcdmPathVertex then
+  if FDragMode in [vcdmPathVertex, vcdmShapeVertex] then
     Exit(crSizeAll);
   if FDocument = nil then
     Exit;
   if HitTestPathVertex(X, Y) >= 0 then
+    Exit(crSizeAll);
+  if HitTestShapeVertex(X, Y, ShapeContourIndex, ShapeVertexIndex) then
     Exit(crSizeAll);
   SelectionRect := SelectedLayersScreenRect;
   if not SelectionRect.IsEmpty and not SelectionContainsLockedLayer then
@@ -279,6 +305,22 @@ begin
   end;
   FEditHistory.AddApplied(TVectArtPathPointsCommand.Create(FDocument,
     FDragLayerIndex, FDragStartPathPoints, PathLayer.Points));
+end;
+
+procedure TVectArtCanvasInteraction.CommitShapeContoursCommand;
+var
+  ShapeLayer: TScreenLayoutShapeLayer;
+begin
+  if (FEditHistory = nil) or (FDocument = nil) or
+    (FDragLayerIndex <= 0) or
+    not (FDocument[FDragLayerIndex] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(FDocument[FDragLayerIndex]);
+  if not ScreenLayoutShapeContoursEqual(FDragStartShapeContours,
+    ShapeLayer.Contours) then
+    FEditHistory.AddApplied(TScreenLayoutShapeContoursCommand.Create(
+      FDocument, FDragLayerIndex, FDragStartShapeContours,
+      ShapeLayer.Contours));
 end;
 
 procedure TVectArtCanvasInteraction.CommitImagePointsCommand;
@@ -390,6 +432,7 @@ var
   NewImagePoints: TVectArtImagePoints;
   NewSelectionBounds: TRectF;
   NewPathPoints: TArray<TPointF>;
+  NewShapeContours: TArray<TScreenLayoutContour>;
   PathPointIndex: Integer;
   ScaleX: Single;
   ScaleY: Single;
@@ -436,6 +479,12 @@ begin
           ScaleY);
     FDocument.SetPathPoints(FDragLayerIndex, NewPathPoints);
   end;
+  if FDragIsShape then
+  begin
+    NewShapeContours := ScaleScreenLayoutShapeContours(
+      FDragStartShapeContours, FDragStartBounds, NewSelectionBounds);
+    FDocument.SetShapeContours(FDragLayerIndex, NewShapeContours);
+  end;
   for I := 0 to High(FMovePathLayerIndices) do
   begin
     SetLength(NewPathPoints, Length(FMoveStartPathPoints[I]));
@@ -448,6 +497,13 @@ begin
           (FMoveStartPathPoints[I][PathPointIndex].Y -
            FDragStartBounds.Top) * ScaleY);
     FDocument.SetPathPoints(FMovePathLayerIndices[I], NewPathPoints);
+  end;
+  for I := 0 to High(FMoveShapeLayerIndices) do
+  begin
+    NewShapeContours := ScaleScreenLayoutShapeContours(
+      FMoveStartShapeContours[I], FDragStartBounds, NewSelectionBounds);
+    FDocument.SetShapeContours(FMoveShapeLayerIndices[I],
+      NewShapeContours);
   end;
 end;
 
@@ -473,6 +529,7 @@ begin
       if FDocument[I].Visible and
         ((FDocument[I] is TVectArtRectangleLayer) or
          (FDocument[I] is TVectArtPathLayer) or
+         (FDocument[I] is TScreenLayoutShapeLayer) or
          (FDocument[I] is TVectArtImageLayer)) then
       begin
         LayerRect := LayerScreenRect(I);
@@ -491,6 +548,7 @@ var
   ImageIndex: Integer;
   MoveIndex: Integer;
   PathIndex: Integer;
+  ShapeIndex: Integer;
 begin
   SetLength(FMoveLayerIndices, FDocument.SelectionCount);
   SetLength(FMoveStartBounds, FDocument.SelectionCount);
@@ -498,9 +556,12 @@ begin
   SetLength(FMoveStartImagePoints, FDocument.SelectionCount);
   SetLength(FMovePathLayerIndices, FDocument.SelectionCount);
   SetLength(FMoveStartPathPoints, FDocument.SelectionCount);
+  SetLength(FMoveShapeLayerIndices, FDocument.SelectionCount);
+  SetLength(FMoveStartShapeContours, FDocument.SelectionCount);
   MoveIndex := 0;
   ImageIndex := 0;
   PathIndex := 0;
+  ShapeIndex := 0;
   for I := 1 to FDocument.LayerCount - 1 do
     if FDocument.IsLayerSelected(I) then
     begin
@@ -524,6 +585,14 @@ begin
         FMoveStartPathPoints[PathIndex] := Copy(
           TVectArtPathLayer(FDocument[I]).Points);
         Inc(PathIndex);
+      end
+      else if FDocument[I] is TScreenLayoutShapeLayer then
+      begin
+        FMoveShapeLayerIndices[ShapeIndex] := I;
+        FMoveStartShapeContours[ShapeIndex] :=
+          CloneScreenLayoutShapeContours(TScreenLayoutShapeLayer(
+            FDocument[I]).Contours);
+        Inc(ShapeIndex);
       end;
     end;
   SetLength(FMoveLayerIndices, MoveIndex);
@@ -532,6 +601,8 @@ begin
   SetLength(FMoveStartImagePoints, ImageIndex);
   SetLength(FMovePathLayerIndices, PathIndex);
   SetLength(FMoveStartPathPoints, PathIndex);
+  SetLength(FMoveShapeLayerIndices, ShapeIndex);
+  SetLength(FMoveStartShapeContours, ShapeIndex);
 end;
 
 procedure TVectArtCanvasInteraction.CommitBoundsCommand;
@@ -546,11 +617,13 @@ var
   PathChanged: Boolean;
   PathLayer: TVectArtPathLayer;
   PathPointIndex: Integer;
+  ShapeLayer: TScreenLayoutShapeLayer;
 begin
   if (FEditHistory = nil) or (FDocument = nil) or
     ((Length(FMoveLayerIndices) = 0) and
      (Length(FMoveImageLayerIndices) = 0) and
-     (Length(FMovePathLayerIndices) = 0)) then
+     (Length(FMovePathLayerIndices) = 0) and
+     (Length(FMoveShapeLayerIndices) = 0)) then
     Exit;
   Command := TVectArtCompoundCommand.Create;
   SetLength(NewBounds, Length(FMoveLayerIndices));
@@ -603,6 +676,16 @@ begin
         FMovePathLayerIndices[I], FMoveStartPathPoints[I],
         PathLayer.Points));
   end;
+  for I := 0 to High(FMoveShapeLayerIndices) do
+  begin
+    ShapeLayer := TScreenLayoutShapeLayer(
+      FDocument[FMoveShapeLayerIndices[I]]);
+    if not ScreenLayoutShapeContoursEqual(FMoveStartShapeContours[I],
+      ShapeLayer.Contours) then
+      Command.Add(TScreenLayoutShapeContoursCommand.Create(FDocument,
+        FMoveShapeLayerIndices[I], FMoveStartShapeContours[I],
+        ShapeLayer.Contours));
+  end;
   if Command.Count > 0 then
     FEditHistory.AddApplied(Command)
   else
@@ -615,8 +698,11 @@ begin
   FDragHandle := vshNone;
   FDragLayerIndex := -1;
   FPathVertexIndex := -1;
+  FShapeContourIndex := -1;
+  FShapeVertexIndex := -1;
   FDragIsImage := False;
   FDragIsPath := False;
+  FDragIsShape := False;
   FMoveOccurred := False;
   FToggleSelectionModeOnClick := False;
   SetLength(FMoveLayerIndices, 0);
@@ -625,7 +711,10 @@ begin
   SetLength(FMoveStartImagePoints, 0);
   SetLength(FMovePathLayerIndices, 0);
   SetLength(FMoveStartPathPoints, 0);
+  SetLength(FMoveShapeLayerIndices, 0);
+  SetLength(FMoveStartShapeContours, 0);
   SetLength(FDragStartPathPoints, 0);
+  SetLength(FDragStartShapeContours, 0);
 end;
 
 function TVectArtCanvasInteraction.HitTestPathVertex(X, Y: Integer): Integer;
@@ -638,6 +727,57 @@ begin
   for I := 0 to High(Rects) do
     if PtInRect(Rects[I], Point(X, Y)) then
       Exit(I);
+end;
+
+function TVectArtCanvasInteraction.HitTestShapeVertex(X, Y: Integer;
+  out ContourIndex, VertexIndex: Integer): Boolean;
+var
+  CurrentContourIndex: Integer;
+  CurrentVertexIndex: Integer;
+  Contours: TArray<TScreenLayoutContour>;
+  HalfSize: Integer;
+  HandleRect: TRect;
+  ShapeLayer: TScreenLayoutShapeLayer;
+begin
+  Result := False;
+  ContourIndex := -1;
+  VertexIndex := -1;
+  if (FDocument = nil) or (FDocument.SelectionCount <> 1) or
+    (FDocument.SelectedIndex <= 0) or
+    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(
+    FDocument[FDocument.SelectedIndex]);
+  if ShapeLayer.Locked then
+    Exit;
+  Contours := ShapeLayer.Contours;
+  HalfSize := PATH_VERTEX_HANDLE_SIZE div 2;
+  for CurrentContourIndex := 0 to High(Contours) do
+    for CurrentVertexIndex := 0 to
+      High(Contours[CurrentContourIndex].Vertices) do
+    begin
+      HandleRect := Rect(
+        ToScreenX(Contours[CurrentContourIndex].Vertices[
+          CurrentVertexIndex].Position.X) -
+          HalfSize,
+        ToScreenY(Contours[CurrentContourIndex].Vertices[
+          CurrentVertexIndex].Position.Y) -
+          HalfSize,
+        ToScreenX(Contours[CurrentContourIndex].Vertices[
+          CurrentVertexIndex].Position.X) -
+          HalfSize + PATH_VERTEX_HANDLE_SIZE,
+        ToScreenY(Contours[CurrentContourIndex].Vertices[
+          CurrentVertexIndex].Position.Y) -
+          HalfSize + PATH_VERTEX_HANDLE_SIZE);
+      if PtInRect(HandleRect, Point(X, Y)) then
+      begin
+        ContourIndex := CurrentContourIndex;
+        VertexIndex := CurrentVertexIndex;
+        Exit(True);
+      end;
+    end;
+  ContourIndex := -1;
+  VertexIndex := -1;
 end;
 
 function TVectArtCanvasInteraction.GetDragging: Boolean;
@@ -669,6 +809,8 @@ var
   ImageLayer: TVectArtImageLayer;
   ImagePolygon: TArray<TPointF>;
   RectangleLayer: TVectArtRectangleLayer;
+  ShapeLayer: TScreenLayoutShapeLayer;
+  ShapePath: ISkPath;
 begin
   Result := -1;
   if (FDocument = nil) or (FZoom <= 0) or
@@ -689,6 +831,14 @@ begin
         ImagePolygon[J] := ImageLayer.Points[J];
       if PointInPolygon(TPointF.Create(LogicalX, LogicalY),
         ImagePolygon) then
+        Exit(I);
+      Continue;
+    end;
+    if Layer is TScreenLayoutShapeLayer then
+    begin
+      ShapeLayer := TScreenLayoutShapeLayer(Layer);
+      ShapePath := BuildScreenLayoutShapePath(ShapeLayer);
+      if ShapePath.Contains(LogicalX, LogicalY) then
         Exit(I);
       Continue;
     end;
@@ -723,12 +873,14 @@ var
   ImageLayer: TVectArtImageLayer;
   PathLayer: TVectArtPathLayer;
   RectangleLayer: TVectArtRectangleLayer;
+  ShapeLayer: TScreenLayoutShapeLayer;
 begin
   Result := TRect.Empty;
   if (FDocument = nil) or (Index <= 0) or
     (Index >= FDocument.LayerCount) or
     not ((FDocument[Index] is TVectArtRectangleLayer) or
       (FDocument[Index] is TVectArtPathLayer) or
+      (FDocument[Index] is TScreenLayoutShapeLayer) or
       (FDocument[Index] is TVectArtImageLayer)) then
     Exit;
   if FDocument[Index] is TVectArtImageLayer then
@@ -743,6 +895,18 @@ begin
   begin
     PathLayer := TVectArtPathLayer(FDocument[Index]);
     Bounds := PointsBounds(PathLayer.Points);
+    Result := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
+      ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
+    if Result.Width = 0 then
+      Inc(Result.Right);
+    if Result.Height = 0 then
+      Inc(Result.Bottom);
+    Exit;
+  end;
+  if FDocument[Index] is TScreenLayoutShapeLayer then
+  begin
+    ShapeLayer := TScreenLayoutShapeLayer(FDocument[Index]);
+    Bounds := ScreenLayoutShapeContoursBounds(ShapeLayer.Contours);
     Result := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
       ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
     if Result.Width = 0 then
@@ -766,6 +930,7 @@ var
   ImageLayer: TVectArtImageLayer;
   PathLayer: TVectArtPathLayer;
   RectangleLayer: TVectArtRectangleLayer;
+  ShapeLayer: TScreenLayoutShapeLayer;
 begin
   Result := TRectF.Empty;
   Found := False;
@@ -775,6 +940,7 @@ begin
     if FDocument.IsLayerSelected(I) and FDocument[I].Visible and
       ((FDocument[I] is TVectArtRectangleLayer) or
        (FDocument[I] is TVectArtPathLayer) or
+       (FDocument[I] is TScreenLayoutShapeLayer) or
        (FDocument[I] is TVectArtImageLayer)) then
     begin
       if FDocument[I] is TVectArtRectangleLayer then
@@ -787,6 +953,11 @@ begin
       begin
         PathLayer := TVectArtPathLayer(FDocument[I]);
         Bounds := PointsBounds(PathLayer.Points);
+      end
+      else if FDocument[I] is TScreenLayoutShapeLayer then
+      begin
+        ShapeLayer := TScreenLayoutShapeLayer(FDocument[I]);
+        Bounds := ScreenLayoutShapeContoursBounds(ShapeLayer.Contours);
       end
       else
       begin
@@ -824,6 +995,7 @@ function TVectArtCanvasInteraction.SelectedLayersFrameOffset: Integer;
 var
   I: Integer;
   PathLayer: TVectArtPathLayer;
+  ShapeLayer: TScreenLayoutShapeLayer;
 begin
   Result := SelectionFrameOffset(0, FZoom);
   if FDocument = nil then
@@ -836,6 +1008,13 @@ begin
       if not PathLayer.Closed then
         Result := Max(Result, SelectionFrameOffset(PathLayer.StrokeWidth,
           FZoom));
+    end
+    else if FDocument.IsLayerSelected(I) and
+      (FDocument[I] is TScreenLayoutShapeLayer) then
+    begin
+      ShapeLayer := TScreenLayoutShapeLayer(FDocument[I]);
+      Result := Max(Result, SelectionFrameOffset(ShapeLayer.StrokeWidth,
+        FZoom));
     end;
 end;
 
@@ -859,6 +1038,15 @@ begin
         ToScreenY(ImageLayer.Points[I].Y));
     Geometry := BuildRotatedSelectionGeometry(ScreenQuad,
       SelectionFrameOffset(0, FZoom));
+    Exit(True);
+  end;
+  if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
+    (FDocument.SelectedIndex > 0) and
+    (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer) then
+  begin
+    Geometry := BuildPathSelectionGeometry(
+      LayerScreenRect(FDocument.SelectedIndex),
+      SelectedLayersFrameOffset);
     Exit(True);
   end;
   if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
@@ -956,6 +1144,17 @@ begin
     FDragStartMouse := Point(X, Y);
     Exit(True);
   end;
+  if HitTestShapeVertex(X, Y, FShapeContourIndex, FShapeVertexIndex) and
+    not SelectionContainsLockedLayer then
+  begin
+    FDragMode := vcdmShapeVertex;
+    FDragLayerIndex := FDocument.SelectedIndex;
+    FDragIsShape := True;
+    FDragStartShapeContours := CloneScreenLayoutShapeContours(
+      TScreenLayoutShapeLayer(FDocument[FDragLayerIndex]).Contours);
+    FDragStartMouse := Point(X, Y);
+    Exit(True);
+  end;
   SelectionRect := SelectedLayersScreenRect;
   if not SelectionRect.IsEmpty and not SelectionContainsLockedLayer then
   begin
@@ -1003,12 +1202,18 @@ begin
           (FDocument[FDragLayerIndex] is TVectArtImageLayer);
         FDragIsPath := (FDocument.SelectionCount = 1) and
           (FDocument[FDragLayerIndex] is TVectArtPathLayer);
+        FDragIsShape := (FDocument.SelectionCount = 1) and
+          (FDocument[FDragLayerIndex] is TScreenLayoutShapeLayer);
         if FDragIsImage then
           FDragStartImagePoints := TVectArtImageLayer(
             FDocument[FDragLayerIndex]).Points
         else if FDragIsPath then
           FDragStartPathPoints := Copy(TVectArtPathLayer(
             FDocument[FDragLayerIndex]).Points)
+        else if FDragIsShape then
+          FDragStartShapeContours := CloneScreenLayoutShapeContours(
+            TScreenLayoutShapeLayer(
+              FDocument[FDragLayerIndex]).Contours)
         else
           CaptureMoveSelection;
         if (FDocument.SelectionCount = 1) and
@@ -1054,12 +1259,17 @@ begin
         (FDocument[FDragLayerIndex] is TVectArtImageLayer);
       FDragIsPath := (FDocument.SelectionCount = 1) and
         (FDocument[FDragLayerIndex] is TVectArtPathLayer);
+      FDragIsShape := (FDocument.SelectionCount = 1) and
+        (FDocument[FDragLayerIndex] is TScreenLayoutShapeLayer);
       if FDragIsPath then
         FDragStartPathPoints := Copy(TVectArtPathLayer(
           FDocument[FDragLayerIndex]).Points)
       else if FDragIsImage then
         FDragStartImagePoints := TVectArtImageLayer(
           FDocument[FDragLayerIndex]).Points
+      else if FDragIsShape then
+        FDragStartShapeContours := CloneScreenLayoutShapeContours(
+          TScreenLayoutShapeLayer(FDocument[FDragLayerIndex]).Contours)
       else
         CaptureMoveSelection;
     end;
@@ -1081,6 +1291,7 @@ var
   NewBounds: TRectF;
   NewImagePoints: TVectArtImagePoints;
   NewPathPoints: TArray<TPointF>;
+  NewShapeContours: TArray<TScreenLayoutContour>;
   ImageBounds: TRectF;
   RectangleLayer: TVectArtRectangleLayer;
 begin
@@ -1111,6 +1322,25 @@ begin
     FDocument.SetPathPoints(FDragLayerIndex, NewPathPoints);
     Exit(True);
   end;
+  if FDragMode = vcdmShapeVertex then
+  begin
+    if (FDragLayerIndex <= 0) or (FShapeContourIndex < 0) or
+      (FShapeVertexIndex < 0) or
+      not (FDocument[FDragLayerIndex] is TScreenLayoutShapeLayer) then
+      Exit(True);
+    NewShapeContours := CloneScreenLayoutShapeContours(
+      FDragStartShapeContours);
+    NewShapeContours[FShapeContourIndex].Vertices[
+      FShapeVertexIndex].Position := TPointF.Create(
+      EnsureRange(ToLogicalX(X), FDocument.CanvasLayer.Width * -0.5,
+        FDocument.CanvasLayer.Width * 0.5),
+      EnsureRange(ToLogicalY(Y), FDocument.CanvasLayer.Height * -0.5,
+        FDocument.CanvasLayer.Height * 0.5));
+    RecalculateScreenLayoutSmoothContour(
+      NewShapeContours[FShapeContourIndex]);
+    FDocument.SetShapeContours(FDragLayerIndex, NewShapeContours);
+    Exit(True);
+  end;
   if FDragMode = vcdmMove then
   begin
     if (Abs(X - FDragStartMouse.X) < MOVE_DRAG_THRESHOLD) and
@@ -1137,6 +1367,13 @@ begin
       FDocument.SetPathPoints(FDragLayerIndex, NewPathPoints);
       Exit(True);
     end;
+    if FDragIsShape then
+    begin
+      NewShapeContours := TranslateScreenLayoutShapeContours(
+        FDragStartShapeContours, DX, DY);
+      FDocument.SetShapeContours(FDragLayerIndex, NewShapeContours);
+      Exit(True);
+    end;
     for I := 0 to High(FMoveLayerIndices) do
     begin
       NewBounds := FMoveStartBounds[I];
@@ -1159,6 +1396,13 @@ begin
           FMoveStartPathPoints[I][ImagePointIndex].X + DX,
           FMoveStartPathPoints[I][ImagePointIndex].Y + DY);
       FDocument.SetPathPoints(FMovePathLayerIndices[I], NewPathPoints);
+    end;
+    for I := 0 to High(FMoveShapeLayerIndices) do
+    begin
+      NewShapeContours := TranslateScreenLayoutShapeContours(
+        FMoveStartShapeContours[I], DX, DY);
+      FDocument.SetShapeContours(FMoveShapeLayerIndices[I],
+        NewShapeContours);
     end;
     Exit(True);
   end
@@ -1207,11 +1451,14 @@ begin
   begin
     if FDragMode = vcdmRangeSelect then
       ApplyRangeSelection;
-    if FDragMode in [vcdmMove, vcdmResize, vcdmPathVertex] then
+    if FDragMode in [vcdmMove, vcdmResize, vcdmPathVertex,
+      vcdmShapeVertex] then
       if FDragIsImage then
         CommitImagePointsCommand
       else if FDragIsPath then
         CommitPathPointsCommand
+      else if FDragIsShape then
+        CommitShapeContoursCommand
       else
         CommitBoundsCommand;
     if FDragMode = vcdmRotate then
@@ -1251,6 +1498,47 @@ begin
       X - HalfSize + PATH_VERTEX_HANDLE_SIZE,
       Y - HalfSize + PATH_VERTEX_HANDLE_SIZE);
   end;
+end;
+
+function TVectArtCanvasInteraction.SelectedShapeVertexRects: TArray<TRect>;
+var
+  ContourIndex: Integer;
+  Contours: TArray<TScreenLayoutContour>;
+  HalfSize: Integer;
+  ResultIndex: Integer;
+  ShapeLayer: TScreenLayoutShapeLayer;
+  VertexIndex: Integer;
+  X: Integer;
+  Y: Integer;
+begin
+  Result := nil;
+  if (FDocument = nil) or (FDocument.SelectionCount <> 1) or
+    (FDocument.SelectedIndex <= 0) or
+    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(
+    FDocument[FDocument.SelectedIndex]);
+  if ShapeLayer.Locked then
+    Exit;
+  Contours := ShapeLayer.Contours;
+  ResultIndex := 0;
+  for ContourIndex := 0 to High(Contours) do
+    Inc(ResultIndex, Length(Contours[ContourIndex].Vertices));
+  SetLength(Result, ResultIndex);
+  ResultIndex := 0;
+  HalfSize := PATH_VERTEX_HANDLE_SIZE div 2;
+  for ContourIndex := 0 to High(Contours) do
+    for VertexIndex := 0 to High(Contours[ContourIndex].Vertices) do
+    begin
+      X := ToScreenX(
+        Contours[ContourIndex].Vertices[VertexIndex].Position.X);
+      Y := ToScreenY(
+        Contours[ContourIndex].Vertices[VertexIndex].Position.Y);
+      Result[ResultIndex] := Rect(X - HalfSize, Y - HalfSize,
+        X - HalfSize + PATH_VERTEX_HANDLE_SIZE,
+        Y - HalfSize + PATH_VERTEX_HANDLE_SIZE);
+      Inc(ResultIndex);
+    end;
 end;
 
 function TVectArtCanvasInteraction.AxisAlignedResizedBounds(X, Y: Integer;

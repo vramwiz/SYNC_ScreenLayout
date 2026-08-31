@@ -12,6 +12,7 @@ type
   private
     FActive: Boolean;
     FCanvasBounds: TRect;
+    FCreationTool: TVectArtEditorTool;
     FCurrentPoint: TPoint;
     FDocument: TVectArtDocument;
     FEditorState: TVectArtEditorState;
@@ -24,22 +25,33 @@ type
     procedure CreateLine;
     procedure CreatePath(Closed: Boolean);
     procedure CreateRectangle;
+    procedure CreateShape;
     function NextLineName: string;
     function NextPathName: string;
     function NextRectangleName: string;
+    function NextShapeName: string;
   public
+    // 新規図形入力に必要なDocument、履歴、ツール、表示座標系を設定する。
     procedure Configure(ADocument: TVectArtDocument;
       AEditHistory: TVectArtEditHistory; AEditorState: TVectArtEditorState;
       const ACanvasBounds: TRect; AZoom: Single);
+    // 現在の作成ツールに応じて入力開始または頂点追加を行う。
     function MouseDown(Button: TMouseButton; Shift: TShiftState;
       X, Y: Integer): Boolean;
+    // 作成中プレビューの終点を更新する。
     function MouseMove(Shift: TShiftState; X, Y: Integer): Boolean;
+    // ドラッグ作成中の図形を確定し、DocumentとUndo履歴へ反映する。
     function MouseUp(Button: TMouseButton; Shift: TShiftState;
       X, Y: Integer): Boolean;
+    // 確定前のPath／Shape頂点列を破棄する。
     procedure CancelPath;
+    // 頂点が足りる場合にPathまたはShapeを確定し、成功時にTrueを返す。
     function FinishPath(Closed: Boolean): Boolean;
+    // 作成中のPath／Shapeプレビュー頂点を返す。
     function PreviewPath(out Points: TArray<TPoint>): Boolean;
+    // ドラッグ作成中の矩形プレビュー範囲を返す。
     function PreviewRect: TRect;
+    // ドラッグ作成中の直線プレビュー端点を返す。
     function PreviewLine(out StartPoint, EndPoint: TPoint): Boolean;
     property Active: Boolean read FActive;
   end;
@@ -48,7 +60,8 @@ implementation
 
 uses
   System.Math, System.SysUtils,
-  ScreenLayoutGeometry, ScreenLayoutLayerStructureCommands;
+  ScreenLayoutGeometry, ScreenLayoutLayerStructureCommands,
+  ScreenLayoutShapeOperations;
 
 const
   MIN_DRAG_SIZE = 3;
@@ -57,7 +70,49 @@ const
 procedure TVectArtShapeCreation.CancelPath;
 begin
   FActive := False;
+  FCreationTool := vetSelect;
   SetLength(FPathPoints, 0);
+end;
+
+procedure TVectArtShapeCreation.CreateShape;
+var
+  AfterSelection: TArray<Integer>;
+  BeforeSelection: TArray<Integer>;
+  Data: TScreenLayoutShapeData;
+  I: Integer;
+  Index: Integer;
+begin
+  if Length(FPathPoints) < 3 then
+    Exit;
+  SetLength(Data.Contours, 1);
+  SetLength(Data.Contours[0].Vertices, Length(FPathPoints));
+  for I := 0 to High(FPathPoints) do
+    Data.Contours[0].Vertices[I].Position := TPointF.Create(
+      ScreenToLogicalX(FPathPoints[I].X, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Width),
+      ScreenToLogicalY(FPathPoints[I].Y, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Height));
+  for I := 0 to High(Data.Contours[0].Vertices) do
+    Data.Contours[0].Vertices[I].OutgoingSegment := slskCubicBezier;
+  RecalculateScreenLayoutSmoothContour(Data.Contours[0]);
+  Data.FillColor := FEditorState.RectangleFillColor;
+  Data.FillRule := slfrEvenOdd;
+  Data.Locked := False;
+  Data.MifAntiAlias := FEditorState.PathMifAntiAlias;
+  Data.Name := NextShapeName;
+  Data.Opacity := FEditorState.RectangleOpacity;
+  Data.StrokeColor := FEditorState.LineStrokeColor;
+  Data.StrokeJoin := FEditorState.LineJoin;
+  Data.StrokeStyle := FEditorState.LineMifStrokeStyle;
+  Data.StrokeWidth := FEditorState.LineStrokeWidth;
+  Data.Visible := True;
+  BeforeSelection := FDocument.GetSelectedLayerIndices;
+  Index := FDocument.InsertShape(FDocument.LayerCount, Data);
+  FDocument.SetSelectedLayers([Index]);
+  AfterSelection := FDocument.GetSelectedLayerIndices;
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutInsertShapeCommand.Create(FDocument,
+      Index, Data, BeforeSelection, AfterSelection));
 end;
 
 procedure TVectArtShapeCreation.CreateLine;
@@ -154,7 +209,7 @@ procedure TVectArtShapeCreation.Configure(ADocument: TVectArtDocument;
   const ACanvasBounds: TRect; AZoom: Single);
 begin
   if (Length(FPathPoints) > 0) and ((AEditorState = nil) or
-    (AEditorState.CurrentTool <> vetPath)) then
+    (AEditorState.CurrentTool <> FCreationTool)) then
     CancelPath;
   FDocument := ADocument;
   FEditHistory := AEditHistory;
@@ -211,22 +266,28 @@ var
 begin
   Result := (Button = mbLeft) and (FDocument <> nil) and
     (FEditorState <> nil) and
-    (FEditorState.CurrentTool in [vetRectangle, vetLine, vetPath]) and
+    (FEditorState.CurrentTool in [vetRectangle, vetLine, vetPath,
+      vetShape]) and
     (FZoom > 0) and
     PtInRect(FCanvasBounds, Point(X, Y));
   if not Result then
     Exit;
   PointValue := ClampToCanvas(Point(X, Y));
-  if FEditorState.CurrentTool = vetPath then
+  if FEditorState.CurrentTool in [vetPath, vetShape] then
   begin
-    if (ssDouble in Shift) and (Length(FPathPoints) >= 2) then
+    if (ssDouble in Shift) and
+      (((FEditorState.CurrentTool = vetShape) and
+        (Length(FPathPoints) >= 3)) or
+       ((FEditorState.CurrentTool = vetPath) and
+        (Length(FPathPoints) >= 2))) then
     begin
-      FinishPath(False);
+      FinishPath(FEditorState.CurrentTool = vetShape);
       Exit;
     end;
     if not FActive then
     begin
       FActive := True;
+      FCreationTool := FEditorState.CurrentTool;
       FPathPoints := [PointValue];
     end
     else if (Length(FPathPoints) >= 3) and
@@ -253,7 +314,8 @@ begin
   Result := FActive;
   if not FActive then
     Exit;
-  if (FEditorState <> nil) and (FEditorState.CurrentTool = vetPath) then
+  if (FEditorState <> nil) and
+    (FEditorState.CurrentTool in [vetPath, vetShape]) then
   begin
     FCurrentPoint := ClampToCanvas(Point(X, Y));
     Exit;
@@ -271,7 +333,7 @@ function TVectArtShapeCreation.MouseUp(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer): Boolean;
 begin
   if FActive and (FEditorState <> nil) and
-    (FEditorState.CurrentTool = vetPath) then
+    (FEditorState.CurrentTool in [vetPath, vetShape]) then
     Exit(False);
   Result := (Button = mbLeft) and FActive;
   if not Result then
@@ -288,10 +350,18 @@ end;
 function TVectArtShapeCreation.FinishPath(Closed: Boolean): Boolean;
 begin
   Result := FActive and (FEditorState <> nil) and
-    (FEditorState.CurrentTool = vetPath) and (Length(FPathPoints) >= 2);
+    (FEditorState.CurrentTool in [vetPath, vetShape]) and
+    (Length(FPathPoints) >= 2);
   if not Result then
     Exit;
-  CreatePath(Closed);
+  if FEditorState.CurrentTool = vetShape then
+  begin
+    if Length(FPathPoints) < 3 then
+      Exit(False);
+    CreateShape;
+  end
+  else
+    CreatePath(Closed);
   CancelPath;
 end;
 
@@ -339,11 +409,34 @@ begin
   Result := Candidate;
 end;
 
+function TVectArtShapeCreation.NextShapeName: string;
+var
+  Candidate: string;
+  Found: Boolean;
+  I: Integer;
+  Number: Integer;
+begin
+  Number := 1;
+  repeat
+    Candidate := 'Shape ' + Number.ToString;
+    Found := False;
+    for I := 1 to FDocument.LayerCount - 1 do
+      if SameText(FDocument[I].Name, Candidate) then
+      begin
+        Found := True;
+        Break;
+      end;
+    Inc(Number);
+  until not Found;
+  Result := Candidate;
+end;
+
 function TVectArtShapeCreation.PreviewPath(
   out Points: TArray<TPoint>): Boolean;
 begin
   Result := FActive and (FEditorState <> nil) and
-    (FEditorState.CurrentTool = vetPath) and (Length(FPathPoints) > 0);
+    (FEditorState.CurrentTool in [vetPath, vetShape]) and
+    (Length(FPathPoints) > 0);
   if not Result then
   begin
     Points := nil;

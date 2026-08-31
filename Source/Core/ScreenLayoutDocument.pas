@@ -9,7 +9,8 @@ uses
   Vcl.Graphics;
 
 type
-  TVectArtLayerKind = (vlkCanvas, vlkRectangle, vlkPath, vlkImage);
+  TVectArtLayerKind = (vlkCanvas, vlkRectangle, vlkPath, vlkImage,
+    vlkShape);
   TVectArtImageSourceKind = (visImage, visLogo);
   TVectArtImagePoints = array[0..3] of TPointF;
   // WebArt Designerの線種コンボとMIF vector stroke style 0..8を同順で保持する。
@@ -20,6 +21,23 @@ type
   TVectArtLineCap = (vlcButt, vlcSquare, vlcRound);
   // MIFのvector stroke join 0..2と同じ順序で保持する。
   TVectArtLineJoin = (vljMiter, vljBevel, vljRound);
+  // 各頂点から次頂点へ向かう閉輪郭区間の表現形式。
+  TScreenLayoutSegmentKind = (slskLine, slskCubicBezier);
+  // 穴や重複輪郭を含むShapeの内外判定規則。
+  TScreenLayoutFillRule = (slfrEvenOdd, slfrNonZero);
+
+  TScreenLayoutVertex = record
+    Position: TPointF;              // 頂点のドキュメント座標。
+    IncomingControl: TPointF;       // 頂点から入力側制御点への相対座標。
+    OutgoingControl: TPointF;       // 頂点から出力側制御点への相対座標。
+    OutgoingSegment: TScreenLayoutSegmentKind; // 次頂点までの区間種別。
+  end;
+
+  TScreenLayoutContour = record
+    Vertices: TArray<TScreenLayoutVertex>; // 終端から先頭へ閉じる頂点列。
+    // 閉輪郭の区間数を返す。終端から先頭への区間も1本に数える。
+    function SegmentCount: Integer;
+  end;
   TVectArtLayer = class
   private
     FKind: TVectArtLayerKind;
@@ -118,6 +136,50 @@ type
     Visible: Boolean;                       // 描画対象に含める状態。
   end;
 
+  TScreenLayoutShapeLayer = class(TVectArtLayer)
+  private
+    FContours: TArray<TScreenLayoutContour>;
+    FFillColor: TColor;
+    FFillRule: TScreenLayoutFillRule;
+    FMifAntiAlias: Boolean;
+    FStrokeColor: TColor;
+    FStrokeJoin: TVectArtLineJoin;
+    FStrokeStyle: TVectArtMifStrokeStyle;
+    FStrokeWidth: Single;
+    function GetContourCount: Integer;
+    function GetContours: TArray<TScreenLayoutContour>;
+    procedure SetContours(const Value: TArray<TScreenLayoutContour>);
+  public
+    constructor Create(const AName: string;
+      const AContours: TArray<TScreenLayoutContour>);
+    property Contours: TArray<TScreenLayoutContour> read GetContours
+      write SetContours;
+    property ContourCount: Integer read GetContourCount;
+    property FillColor: TColor read FFillColor write FFillColor;
+    property FillRule: TScreenLayoutFillRule read FFillRule write FFillRule;
+    property MifAntiAlias: Boolean read FMifAntiAlias write FMifAntiAlias;
+    property StrokeColor: TColor read FStrokeColor write FStrokeColor;
+    property StrokeJoin: TVectArtLineJoin read FStrokeJoin write FStrokeJoin;
+    property StrokeStyle: TVectArtMifStrokeStyle read FStrokeStyle
+      write FStrokeStyle;
+    property StrokeWidth: Single read FStrokeWidth write FStrokeWidth;
+  end;
+
+  TScreenLayoutShapeData = record
+    Contours: TArray<TScreenLayoutContour>; // 外周、穴、分離領域を含む閉輪郭群。
+    FillColor: TColor;                      // Even-Odd等の規則で塗る色。
+    FillRule: TScreenLayoutFillRule;        // 複数輪郭の内外判定規則。
+    Locked: Boolean;                        // 編集を禁止する状態。
+    MifAntiAlias: Boolean;                  // 輪郭描画の品質値。
+    Name: string;                           // レイヤー一覧の表示名。
+    Opacity: Single;                        // 0.0..1.0のレイヤー不透明度。
+    StrokeColor: TColor;                    // 全輪郭へ適用する縁取り色。
+    StrokeJoin: TVectArtLineJoin;           // 閉輪郭の頂点結合形式。
+    StrokeStyle: TVectArtMifStrokeStyle;    // 全輪郭へ適用する線パターン。
+    StrokeWidth: Single;                    // 0の場合は縁取りなし。
+    Visible: Boolean;                       // 描画対象に含める状態。
+  end;
+
   TVectArtImageLayer = class(TVectArtLayer)
   private
     FPngData: TBytes;
@@ -177,6 +239,9 @@ type
     function InsertRectangle(Index: Integer;
       const Data: TVectArtRectangleData): Integer;
     function InsertPath(Index: Integer; const Data: TVectArtPathData): Integer;
+    // 複数の閉輪郭を持つShapeを指定位置へ挿入し、実際のレイヤー番号を返す。
+    function InsertShape(Index: Integer;
+      const Data: TScreenLayoutShapeData): Integer;
     function InsertImage(Index: Integer; const Data: TVectArtImageData): Integer;
     function IsLayerSelected(Index: Integer): Boolean;
     procedure SetCanvasSize(AWidth, AHeight: Integer);
@@ -196,10 +261,22 @@ type
     function RemoveRectangle(Index: Integer;
       out Data: TVectArtRectangleData): Boolean;
     function RemovePath(Index: Integer; out Data: TVectArtPathData): Boolean;
+    // Shapeを削除し、Undo用の独立したデータをDataへ返す。
+    function RemoveShape(Index: Integer;
+      out Data: TScreenLayoutShapeData): Boolean;
     function RemoveImage(Index: Integer; out Data: TVectArtImageData): Boolean;
     procedure SetPathPoints(Index: Integer; const Points: TArray<TPointF>);
     procedure SetPathStroke(Index: Integer; Color: TColor; Width: Single;
       Style: TVectArtMifStrokeStyle);
+    // Shapeの輪郭群を深いコピーで置換し、Document変更を通知する。
+    procedure SetShapeContours(Index: Integer;
+      const Contours: TArray<TScreenLayoutContour>);
+    // Shapeの塗り色と複数輪郭の内外判定規則を更新する。
+    procedure SetShapeFill(Index: Integer; Color: TColor;
+      FillRule: TScreenLayoutFillRule);
+    // Shapeの全輪郭へ共通適用する縁取り設定を更新する。
+    procedure SetShapeStroke(Index: Integer; Color: TColor; Width: Single;
+      Style: TVectArtMifStrokeStyle; Join: TVectArtLineJoin);
     procedure SelectLayerRange(AnchorIndex, TargetIndex: Integer;
       Additive: Boolean);
     procedure SetSelectedLayers(const Indices: array of Integer);
@@ -228,6 +305,72 @@ implementation
 
 uses
   System.Math, ScreenLayoutGeometry;
+
+function CopyShapeContours(
+  const Source: TArray<TScreenLayoutContour>): TArray<TScreenLayoutContour>;
+var
+  I: Integer;
+begin
+  SetLength(Result, Length(Source));
+  for I := 0 to High(Source) do
+    Result[I].Vertices := Copy(Source[I].Vertices);
+end;
+
+procedure ValidateShapeContours(
+  const Contours: TArray<TScreenLayoutContour>);
+var
+  I: Integer;
+begin
+  if Length(Contours) = 0 then
+    raise EArgumentException.Create('Shape must contain at least one contour');
+  for I := 0 to High(Contours) do
+    if Length(Contours[I].Vertices) < 3 then
+      raise EArgumentException.CreateFmt(
+        'Shape contour %d must contain at least three vertices', [I]);
+end;
+
+function ShapeContoursEqual(const Left,
+  Right: TArray<TScreenLayoutContour>): Boolean;
+var
+  ContourIndex: Integer;
+  VertexIndex: Integer;
+begin
+  if Length(Left) <> Length(Right) then
+    Exit(False);
+  for ContourIndex := 0 to High(Left) do
+  begin
+    if Length(Left[ContourIndex].Vertices) <>
+      Length(Right[ContourIndex].Vertices) then
+      Exit(False);
+    for VertexIndex := 0 to High(Left[ContourIndex].Vertices) do
+      with Left[ContourIndex].Vertices[VertexIndex] do
+      begin
+        if not SameValue(Position.X,
+          Right[ContourIndex].Vertices[VertexIndex].Position.X) or
+          not SameValue(Position.Y,
+          Right[ContourIndex].Vertices[VertexIndex].Position.Y) or
+          not SameValue(IncomingControl.X,
+          Right[ContourIndex].Vertices[VertexIndex].IncomingControl.X) or
+          not SameValue(IncomingControl.Y,
+          Right[ContourIndex].Vertices[VertexIndex].IncomingControl.Y) or
+          not SameValue(OutgoingControl.X,
+          Right[ContourIndex].Vertices[VertexIndex].OutgoingControl.X) or
+          not SameValue(OutgoingControl.Y,
+          Right[ContourIndex].Vertices[VertexIndex].OutgoingControl.Y) or
+          (OutgoingSegment <>
+          Right[ContourIndex].Vertices[VertexIndex].OutgoingSegment) then
+          Exit(False);
+      end;
+  end;
+  Result := True;
+end;
+
+{ TScreenLayoutContour }
+
+function TScreenLayoutContour.SegmentCount: Integer;
+begin
+  Result := Length(Vertices);
+end;
 
 function VectArtStrokeDashIntervals(Style: TVectArtMifStrokeStyle;
   Width: Single): TArray<Single>;
@@ -313,6 +456,39 @@ begin
   FStrokeColor := clBlack;
   FMifStrokeStyle := vssSolid;
   FStrokeWidth := 1.0;
+end;
+
+{ TScreenLayoutShapeLayer }
+
+constructor TScreenLayoutShapeLayer.Create(const AName: string;
+  const AContours: TArray<TScreenLayoutContour>);
+begin
+  inherited Create(vlkShape, AName);
+  SetContours(AContours);
+  FFillColor := clWhite;
+  FFillRule := slfrEvenOdd;
+  FMifAntiAlias := True;
+  FStrokeColor := clBlack;
+  FStrokeJoin := vljMiter;
+  FStrokeStyle := vssSolid;
+  FStrokeWidth := 0.0;
+end;
+
+function TScreenLayoutShapeLayer.GetContours: TArray<TScreenLayoutContour>;
+begin
+  Result := CopyShapeContours(FContours);
+end;
+
+function TScreenLayoutShapeLayer.GetContourCount: Integer;
+begin
+  Result := Length(FContours);
+end;
+
+procedure TScreenLayoutShapeLayer.SetContours(
+  const Value: TArray<TScreenLayoutContour>);
+begin
+  ValidateShapeContours(Value);
+  FContours := CopyShapeContours(Value);
 end;
 
 { TVectArtImageLayer }
@@ -454,6 +630,33 @@ begin
   PathLayer.StrokeWidth := Max(Data.StrokeWidth, 0.0);
   PathLayer.Visible := Data.Visible;
   FLayers.Insert(Result, PathLayer);
+  for I := 0 to FSelectedLayers.Count - 1 do
+    if FSelectedLayers[I] >= Result then
+      FSelectedLayers[I] := FSelectedLayers[I] + 1;
+  if FSelectedIndex >= Result then
+    Inc(FSelectedIndex);
+  Changed;
+end;
+
+function TVectArtDocument.InsertShape(Index: Integer;
+  const Data: TScreenLayoutShapeData): Integer;
+var
+  I: Integer;
+  ShapeLayer: TScreenLayoutShapeLayer;
+begin
+  Result := EnsureRange(Index, 1, FLayers.Count);
+  ShapeLayer := TScreenLayoutShapeLayer.Create(Data.Name, Data.Contours);
+  ShapeLayer.FillColor := Data.FillColor;
+  ShapeLayer.FillRule := Data.FillRule;
+  ShapeLayer.Locked := Data.Locked;
+  ShapeLayer.MifAntiAlias := Data.MifAntiAlias;
+  ShapeLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  ShapeLayer.StrokeColor := Data.StrokeColor;
+  ShapeLayer.StrokeJoin := Data.StrokeJoin;
+  ShapeLayer.StrokeStyle := Data.StrokeStyle;
+  ShapeLayer.StrokeWidth := Max(Data.StrokeWidth, 0.0);
+  ShapeLayer.Visible := Data.Visible;
+  FLayers.Insert(Result, ShapeLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
       FSelectedLayers[I] := FSelectedLayers[I] + 1;
@@ -608,6 +811,47 @@ begin
   Data.SourceFileName := ImageLayer.SourceFileName;
   Data.SourceKind := ImageLayer.SourceKind;
   Data.Visible := ImageLayer.Visible;
+  FLayers.Delete(Index);
+  Selection := TList<Integer>.Create;
+  try
+    for I := 0 to FSelectedLayers.Count - 1 do
+      if FSelectedLayers[I] < Index then
+        Selection.Add(FSelectedLayers[I])
+      else if FSelectedLayers[I] > Index then
+        Selection.Add(FSelectedLayers[I] - 1);
+    if (Selection.Count = 0) and (FLayers.Count > 1) then
+      Selection.Add(Min(Index, FLayers.Count - 1));
+    SetSelectedLayersCore(Selection.ToArray, False);
+  finally
+    Selection.Free;
+  end;
+  Changed;
+end;
+
+function TVectArtDocument.RemoveShape(Index: Integer;
+  out Data: TScreenLayoutShapeData): Boolean;
+var
+  I: Integer;
+  Selection: TList<Integer>;
+  ShapeLayer: TScreenLayoutShapeLayer;
+begin
+  Result := (Index > 0) and (Index < FLayers.Count) and
+    (FLayers[Index] is TScreenLayoutShapeLayer);
+  if not Result then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(FLayers[Index]);
+  Data.Contours := ShapeLayer.Contours;
+  Data.FillColor := ShapeLayer.FillColor;
+  Data.FillRule := ShapeLayer.FillRule;
+  Data.Locked := ShapeLayer.Locked;
+  Data.MifAntiAlias := ShapeLayer.MifAntiAlias;
+  Data.Name := ShapeLayer.Name;
+  Data.Opacity := ShapeLayer.Opacity;
+  Data.StrokeColor := ShapeLayer.StrokeColor;
+  Data.StrokeJoin := ShapeLayer.StrokeJoin;
+  Data.StrokeStyle := ShapeLayer.StrokeStyle;
+  Data.StrokeWidth := ShapeLayer.StrokeWidth;
+  Data.Visible := ShapeLayer.Visible;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -950,6 +1194,61 @@ begin
   PathLayer.StrokeColor := Color;
   PathLayer.StrokeWidth := NewWidth;
   PathLayer.MifStrokeStyle := Style;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetShapeContours(Index: Integer;
+  const Contours: TArray<TScreenLayoutContour>);
+var
+  ShapeLayer: TScreenLayoutShapeLayer;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(FLayers[Index]);
+  if ShapeContoursEqual(ShapeLayer.FContours, Contours) then
+    Exit;
+  ShapeLayer.Contours := Contours;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetShapeFill(Index: Integer; Color: TColor;
+  FillRule: TScreenLayoutFillRule);
+var
+  ShapeLayer: TScreenLayoutShapeLayer;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(FLayers[Index]);
+  if (ShapeLayer.FillColor = Color) and
+    (ShapeLayer.FillRule = FillRule) then
+    Exit;
+  ShapeLayer.FillColor := Color;
+  ShapeLayer.FillRule := FillRule;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetShapeStroke(Index: Integer; Color: TColor;
+  Width: Single; Style: TVectArtMifStrokeStyle; Join: TVectArtLineJoin);
+var
+  NewWidth: Single;
+  ShapeLayer: TScreenLayoutShapeLayer;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(FLayers[Index]);
+  NewWidth := Max(Width, 0.0);
+  if (ShapeLayer.StrokeColor = Color) and
+    SameValue(ShapeLayer.StrokeWidth, NewWidth) and
+    (ShapeLayer.StrokeStyle = Style) and
+    (ShapeLayer.StrokeJoin = Join) then
+    Exit;
+  ShapeLayer.StrokeColor := Color;
+  ShapeLayer.StrokeWidth := NewWidth;
+  ShapeLayer.StrokeStyle := Style;
+  ShapeLayer.StrokeJoin := Join;
   Changed;
 end;
 

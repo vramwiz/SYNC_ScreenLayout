@@ -447,6 +447,10 @@ begin
     else
       DetailText := Format('Path  %d%%', [Round(Layer.Opacity * 100)]);
   end
+  else if Layer is TScreenLayoutShapeLayer then
+    DetailText := Format('Shape  %d contours  %d%%',
+      [TScreenLayoutShapeLayer(Layer).ContourCount,
+       Round(Layer.Opacity * 100)])
   else
     DetailText := '';
   ACanvas.Font.Height := -11;
@@ -649,6 +653,10 @@ begin
     else
       DetailText := Format('Path  %d%%', [Round(Layer.Opacity * 100)]);
   end
+  else if Layer is TScreenLayoutShapeLayer then
+    DetailText := Format('Shape  %d contours  %d%%',
+      [TScreenLayoutShapeLayer(Layer).ContourCount,
+       Round(Layer.Opacity * 100)])
   else
     DetailText := '';
   ACanvas.Font.Height := -11;

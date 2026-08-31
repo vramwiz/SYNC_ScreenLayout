@@ -67,10 +67,13 @@
         <DCCReference Include="Source\Shell\ScreenLayoutCanvasSettingsDialog.pas"/>
         <DCCReference Include="Source\Core\ScreenLayoutDocument.pas"/>
         <DCCReference Include="Source\Core\ScreenLayoutGeometry.pas"/>
+        <DCCReference Include="Source\Core\ScreenLayoutShapeOperations.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutRenderer.pas"/>
+        <DCCReference Include="Source\Rendering\ScreenLayoutShapePath.pas"/>
         <DCCReference Include="Source\Core\ScreenLayoutContext.pas"/>
         <DCCReference Include="Source\Core\ScreenLayoutEditorState.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutEditCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\ScreenLayoutShapeEditCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutLayerStructureCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutLayerBatchCommands.pas"/>
         <DCCReference Include="Source\Core\ScreenLayoutEditHistory.pas"/>

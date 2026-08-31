@@ -351,6 +351,11 @@ begin
     (FEditorState.CurrentTool = vetPath) then
     lblStatus.Caption := 'Path: click vertices, click first point to close, ' +
       'double-click/right-click to finish   Canvas: ' + CanvasSize
+  else if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetShape) then
+    lblStatus.Caption := 'Shape: click at least three vertices, then click ' +
+      'the first point or double-click/right-click to close   Canvas: ' +
+      CanvasSize
   else
     lblStatus.Caption := 'Ready   Tool: Select   Canvas: ' + CanvasSize;
 end;
