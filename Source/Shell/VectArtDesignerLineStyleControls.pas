@@ -1,5 +1,5 @@
-// Line詳細設定で使うダークボタンと線端・接合・AAの選択アイコンを描画する。
-// 線端と接合は共通値、AAボタンはMIF vector qualityとして扱う。
+﻿// Line詳細設定で使うダークボタンと線端・接合・AAの選択アイコンを描画する。
+// 線端・接合形式とアンチエイリアスの選択ボタンを提供する。
 unit VectArtDesignerLineStyleControls;
 
 interface

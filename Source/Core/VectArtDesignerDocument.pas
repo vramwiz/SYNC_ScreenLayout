@@ -1,5 +1,5 @@
-// 編集対象となる用紙、オブジェクトレイヤー、編集モードを一元管理する。
-// レイヤー配列の先頭を最背面、末尾を最前面とし、MIF由来の装飾値はMif名で区別する。
+﻿// 編集対象となる用紙とオブジェクトレイヤーを一元管理する。
+// レイヤー配列の先頭を最背面、末尾を最前面とする。
 unit VectArtDesignerDocument;
 
 interface
@@ -9,9 +9,6 @@ uses
   Vcl.Graphics;
 
 type
-  // ファイル形式ではなく、編集UIと描画で使用する表現体系を示す。
-  // 将来の編集体系追加に備えてBooleanではなく列挙値として保持する。
-  TVectArtEditingMode = (vemStandard, vemMifCompatible);
   TVectArtLayerKind = (vlkCanvas, vlkRectangle, vlkLine, vlkPath, vlkImage);
   TVectArtImageSourceKind = (visImage, visLogo);
   TVectArtImagePoints = array[0..3] of TPointF;
@@ -23,12 +20,6 @@ type
   TVectArtLineCap = (vlcButt, vlcSquare, vlcRound);
   // MIFのvector stroke join 0..2と同じ順序で保持する。
   TVectArtLineJoin = (vljMiter, vljBevel, vljRound);
-  // WebArt DesignerのMIFマーカー値0..9を同順で保持する。
-  // 既存JSONとの互換性のため、vlmArrowの序数1を変更しない。
-  TVectArtMifLineMarker = (vlmNone, vlmArrow, vlmOpenArrow, vlmWideArrow,
-    vlmCircle, vlmDiamond, vlmConcaveArrow, vlmSmallArrow, vlmSlash,
-    vlmStar);
-
   TVectArtLayer = class
   private
     FKind: TVectArtLayerKind;
@@ -97,14 +88,9 @@ type
 
   TVectArtLineLayer = class(TVectArtLayer)
   private
-    FMifAntiAlias: Boolean;
     FEndPoint: TPointF;
-    FMifEndMarker: TVectArtMifLineMarker;
-    FMifEndMarkerSize: Single;
     FLineCap: TVectArtLineCap;
     FLineJoin: TVectArtLineJoin;
-    FMifStartMarker: TVectArtMifLineMarker;
-    FMifStartMarkerSize: Single;
     FStartPoint: TPointF;
     FStrokeColor: TColor;
     FMifStrokeStyle: TVectArtMifStrokeStyle;
@@ -112,15 +98,9 @@ type
   public
     constructor Create(const AName: string; const AStartPoint,
       AEndPoint: TPointF);
-    property MifAntiAlias: Boolean read FMifAntiAlias write FMifAntiAlias;
     property EndPoint: TPointF read FEndPoint write FEndPoint;
-    property MifEndMarker: TVectArtMifLineMarker read FMifEndMarker write FMifEndMarker;
-    property MifEndMarkerSize: Single read FMifEndMarkerSize write FMifEndMarkerSize;
     property LineCap: TVectArtLineCap read FLineCap write FLineCap;
     property LineJoin: TVectArtLineJoin read FLineJoin write FLineJoin;
-    property MifStartMarker: TVectArtMifLineMarker read FMifStartMarker
-      write FMifStartMarker;
-    property MifStartMarkerSize: Single read FMifStartMarkerSize write FMifStartMarkerSize;
     property StartPoint: TPointF read FStartPoint write FStartPoint;
     property StrokeColor: TColor read FStrokeColor write FStrokeColor;
     property MifStrokeStyle: TVectArtMifStrokeStyle read FMifStrokeStyle
@@ -129,18 +109,13 @@ type
   end;
 
   TVectArtLineData = record
-    MifAntiAlias: Boolean;                  // MIF vector qualityに対応する品質値。
     EndPoint: TPointF;                      // 線の終点。
-    MifEndMarker: TVectArtMifLineMarker;    // MIF互換の終点マーカー。
-    MifEndMarkerSize: Single;               // MIF互換の終点マーカー倍率。
     LineCap: TVectArtLineCap;               // 共通の線端形状。
     LineJoin: TVectArtLineJoin;             // 共通の線結合形状。
     Locked: Boolean;                        // 編集を禁止する状態。
     Name: string;                           // レイヤー一覧の表示名。
     Opacity: Single;                        // 0.0..1.0のレイヤー不透明度。
     StartPoint: TPointF;                    // 線の始点。
-    MifStartMarker: TVectArtMifLineMarker;  // MIF互換の始点マーカー。
-    MifStartMarkerSize: Single;             // MIF互換の始点マーカー倍率。
     StrokeColor: TColor;                    // 線色。
     MifStrokeStyle: TVectArtMifStrokeStyle; // MIF互換の線パターン。
     StrokeWidth: Single;                    // ドキュメント座標の線幅。
@@ -196,12 +171,15 @@ type
   private
     FPngData: TBytes;
     FPoints: TVectArtImagePoints;
+    FSourceFileName: string;
     FSourceKind: TVectArtImageSourceKind;
   public
     constructor Create(const AName: string; const APngData: TBytes;
-      const APoints: TVectArtImagePoints; ASourceKind: TVectArtImageSourceKind);
+      const APoints: TVectArtImagePoints; ASourceKind: TVectArtImageSourceKind;
+      const ASourceFileName: string = '');
     property PngData: TBytes read FPngData;
     property Points: TVectArtImagePoints read FPoints write FPoints;
+    property SourceFileName: string read FSourceFileName;
     property SourceKind: TVectArtImageSourceKind read FSourceKind;
   end;
 
@@ -211,13 +189,13 @@ type
     Opacity: Single;                     // 0.0..1.0のレイヤー不透明度。
     PngData: TBytes;                     // 埋め込みPNGの全バイト。
     Points: TVectArtImagePoints;         // 左上から時計回りの配置4頂点。
+    SourceFileName: string;              // JSONから参照する画像ファイルパス。
     SourceKind: TVectArtImageSourceKind; // MIF由来のimage／logo区分。
     Visible: Boolean;                    // 描画対象に含める状態。
   end;
 
   TVectArtDocument = class
   private
-    FEditingMode: TVectArtEditingMode;
     FLayers: TObjectList<TVectArtLayer>;
     FChangePending: Boolean;
     FInteractiveChanged: Boolean;
@@ -233,7 +211,6 @@ type
     function GetIsInteractiveUpdate: Boolean;
     function GetSelectionCount: Integer;
     procedure SelectionChanged;
-    procedure SetEditingMode(const Value: TVectArtEditingMode);
     procedure SetSelectedLayersCore(const Indices: array of Integer;
       Notify: Boolean);
     procedure SetSelectedIndex(const Value: Integer);
@@ -261,11 +238,6 @@ type
     procedure SetLinePoints(Index: Integer; const StartPoint,
       EndPoint: TPointF);
     procedure SetLineCap(Index: Integer; Value: TVectArtLineCap);
-    procedure SetLineMifAntiAlias(Index: Integer; Value: Boolean);
-    procedure SetLineMifEndMarker(Index: Integer; Value: TVectArtMifLineMarker);
-    procedure SetLineMifEndMarkerSize(Index: Integer; Value: Single);
-    procedure SetLineMifStartMarker(Index: Integer; Value: TVectArtMifLineMarker);
-    procedure SetLineMifStartMarkerSize(Index: Integer; Value: Single);
     procedure SetLineJoin(Index: Integer; Value: TVectArtLineJoin);
     procedure SetLineStroke(Index: Integer; Color: TColor; Width: Single;
       Style: TVectArtMifStrokeStyle);
@@ -292,9 +264,6 @@ type
     procedure SetSelectedLayers(const Indices: array of Integer);
     procedure ToggleSelectedLayer(Index: Integer);
     property CanvasLayer: TVectArtCanvasLayer read GetCanvasLayer;
-    // GUI、操作、描画で選ぶ表現体系。ファイル形式や書出し可否は示さない。
-    property EditingMode: TVectArtEditingMode read FEditingMode
-      write SetEditingMode;
     property LayerCount: Integer read GetLayerCount;
     property Layers[Index: Integer]: TVectArtLayer read GetLayer; default;
     property IsInteractiveUpdate: Boolean read GetIsInteractiveUpdate;
@@ -397,15 +366,10 @@ constructor TVectArtLineLayer.Create(const AName: string;
   const AStartPoint, AEndPoint: TPointF);
 begin
   inherited Create(vlkLine, AName);
-  FMifAntiAlias := True;
-  FMifEndMarker := vlmNone;
-  FMifEndMarkerSize := 4.0;
   FStartPoint := AStartPoint;
   FEndPoint := AEndPoint;
   FLineCap := vlcButt;
   FLineJoin := vljMiter;
-  FMifStartMarker := vlmNone;
-  FMifStartMarkerSize := 4.0;
   FStrokeColor := clBlack;
   FMifStrokeStyle := vssSolid;
   FStrokeWidth := 1.0;
@@ -433,11 +397,12 @@ end;
 
 constructor TVectArtImageLayer.Create(const AName: string;
   const APngData: TBytes; const APoints: TVectArtImagePoints;
-  ASourceKind: TVectArtImageSourceKind);
+  ASourceKind: TVectArtImageSourceKind; const ASourceFileName: string);
 begin
   inherited Create(vlkImage, AName);
   FPngData := Copy(APngData);
   FPoints := APoints;
+  FSourceFileName := ASourceFileName;
   FSourceKind := ASourceKind;
 end;
 
@@ -446,20 +411,11 @@ end;
 constructor TVectArtDocument.Create;
 begin
   inherited Create;
-  FEditingMode := vemStandard;
   FLayers := TObjectList<TVectArtLayer>.Create(True);
   FSelectedLayers := TList<Integer>.Create;
   FLayers.Add(TVectArtCanvasLayer.Create(DEFAULT_CANVAS_WIDTH,
     DEFAULT_CANVAS_HEIGHT, clWhite));
   FSelectedIndex := -1;
-end;
-
-procedure TVectArtDocument.SetEditingMode(const Value: TVectArtEditingMode);
-begin
-  if FEditingMode = Value then
-    Exit;
-  FEditingMode := Value;
-  Changed;
 end;
 
 destructor TVectArtDocument.Destroy;
@@ -571,12 +527,7 @@ begin
     Data.EndPoint);
   LineLayer.Locked := Data.Locked;
   LineLayer.LineCap := Data.LineCap;
-  LineLayer.MifAntiAlias := Data.MifAntiAlias;
-  LineLayer.MifEndMarker := Data.MifEndMarker;
-  LineLayer.MifEndMarkerSize := Max(Data.MifEndMarkerSize, 1.0);
   LineLayer.LineJoin := Data.LineJoin;
-  LineLayer.MifStartMarker := Data.MifStartMarker;
-  LineLayer.MifStartMarkerSize := Max(Data.MifStartMarkerSize, 1.0);
   LineLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
   LineLayer.StrokeColor := Data.StrokeColor;
   LineLayer.MifStrokeStyle := Data.MifStrokeStyle;
@@ -627,7 +578,7 @@ var
 begin
   Result := EnsureRange(Index, 1, FLayers.Count);
   ImageLayer := TVectArtImageLayer.Create(Data.Name, Data.PngData,
-    Data.Points, Data.SourceKind);
+    Data.Points, Data.SourceKind, Data.SourceFileName);
   ImageLayer.Locked := Data.Locked;
   ImageLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
   ImageLayer.Visible := Data.Visible;
@@ -720,12 +671,7 @@ begin
   LineLayer := TVectArtLineLayer(FLayers[Index]);
   Data.EndPoint := LineLayer.EndPoint;
   Data.LineCap := LineLayer.LineCap;
-  Data.MifAntiAlias := LineLayer.MifAntiAlias;
-  Data.MifEndMarker := LineLayer.MifEndMarker;
-  Data.MifEndMarkerSize := LineLayer.MifEndMarkerSize;
   Data.LineJoin := LineLayer.LineJoin;
-  Data.MifStartMarker := LineLayer.MifStartMarker;
-  Data.MifStartMarkerSize := LineLayer.MifStartMarkerSize;
   Data.Locked := LineLayer.Locked;
   Data.Name := LineLayer.Name;
   Data.Opacity := LineLayer.Opacity;
@@ -811,6 +757,7 @@ begin
   Data.Opacity := ImageLayer.Opacity;
   Data.PngData := Copy(ImageLayer.PngData);
   Data.Points := ImageLayer.Points;
+  Data.SourceFileName := ImageLayer.SourceFileName;
   Data.SourceKind := ImageLayer.SourceKind;
   Data.Visible := ImageLayer.Visible;
   FLayers.Delete(Index);
@@ -1084,78 +1031,6 @@ begin
   if LineLayer.LineCap = Value then
     Exit;
   LineLayer.LineCap := Value;
-  Changed;
-end;
-
-procedure TVectArtDocument.SetLineMifAntiAlias(Index: Integer; Value: Boolean);
-var
-  LineLayer: TVectArtLineLayer;
-begin
-  if (Index <= 0) or (Index >= FLayers.Count) or
-    not (FLayers[Index] is TVectArtLineLayer) then
-    Exit;
-  LineLayer := TVectArtLineLayer(FLayers[Index]);
-  if LineLayer.MifAntiAlias = Value then
-    Exit;
-  LineLayer.MifAntiAlias := Value;
-  Changed;
-end;
-
-procedure TVectArtDocument.SetLineMifEndMarker(Index: Integer;
-  Value: TVectArtMifLineMarker);
-var
-  LineLayer: TVectArtLineLayer;
-begin
-  if (Index <= 0) or (Index >= FLayers.Count) or
-    not (FLayers[Index] is TVectArtLineLayer) then
-    Exit;
-  LineLayer := TVectArtLineLayer(FLayers[Index]);
-  if LineLayer.MifEndMarker = Value then
-    Exit;
-  LineLayer.MifEndMarker := Value;
-  Changed;
-end;
-
-procedure TVectArtDocument.SetLineMifEndMarkerSize(Index: Integer; Value: Single);
-var
-  LineLayer: TVectArtLineLayer;
-  NewValue: Single;
-begin
-  if (Index < 0) or (Index >= FLayers.Count) or
-    not (FLayers[Index] is TVectArtLineLayer) then Exit;
-  LineLayer := TVectArtLineLayer(FLayers[Index]);
-  NewValue := Max(Value, 1.0);
-  if SameValue(LineLayer.MifEndMarkerSize, NewValue) then Exit;
-  LineLayer.MifEndMarkerSize := NewValue;
-  Changed;
-end;
-
-procedure TVectArtDocument.SetLineMifStartMarker(Index: Integer;
-  Value: TVectArtMifLineMarker);
-var
-  LineLayer: TVectArtLineLayer;
-begin
-  if (Index <= 0) or (Index >= FLayers.Count) or
-    not (FLayers[Index] is TVectArtLineLayer) then
-    Exit;
-  LineLayer := TVectArtLineLayer(FLayers[Index]);
-  if LineLayer.MifStartMarker = Value then
-    Exit;
-  LineLayer.MifStartMarker := Value;
-  Changed;
-end;
-
-procedure TVectArtDocument.SetLineMifStartMarkerSize(Index: Integer; Value: Single);
-var
-  LineLayer: TVectArtLineLayer;
-  NewValue: Single;
-begin
-  if (Index < 0) or (Index >= FLayers.Count) or
-    not (FLayers[Index] is TVectArtLineLayer) then Exit;
-  LineLayer := TVectArtLineLayer(FLayers[Index]);
-  NewValue := Max(Value, 1.0);
-  if SameValue(LineLayer.MifStartMarkerSize, NewValue) then Exit;
-  LineLayer.MifStartMarkerSize := NewValue;
   Changed;
 end;
 

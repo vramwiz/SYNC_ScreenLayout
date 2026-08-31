@@ -1,4 +1,4 @@
-// 中央編集領域のキャンバス表示を担当する。
+﻿// 中央編集領域のキャンバス表示を担当する。
 // 論理サイズと画面上の拡大率を分離し、描画にはDirect2Dを優先して使用する。
 unit VectArtDesignerCanvas;
 
@@ -37,6 +37,8 @@ type
     procedure PaintGDI;
     procedure SetDocument(const Value: TVectArtDocument);
     procedure SetEditorState(const Value: TVectArtEditorState);
+    function ToScreenX(Value: Single): Integer;
+    function ToScreenY(Value: Single): Integer;
     function GetEditHistory: TVectArtEditHistory;
     function HasReferenceBackground: Boolean;
     procedure UpdateRenderedDocument;
@@ -170,9 +172,7 @@ end;
 
 procedure DrawStyledPreviewLine(Target: TCanvas; const StartPoint,
   EndPoint: TPoint; Color: TColor; Width: Single;
-  Style: TVectArtMifStrokeStyle; LineCap: TVectArtLineCap;
-  MifAntiAlias: Boolean; MifStartMarker, MifEndMarker: TVectArtMifLineMarker;
-  MifStartMarkerSize, MifEndMarkerSize: Single); overload;
+  Style: TVectArtMifStrokeStyle; LineCap: TVectArtLineCap); overload;
 var
   DX: Single;
   DY: Single;
@@ -182,8 +182,6 @@ var
   P1: TPoint;
   P2: TPoint;
   Radius: Integer;
-  Geometry: TVectArtMarkerGeometry;
-  MarkerPoints: TArray<TPoint>;
   Segments: TArray<TPreviewLineSegment>;
 begin
   Segments := BuildStyledPreviewSegments(StartPoint, EndPoint, Width, Style);
@@ -223,40 +221,13 @@ begin
         P2.Y + Radius + 1);
       Target.Brush.Style := bsClear;
     end;
-  end;
-  for I := 0 to 1 do
-  begin
-    if I = 0 then
-      Geometry := BuildMifLineMarkerGeometry(Ord(MifStartMarker), StartPoint,
-        EndPoint, Width, MifStartMarkerSize)
-    else
-      Geometry := BuildMifLineMarkerGeometry(Ord(MifEndMarker), EndPoint,
-        StartPoint, Width, MifEndMarkerSize);
-    SetLength(MarkerPoints, Length(Geometry.PrimaryPoints));
-    for Radius := 0 to High(MarkerPoints) do
-      MarkerPoints[Radius] := Point(Round(Geometry.PrimaryPoints[Radius].X),
-        Round(Geometry.PrimaryPoints[Radius].Y));
-    if Length(MarkerPoints) < 2 then Continue;
-    Target.Pen.Color := Color;
-    Target.Pen.Width := Max(Round(Width), 1);
-    if Geometry.Filled then
-    begin
-      Target.Brush.Style := bsSolid;
-      Target.Brush.Color := Color;
-      Target.Polygon(MarkerPoints);
-      Target.Brush.Style := bsClear;
-    end
-    else
-      Target.Polyline(MarkerPoints);
   end;
   Target.Pen.Width := 1;
 end;
 
 procedure DrawStyledPreviewLine(Target: TDirect2DCanvas;
   const StartPoint, EndPoint: TPoint; Color: TColor; Width: Single;
-  Style: TVectArtMifStrokeStyle; LineCap: TVectArtLineCap;
-  MifAntiAlias: Boolean; MifStartMarker, MifEndMarker: TVectArtMifLineMarker;
-  MifStartMarkerSize, MifEndMarkerSize: Single); overload;
+  Style: TVectArtMifStrokeStyle; LineCap: TVectArtLineCap); overload;
 var
   DX: Single;
   DY: Single;
@@ -266,14 +237,9 @@ var
   P1: TPoint;
   P2: TPoint;
   Radius: Integer;
-  Geometry: TVectArtMarkerGeometry;
-  MarkerPoints: TArray<TPoint>;
   Segments: TArray<TPreviewLineSegment>;
 begin
-  if MifAntiAlias then
-    Target.RenderTarget.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE)
-  else
-    Target.RenderTarget.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+  Target.RenderTarget.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
   Segments := BuildStyledPreviewSegments(StartPoint, EndPoint, Width, Style);
   EffectiveCap := LineCap;
   if VectArtStrokeUsesRoundCaps(Style) then
@@ -311,31 +277,6 @@ begin
         P2.Y + Radius + 1);
       Target.Brush.Style := bsClear;
     end;
-  end;
-  for I := 0 to 1 do
-  begin
-    if I = 0 then
-      Geometry := BuildMifLineMarkerGeometry(Ord(MifStartMarker), StartPoint,
-        EndPoint, Width, MifStartMarkerSize)
-    else
-      Geometry := BuildMifLineMarkerGeometry(Ord(MifEndMarker), EndPoint,
-        StartPoint, Width, MifEndMarkerSize);
-    SetLength(MarkerPoints, Length(Geometry.PrimaryPoints));
-    for Radius := 0 to High(MarkerPoints) do
-      MarkerPoints[Radius] := Point(Round(Geometry.PrimaryPoints[Radius].X),
-        Round(Geometry.PrimaryPoints[Radius].Y));
-    if Length(MarkerPoints) < 2 then Continue;
-    Target.Pen.Color := Color;
-    Target.Pen.Width := Max(Round(Width), 1);
-    if Geometry.Filled then
-    begin
-      Target.Brush.Style := bsSolid;
-      Target.Brush.Color := Color;
-      Target.Polygon(MarkerPoints);
-      Target.Brush.Style := bsClear;
-    end
-    else
-      Target.Polyline(MarkerPoints);
   end;
   Target.Pen.Width := 1;
   Target.RenderTarget.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
@@ -423,6 +364,18 @@ begin
     (ControlHeight - DisplayHeight) div 2 + Round(FPanOffset.Y),
     (ControlWidth + DisplayWidth) div 2 + Round(FPanOffset.X),
     (ControlHeight + DisplayHeight) div 2 + Round(FPanOffset.Y));
+end;
+
+function TVectArtCanvasControl.ToScreenX(Value: Single): Integer;
+begin
+  Result := LogicalToScreenX(Value, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Width);
+end;
+
+function TVectArtCanvasControl.ToScreenY(Value: Single): Integer;
+begin
+  Result := LogicalToScreenY(Value, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Height);
 end;
 
 function TVectArtCanvasControl.DoMouseWheel(Shift: TShiftState;
@@ -844,11 +797,9 @@ begin
                 ImageLayer.Points[RotationHandleIndex].Y);
             end;
           end;
-          LayerRect := Rect(FCanvasBounds.Left +
-            Round(RotatedBounds.Left * FZoom), FCanvasBounds.Top +
-            Round(RotatedBounds.Top * FZoom), FCanvasBounds.Left +
-            Round(RotatedBounds.Right * FZoom), FCanvasBounds.Top +
-            Round(RotatedBounds.Bottom * FZoom));
+          LayerRect := Rect(ToScreenX(RotatedBounds.Left),
+            ToScreenY(RotatedBounds.Top), ToScreenX(RotatedBounds.Right),
+            ToScreenY(RotatedBounds.Bottom));
           if LayerRect.Width = 0 then
             Inc(LayerRect.Right);
           if LayerRect.Height = 0 then
@@ -875,11 +826,11 @@ begin
         begin
           LineLayer := TVectArtLineLayer(
             FDocument[FDocument.SelectedIndex]);
-          SelectionGeometry := BuildLineSelectionGeometry(Point(
-            FCanvasBounds.Left + Round(LineLayer.StartPoint.X * FZoom),
-            FCanvasBounds.Top + Round(LineLayer.StartPoint.Y * FZoom)),
-            Point(FCanvasBounds.Left + Round(LineLayer.EndPoint.X * FZoom),
-            FCanvasBounds.Top + Round(LineLayer.EndPoint.Y * FZoom)));
+          SelectionGeometry := BuildLineSelectionGeometry(
+            Point(ToScreenX(LineLayer.StartPoint.X),
+              ToScreenY(LineLayer.StartPoint.Y)),
+            Point(ToScreenX(LineLayer.EndPoint.X),
+              ToScreenY(LineLayer.EndPoint.Y)));
         end
         else if (FDocument.SelectionCount = 1) and
           (FDocument.SelectedIndex > 0) and
@@ -893,9 +844,8 @@ begin
           ImageLayer := TVectArtImageLayer(
             FDocument[FDocument.SelectedIndex]);
           for I := 0 to High(ScreenQuad) do
-            ScreenQuad[I] := Point(FCanvasBounds.Left +
-              Round(ImageLayer.Points[I].X * FZoom), FCanvasBounds.Top +
-              Round(ImageLayer.Points[I].Y * FZoom));
+            ScreenQuad[I] := Point(ToScreenX(ImageLayer.Points[I].X),
+              ToScreenY(ImageLayer.Points[I].Y));
           SelectionGeometry := BuildRotatedSelectionGeometry(ScreenQuad,
             SelectionFrameOffsetPixels);
         end
@@ -909,9 +859,8 @@ begin
           LogicalQuad := RectangleCorners(RectangleLayer.Bounds,
             RectangleLayer.RotationDegrees);
           for I := 0 to High(ScreenQuad) do
-            ScreenQuad[I] := Point(FCanvasBounds.Left +
-              Round(LogicalQuad[I].X * FZoom), FCanvasBounds.Top +
-              Round(LogicalQuad[I].Y * FZoom));
+            ScreenQuad[I] := Point(ToScreenX(LogicalQuad[I].X),
+              ToScreenY(LogicalQuad[I].Y));
           SelectionGeometry := BuildRotatedSelectionGeometry(ScreenQuad,
             SelectionFrameOffsetPixels);
         end
@@ -974,10 +923,7 @@ begin
         DrawStyledPreviewLine(Direct2DCanvas, LineStart, LineEnd,
           FEditorState.LineStrokeColor,
           FEditorState.LineStrokeWidth * FZoom,
-          FEditorState.LineMifStrokeStyle, FEditorState.LineCap,
-          FEditorState.LineMifAntiAlias, FEditorState.LineMifStartMarker,
-          FEditorState.LineMifEndMarker, FEditorState.LineMifStartMarkerSize,
-          FEditorState.LineMifEndMarkerSize);
+          FEditorState.LineMifStrokeStyle, FEditorState.LineCap);
       if FShapeCreation.PreviewPath(PathPreview) then
       begin
         Direct2DCanvas.Pen.Color := COLOR_SELECTION;
@@ -1136,11 +1082,9 @@ begin
             ImageLayer.Points[RotationHandleIndex].Y);
         end;
       end;
-      LayerRect := Rect(FCanvasBounds.Left +
-        Round(RotatedBounds.Left * FZoom), FCanvasBounds.Top +
-        Round(RotatedBounds.Top * FZoom), FCanvasBounds.Left +
-        Round(RotatedBounds.Right * FZoom), FCanvasBounds.Top +
-        Round(RotatedBounds.Bottom * FZoom));
+      LayerRect := Rect(ToScreenX(RotatedBounds.Left),
+        ToScreenY(RotatedBounds.Top), ToScreenX(RotatedBounds.Right),
+        ToScreenY(RotatedBounds.Bottom));
       if LayerRect.Width = 0 then
         Inc(LayerRect.Right);
       if LayerRect.Height = 0 then
@@ -1165,11 +1109,11 @@ begin
       (FDocument[FDocument.SelectedIndex] is TVectArtLineLayer) then
     begin
       LineLayer := TVectArtLineLayer(FDocument[FDocument.SelectedIndex]);
-      SelectionGeometry := BuildLineSelectionGeometry(Point(
-        FCanvasBounds.Left + Round(LineLayer.StartPoint.X * FZoom),
-        FCanvasBounds.Top + Round(LineLayer.StartPoint.Y * FZoom)), Point(
-        FCanvasBounds.Left + Round(LineLayer.EndPoint.X * FZoom),
-        FCanvasBounds.Top + Round(LineLayer.EndPoint.Y * FZoom)));
+      SelectionGeometry := BuildLineSelectionGeometry(
+        Point(ToScreenX(LineLayer.StartPoint.X),
+          ToScreenY(LineLayer.StartPoint.Y)),
+        Point(ToScreenX(LineLayer.EndPoint.X),
+          ToScreenY(LineLayer.EndPoint.Y)));
     end
     else if (FDocument.SelectionCount = 1) and
       (FDocument.SelectedIndex > 0) and
@@ -1182,9 +1126,8 @@ begin
     begin
       ImageLayer := TVectArtImageLayer(FDocument[FDocument.SelectedIndex]);
       for I := 0 to High(ScreenQuad) do
-        ScreenQuad[I] := Point(FCanvasBounds.Left +
-          Round(ImageLayer.Points[I].X * FZoom), FCanvasBounds.Top +
-          Round(ImageLayer.Points[I].Y * FZoom));
+        ScreenQuad[I] := Point(ToScreenX(ImageLayer.Points[I].X),
+          ToScreenY(ImageLayer.Points[I].Y));
       SelectionGeometry := BuildRotatedSelectionGeometry(ScreenQuad,
         SelectionFrameOffsetPixels);
     end
@@ -1198,9 +1141,8 @@ begin
       LogicalQuad := RectangleCorners(RectangleLayer.Bounds,
         RectangleLayer.RotationDegrees);
       for I := 0 to High(ScreenQuad) do
-        ScreenQuad[I] := Point(FCanvasBounds.Left +
-          Round(LogicalQuad[I].X * FZoom), FCanvasBounds.Top +
-          Round(LogicalQuad[I].Y * FZoom));
+        ScreenQuad[I] := Point(ToScreenX(LogicalQuad[I].X),
+          ToScreenY(LogicalQuad[I].Y));
       SelectionGeometry := BuildRotatedSelectionGeometry(ScreenQuad,
         SelectionFrameOffsetPixels);
     end
@@ -1262,10 +1204,7 @@ begin
   if FShapeCreation.PreviewLine(LineStart, LineEnd) then
     DrawStyledPreviewLine(Canvas, LineStart, LineEnd,
       FEditorState.LineStrokeColor, FEditorState.LineStrokeWidth * FZoom,
-      FEditorState.LineMifStrokeStyle, FEditorState.LineCap,
-      FEditorState.LineMifAntiAlias, FEditorState.LineMifStartMarker,
-      FEditorState.LineMifEndMarker, FEditorState.LineMifStartMarkerSize,
-      FEditorState.LineMifEndMarkerSize);
+      FEditorState.LineMifStrokeStyle, FEditorState.LineCap);
   if FShapeCreation.PreviewPath(PathPreview) then
   begin
     Canvas.Pen.Color := COLOR_SELECTION;

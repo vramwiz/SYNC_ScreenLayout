@@ -1,7 +1,7 @@
 object MainForm: TMainForm
   Left = 0
   Top = 0
-  Caption = 'VectArtDesigner'
+  Caption = 'ScreenDesignMaker'
   ClientHeight = 720
   ClientWidth = 1180
   Color = 1973790

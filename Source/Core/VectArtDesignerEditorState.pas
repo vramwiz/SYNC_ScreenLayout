@@ -1,5 +1,4 @@
-// 編集ツールなど、複数の編集UIが共有する一時状態を管理する。
-// 現在の線装飾初期値はMIF互換用とし、標準モード用の状態とは名前で区別する。
+﻿// 編集ツールなど、複数の編集UIが共有する一時状態を管理する。
 unit VectArtDesignerEditorState;
 
 interface
@@ -12,11 +11,6 @@ type
 
   TVectArtEditorState = class
   private
-    FLineMifAntiAlias: Boolean;
-    FLineMifEndMarker: TVectArtMifLineMarker;
-    FLineMifEndMarkerSize: Single;
-    FLineMifStartMarker: TVectArtMifLineMarker;
-    FLineMifStartMarkerSize: Single;
     FCurrentTool: TVectArtEditorTool;
     FLineCap: TVectArtLineCap;
     FLineJoin: TVectArtLineJoin;
@@ -34,11 +28,6 @@ type
     FRectangleStrokeWidth: Single;
     procedure SetCurrentTool(const Value: TVectArtEditorTool);
     procedure SetLineCap(const Value: TVectArtLineCap);
-    procedure SetLineMifAntiAlias(const Value: Boolean);
-    procedure SetLineMifEndMarker(const Value: TVectArtMifLineMarker);
-    procedure SetLineMifEndMarkerSize(const Value: Single);
-    procedure SetLineMifStartMarker(const Value: TVectArtMifLineMarker);
-    procedure SetLineMifStartMarkerSize(const Value: Single);
     procedure SetLineJoin(const Value: TVectArtLineJoin);
     procedure SetLineStrokeColor(const Value: TColor);
     procedure SetLineMifStrokeStyle(const Value: TVectArtMifStrokeStyle);
@@ -56,15 +45,6 @@ type
     property CurrentTool: TVectArtEditorTool read FCurrentTool
       write SetCurrentTool;
     property LineCap: TVectArtLineCap read FLineCap write SetLineCap;
-    property LineMifAntiAlias: Boolean read FLineMifAntiAlias write SetLineMifAntiAlias;
-    property LineMifEndMarker: TVectArtMifLineMarker read FLineMifEndMarker
-      write SetLineMifEndMarker;
-    property LineMifEndMarkerSize: Single read FLineMifEndMarkerSize
-      write SetLineMifEndMarkerSize;
-    property LineMifStartMarker: TVectArtMifLineMarker read FLineMifStartMarker
-      write SetLineMifStartMarker;
-    property LineMifStartMarkerSize: Single read FLineMifStartMarkerSize
-      write SetLineMifStartMarkerSize;
     property LineJoin: TVectArtLineJoin read FLineJoin write SetLineJoin;
     property LineStrokeColor: TColor read FLineStrokeColor
       write SetLineStrokeColor;
@@ -101,11 +81,6 @@ constructor TVectArtEditorState.Create;
 begin
   inherited Create;
   FCurrentTool := vetSelect;
-  FLineMifAntiAlias := True;
-  FLineMifEndMarker := vlmNone;
-  FLineMifEndMarkerSize := 4.0;
-  FLineMifStartMarker := vlmNone;
-  FLineMifStartMarkerSize := 4.0;
   FLineCap := vlcButt;
   FLineJoin := vljMiter;
   FLineStrokeColor := clBlack;
@@ -155,55 +130,6 @@ begin
   FLineCap := Value;
   if Assigned(FOnChanged) then
     FOnChanged(Self);
-end;
-
-procedure TVectArtEditorState.SetLineMifAntiAlias(const Value: Boolean);
-begin
-  if FLineMifAntiAlias = Value then
-    Exit;
-  FLineMifAntiAlias := Value;
-  if Assigned(FOnChanged) then
-    FOnChanged(Self);
-end;
-
-procedure TVectArtEditorState.SetLineMifEndMarker(
-  const Value: TVectArtMifLineMarker);
-begin
-  if FLineMifEndMarker = Value then
-    Exit;
-  FLineMifEndMarker := Value;
-  if Assigned(FOnChanged) then
-    FOnChanged(Self);
-end;
-
-procedure TVectArtEditorState.SetLineMifEndMarkerSize(const Value: Single);
-var
-  NewValue: Single;
-begin
-  NewValue := Max(Value, 1.0);
-  if SameValue(FLineMifEndMarkerSize, NewValue) then Exit;
-  FLineMifEndMarkerSize := NewValue;
-  if Assigned(FOnChanged) then FOnChanged(Self);
-end;
-
-procedure TVectArtEditorState.SetLineMifStartMarker(
-  const Value: TVectArtMifLineMarker);
-begin
-  if FLineMifStartMarker = Value then
-    Exit;
-  FLineMifStartMarker := Value;
-  if Assigned(FOnChanged) then
-    FOnChanged(Self);
-end;
-
-procedure TVectArtEditorState.SetLineMifStartMarkerSize(const Value: Single);
-var
-  NewValue: Single;
-begin
-  NewValue := Max(Value, 1.0);
-  if SameValue(FLineMifStartMarkerSize, NewValue) then Exit;
-  FLineMifStartMarkerSize := NewValue;
-  if Assigned(FOnChanged) then FOnChanged(Self);
 end;
 
 procedure TVectArtEditorState.SetLineJoin(const Value: TVectArtLineJoin);

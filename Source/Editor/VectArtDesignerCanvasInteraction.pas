@@ -69,6 +69,10 @@ type
       out Geometry: TVectArtSelectionGeometry): Boolean;
     function SelectedLayersLogicalRect: TRectF;
     function SelectedLayersScreenRect: TRect;
+    function ToLogicalX(Value: Single): Single;
+    function ToLogicalY(Value: Single): Single;
+    function ToScreenX(Value: Single): Integer;
+    function ToScreenY(Value: Single): Integer;
   public
     constructor Create;
     procedure Configure(ADocument: TVectArtDocument;
@@ -170,6 +174,30 @@ begin
   FDocument := ADocument;
   FCanvasBounds := ACanvasBounds;
   FZoom := AZoom;
+end;
+
+function TVectArtCanvasInteraction.ToLogicalX(Value: Single): Single;
+begin
+  Result := ScreenToLogicalX(Value, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Width);
+end;
+
+function TVectArtCanvasInteraction.ToLogicalY(Value: Single): Single;
+begin
+  Result := ScreenToLogicalY(Value, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Height);
+end;
+
+function TVectArtCanvasInteraction.ToScreenX(Value: Single): Integer;
+begin
+  Result := LogicalToScreenX(Value, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Width);
+end;
+
+function TVectArtCanvasInteraction.ToScreenY(Value: Single): Integer;
+begin
+  Result := LogicalToScreenY(Value, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Height);
 end;
 
 function TVectArtCanvasInteraction.CursorAt(X, Y: Integer): TCursor;
@@ -610,8 +638,8 @@ begin
   if (FDocument = nil) or (FZoom <= 0) or
     not PtInRect(FCanvasBounds, Point(X, Y)) then
     Exit;
-  LogicalX := (X - FCanvasBounds.Left) / FZoom;
-  LogicalY := (Y - FCanvasBounds.Top) / FZoom;
+  LogicalX := ToLogicalX(X);
+  LogicalY := ToLogicalY(Y);
   for I := FDocument.LayerCount - 1 downto 1 do
   begin
     Layer := FDocument[I];
@@ -696,21 +724,18 @@ begin
   begin
     ImageLayer := TVectArtImageLayer(FDocument[Index]);
     Bounds := ImagePointsBounds(ImageLayer.Points);
-    Result := Rect(FCanvasBounds.Left + Round(Bounds.Left * FZoom),
-      FCanvasBounds.Top + Round(Bounds.Top * FZoom),
-      FCanvasBounds.Left + Round(Bounds.Right * FZoom),
-      FCanvasBounds.Top + Round(Bounds.Bottom * FZoom));
+    Result := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
+      ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
     Exit;
   end;
   if FDocument[Index] is TVectArtLineLayer then
   begin
     LineLayer := TVectArtLineLayer(FDocument[Index]);
-    Result := Rect(FCanvasBounds.Left + Round(Min(LineLayer.StartPoint.X,
-      LineLayer.EndPoint.X) * FZoom), FCanvasBounds.Top +
-      Round(Min(LineLayer.StartPoint.Y, LineLayer.EndPoint.Y) * FZoom),
-      FCanvasBounds.Left + Round(Max(LineLayer.StartPoint.X,
-      LineLayer.EndPoint.X) * FZoom), FCanvasBounds.Top +
-      Round(Max(LineLayer.StartPoint.Y, LineLayer.EndPoint.Y) * FZoom));
+    Result := Rect(ToScreenX(Min(LineLayer.StartPoint.X,
+      LineLayer.EndPoint.X)), ToScreenY(Min(LineLayer.StartPoint.Y,
+      LineLayer.EndPoint.Y)), ToScreenX(Max(LineLayer.StartPoint.X,
+      LineLayer.EndPoint.X)), ToScreenY(Max(LineLayer.StartPoint.Y,
+      LineLayer.EndPoint.Y)));
     if Result.Width = 0 then
       Inc(Result.Right);
     if Result.Height = 0 then
@@ -721,10 +746,8 @@ begin
   begin
     PathLayer := TVectArtPathLayer(FDocument[Index]);
     Bounds := PointsBounds(PathLayer.Points);
-    Result := Rect(FCanvasBounds.Left + Round(Bounds.Left * FZoom),
-      FCanvasBounds.Top + Round(Bounds.Top * FZoom),
-      FCanvasBounds.Left + Round(Bounds.Right * FZoom),
-      FCanvasBounds.Top + Round(Bounds.Bottom * FZoom));
+    Result := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
+      ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
     if Result.Width = 0 then
       Inc(Result.Right);
     if Result.Height = 0 then
@@ -734,11 +757,8 @@ begin
   RectangleLayer := TVectArtRectangleLayer(FDocument[Index]);
   Bounds := QuadBounds(RectangleCorners(RectangleLayer.Bounds,
     RectangleLayer.RotationDegrees));
-  Result := Rect(
-    FCanvasBounds.Left + Round(Bounds.Left * FZoom),
-    FCanvasBounds.Top + Round(Bounds.Top * FZoom),
-    FCanvasBounds.Left + Round(Bounds.Right * FZoom),
-    FCanvasBounds.Top + Round(Bounds.Bottom * FZoom));
+  Result := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
+    ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
 end;
 
 function TVectArtCanvasInteraction.SelectedLayersLogicalRect: TRectF;
@@ -861,9 +881,8 @@ begin
   begin
     ImageLayer := TVectArtImageLayer(FDocument[FDocument.SelectedIndex]);
     for I := 0 to High(ScreenQuad) do
-      ScreenQuad[I] := Point(FCanvasBounds.Left +
-        Round(ImageLayer.Points[I].X * FZoom), FCanvasBounds.Top +
-        Round(ImageLayer.Points[I].Y * FZoom));
+      ScreenQuad[I] := Point(ToScreenX(ImageLayer.Points[I].X),
+        ToScreenY(ImageLayer.Points[I].Y));
     Geometry := BuildRotatedSelectionGeometry(ScreenQuad,
       SelectionFrameOffset(0, FZoom));
     Exit(True);
@@ -883,11 +902,11 @@ begin
     (FDocument[FDocument.SelectedIndex] is TVectArtLineLayer) then
   begin
     LineLayer := TVectArtLineLayer(FDocument[FDocument.SelectedIndex]);
-    Geometry := BuildLineSelectionGeometry(Point(FCanvasBounds.Left +
-      Round(LineLayer.StartPoint.X * FZoom), FCanvasBounds.Top +
-      Round(LineLayer.StartPoint.Y * FZoom)), Point(FCanvasBounds.Left +
-      Round(LineLayer.EndPoint.X * FZoom), FCanvasBounds.Top +
-      Round(LineLayer.EndPoint.Y * FZoom)));
+    Geometry := BuildLineSelectionGeometry(
+      Point(ToScreenX(LineLayer.StartPoint.X),
+        ToScreenY(LineLayer.StartPoint.Y)),
+      Point(ToScreenX(LineLayer.EndPoint.X),
+        ToScreenY(LineLayer.EndPoint.Y)));
     Exit(True);
   end;
   if FAxisAlignedSelection then
@@ -905,9 +924,8 @@ begin
   LogicalQuad := RectangleCorners(RectangleLayer.Bounds,
     RectangleLayer.RotationDegrees);
   for I := 0 to High(ScreenQuad) do
-    ScreenQuad[I] := Point(FCanvasBounds.Left +
-      Round(LogicalQuad[I].X * FZoom), FCanvasBounds.Top +
-      Round(LogicalQuad[I].Y * FZoom));
+    ScreenQuad[I] := Point(ToScreenX(LogicalQuad[I].X),
+      ToScreenY(LogicalQuad[I].Y));
   Geometry := BuildRotatedSelectionGeometry(ScreenQuad,
     SelectionFrameOffset(RectangleLayer.StrokeWidth, FZoom));
 end;
@@ -920,11 +938,8 @@ begin
   LogicalRect := SelectedLayersLogicalRect;
   if LogicalRect.IsEmpty then
     Exit;
-  Result := Rect(
-    FCanvasBounds.Left + Round(LogicalRect.Left * FZoom),
-    FCanvasBounds.Top + Round(LogicalRect.Top * FZoom),
-    FCanvasBounds.Left + Round(LogicalRect.Right * FZoom),
-    FCanvasBounds.Top + Round(LogicalRect.Bottom * FZoom));
+  Result := Rect(ToScreenX(LogicalRect.Left), ToScreenY(LogicalRect.Top),
+    ToScreenX(LogicalRect.Right), ToScreenY(LogicalRect.Bottom));
   if Result.Width = 0 then
     Inc(Result.Right);
   if Result.Height = 0 then
@@ -992,22 +1007,18 @@ begin
         FDragStartImagePoints := ImageLayer.Points;
         ImageBounds := ImagePointsBounds(ImageLayer.Points);
         FRotationStartValue := 0;
-        CenterX := FCanvasBounds.Left +
-          (ImageBounds.Left + ImageBounds.Right) * 0.5 * FZoom;
-        CenterY := FCanvasBounds.Top +
-          (ImageBounds.Top + ImageBounds.Bottom) * 0.5 * FZoom;
+        CenterX := ToScreenX((ImageBounds.Left + ImageBounds.Right) * 0.5);
+        CenterY := ToScreenY((ImageBounds.Top + ImageBounds.Bottom) * 0.5);
       end
       else
       begin
         RectangleLayer := TVectArtRectangleLayer(
           FDocument[FDragLayerIndex]);
         FRotationStartValue := RectangleLayer.RotationDegrees;
-        CenterX := FCanvasBounds.Left +
-          (RectangleLayer.Bounds.Left + RectangleLayer.Bounds.Right) *
-          0.5 * FZoom;
-        CenterY := FCanvasBounds.Top +
-          (RectangleLayer.Bounds.Top + RectangleLayer.Bounds.Bottom) *
-          0.5 * FZoom;
+        CenterX := ToScreenX((RectangleLayer.Bounds.Left +
+          RectangleLayer.Bounds.Right) * 0.5);
+        CenterY := ToScreenY((RectangleLayer.Bounds.Top +
+          RectangleLayer.Bounds.Bottom) * 0.5);
       end;
       FRotationStartMouseAngle := RadToDeg(ArcTan2(Y - CenterY,
         X - CenterX));
@@ -1143,10 +1154,10 @@ begin
       Exit(True);
     NewPathPoints := Copy(FDragStartPathPoints);
     NewPathPoints[FPathVertexIndex] := TPointF.Create(
-      EnsureRange((X - FCanvasBounds.Left) / FZoom, 0.0,
-        FDocument.CanvasLayer.Width * 1.0),
-      EnsureRange((Y - FCanvasBounds.Top) / FZoom, 0.0,
-        FDocument.CanvasLayer.Height * 1.0));
+      EnsureRange(ToLogicalX(X), FDocument.CanvasLayer.Width * -0.5,
+        FDocument.CanvasLayer.Width * 0.5),
+      EnsureRange(ToLogicalY(Y), FDocument.CanvasLayer.Height * -0.5,
+        FDocument.CanvasLayer.Height * 0.5));
     FDocument.SetPathPoints(FDragLayerIndex, NewPathPoints);
     Exit(True);
   end;
@@ -1209,10 +1220,8 @@ begin
       (FDocument[FDragLayerIndex] is TVectArtImageLayer) then
     begin
       ImageBounds := ImagePointsBounds(FDragStartImagePoints);
-      CenterX := FCanvasBounds.Left +
-        (ImageBounds.Left + ImageBounds.Right) * 0.5 * FZoom;
-      CenterY := FCanvasBounds.Top +
-        (ImageBounds.Top + ImageBounds.Bottom) * 0.5 * FZoom;
+      CenterX := ToScreenX((ImageBounds.Left + ImageBounds.Right) * 0.5);
+      CenterY := ToScreenY((ImageBounds.Top + ImageBounds.Bottom) * 0.5);
       CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
       for I := 0 to High(NewImagePoints) do
         NewImagePoints[I] := RotatePointAround(FDragStartImagePoints[I],
@@ -1225,12 +1234,10 @@ begin
     if not (FDocument[FDragLayerIndex] is TVectArtRectangleLayer) then
       Exit(True);
     RectangleLayer := TVectArtRectangleLayer(FDocument[FDragLayerIndex]);
-    CenterX := FCanvasBounds.Left +
-      (RectangleLayer.Bounds.Left + RectangleLayer.Bounds.Right) *
-      0.5 * FZoom;
-    CenterY := FCanvasBounds.Top +
-      (RectangleLayer.Bounds.Top + RectangleLayer.Bounds.Bottom) *
-      0.5 * FZoom;
+    CenterX := ToScreenX((RectangleLayer.Bounds.Left +
+      RectangleLayer.Bounds.Right) * 0.5);
+    CenterY := ToScreenY((RectangleLayer.Bounds.Top +
+      RectangleLayer.Bounds.Bottom) * 0.5);
     CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
     FDocument.SetRectangleRotation(FDragLayerIndex,
       FRotationStartValue + CurrentMouseAngle - FRotationStartMouseAngle);
@@ -1255,8 +1262,8 @@ begin
       LineUnitY := 0;
     end;
     LogicalHandleDistance := LineSelectionHandleDistance / FZoom;
-    LogicalMouseX := (X - FCanvasBounds.Left) / FZoom;
-    LogicalMouseY := (Y - FCanvasBounds.Top) / FZoom;
+    LogicalMouseX := ToLogicalX(X);
+    LogicalMouseY := ToLogicalY(Y);
     if FDragHandle = vshTopLeft then
       FDocument.SetLinePoints(FDragLayerIndex,
         TPointF.Create(LogicalMouseX + LineUnitX * LogicalHandleDistance,
@@ -1319,8 +1326,8 @@ begin
   HalfSize := PATH_VERTEX_HANDLE_SIZE div 2;
   for I := 0 to High(PathLayer.Points) do
   begin
-    X := FCanvasBounds.Left + Round(PathLayer.Points[I].X * FZoom);
-    Y := FCanvasBounds.Top + Round(PathLayer.Points[I].Y * FZoom);
+    X := ToScreenX(PathLayer.Points[I].X);
+    Y := ToScreenY(PathLayer.Points[I].Y);
     Result[I] := Rect(X - HalfSize, Y - HalfSize,
       X - HalfSize + PATH_VERTEX_HANDLE_SIZE,
       Y - HalfSize + PATH_VERTEX_HANDLE_SIZE);
@@ -1443,11 +1450,9 @@ begin
     Center := TPointF.Create((FDragStartBounds.Left +
       FDragStartBounds.Right) * 0.5, (FDragStartBounds.Top +
       FDragStartBounds.Bottom) * 0.5);
-    StartLogical := TPointF.Create(
-      (FDragStartMouse.X - FCanvasBounds.Left) / FZoom,
-      (FDragStartMouse.Y - FCanvasBounds.Top) / FZoom);
-    CurrentLogical := TPointF.Create((X - FCanvasBounds.Left) / FZoom,
-      (Y - FCanvasBounds.Top) / FZoom);
+    StartLogical := TPointF.Create(ToLogicalX(FDragStartMouse.X),
+      ToLogicalY(FDragStartMouse.Y));
+    CurrentLogical := TPointF.Create(ToLogicalX(X), ToLogicalY(Y));
     LocalStart := RotatePointAround(StartLogical, Center, -RotationDegrees);
     LocalCurrent := RotatePointAround(CurrentLogical, Center,
       -RotationDegrees);

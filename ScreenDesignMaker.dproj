@@ -1,0 +1,149 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{65AA0E2E-CE0A-4BAE-A761-66AB46E5525D}</ProjectGuid>
+        <ProjectVersion>20.4</ProjectVersion>
+        <FrameworkType>VCL</FrameworkType>
+        <Config Condition="'$(Config)'==''">Debug</Config>
+        <Platform Condition="'$(Platform)'==''">Win64</Platform>
+        <ProjectName Condition="'$(ProjectName)'==''">ScreenDesignMaker</ProjectName>
+        <TargetedPlatforms>2</TargetedPlatforms>
+        <AppType>Application</AppType>
+        <MainSource>ScreenDesignMaker.dpr</MainSource>
+        <Base>True</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Debug' or '$(Cfg_1)'!=''">
+        <Cfg_1>true</Cfg_1>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win64' and '$(Cfg_1)'=='true') or '$(Cfg_1_Win64)'!=''">
+        <Cfg_1_Win64>true</Cfg_1_Win64>
+        <CfgParent>Cfg_1</CfgParent>
+        <Cfg_1>true</Cfg_1>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Release' or '$(Cfg_2)'!=''">
+        <Cfg_2>true</Cfg_2>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Base)'!=''">
+        <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;Vcl;Winapi;$(DCC_Namespace)</DCC_Namespace>
+        <SanitizedProjectName>ScreenDesignMaker</SanitizedProjectName>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_1)'!=''">
+        <DCC_Define>DEBUG;$(DCC_Define)</DCC_Define>
+        <DCC_DebugInformation>1</DCC_DebugInformation>
+        <DCC_LocalDebugSymbols>true</DCC_LocalDebugSymbols>
+        <DCC_Optimize>false</DCC_Optimize>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
+        <BT_BuildType>Debug</BT_BuildType>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_2)'!=''">
+        <DCC_Define>RELEASE;$(DCC_Define)</DCC_Define>
+        <DCC_DebugInformation>0</DCC_DebugInformation>
+        <DCC_LocalDebugSymbols>false</DCC_LocalDebugSymbols>
+        <DCC_Optimize>true</DCC_Optimize>
+    </PropertyGroup>
+    <ItemGroup>
+        <DelphiCompile Include="$(MainSource)">
+            <MainSource>MainSource</MainSource>
+        </DelphiCompile>
+        <DCCReference Include="Lib\TextRenderer\TextRendererSkiaBootstrap.pas"/>
+        <DCCReference Include="Lib\TextRenderer\TextRendererTypes.pas"/>
+        <DCCReference Include="Lib\TextRenderer\TextRenderer.pas"/>
+        <DCCReference Include="Lib\TextRenderer\TextRendererSkiaRuntime.pas"/>
+        <DCCReference Include="Lib\TextRenderer\TextRendererSkia.pas"/>
+        <DCCReference Include="Lib\DarkMenu\VectArtDarkPopupMenu.pas"/>
+        <DCCReference Include="Lib\ShortcutAction\ShortcutAction.pas"/>
+        <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas"/>
+        <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas"/>
+        <DCCReference Include="Source\Shell\VectArtDesignerMainForm.pas">
+            <Form>MainForm</Form>
+        </DCCReference>
+        <DCCReference Include="Source\Shell\VectArtDesignerEditActionsUI.pas"/>
+        <DCCReference Include="Source\ObjectProperties\VectArtDesignerStrokeStyleCombo.pas"/>
+        <DCCReference Include="Source\Shell\VectArtDesignerLineToolbar.pas"/>
+        <DCCReference Include="Source\Shell\VectArtDesignerLineStyleControls.pas"/>
+        <DCCReference Include="Source\Shell\VectArtDesignerCanvasSettingsDialog.pas"/>
+        <DCCReference Include="Source\Core\VectArtDesignerDocument.pas"/>
+        <DCCReference Include="Source\Core\VectArtDesignerGeometry.pas"/>
+        <DCCReference Include="Source\Rendering\VectArtDesignerRenderer.pas"/>
+        <DCCReference Include="Source\Core\VectArtDesignerContext.pas"/>
+        <DCCReference Include="Source\Core\VectArtDesignerEditorState.pas"/>
+        <DCCReference Include="Source\Core\Commands\VectArtDesignerEditCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\VectArtDesignerLayerStructureCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\VectArtDesignerLayerBatchCommands.pas"/>
+        <DCCReference Include="Source\Core\VectArtDesignerEditHistory.pas"/>
+        <DCCReference Include="Source\Persistence\VectArtDesignerDocumentJson.pas"/>
+        <DCCReference Include="Source\Editor\VectArtDesignerCanvas.pas"/>
+        <DCCReference Include="Source\Editor\VectArtDesignerCanvasInteraction.pas"/>
+        <DCCReference Include="Source\Editor\VectArtDesignerShapeCreation.pas"/>
+        <DCCReference Include="Source\Editor\VectArtDesignerKeyboardMovement.pas"/>
+        <DCCReference Include="Source\Editor\VectArtDesignerEditorWorkspaceFrame.pas">
+            <Form>EditorWorkspaceFrame</Form>
+            <DesignClass>TFrame</DesignClass>
+        </DCCReference>
+        <DCCReference Include="Source\Editor\VectArtDesignerSelectionGeometry.pas"/>
+        <DCCReference Include="Source\Layers\VectArtDesignerLayerList.pas"/>
+        <DCCReference Include="Source\Layers\VectArtDesignerLayerRenderer.pas"/>
+        <DCCReference Include="Source\Layers\VectArtDesignerLayerActions.pas"/>
+        <DCCReference Include="Source\Layers\VectArtDesignerLayerOperations.pas"/>
+        <DCCReference Include="Source\Layers\VectArtDesignerLayerDuplication.pas"/>
+        <DCCReference Include="Source\Layers\VectArtDesignerLayerPanelFrame.pas">
+            <Form>LayerPanelFrame</Form>
+            <DesignClass>TFrame</DesignClass>
+        </DCCReference>
+        <DCCReference Include="Source\Layout\VectArtDesignerDockManager.pas"/>
+        <DCCReference Include="Source\Layout\VectArtDesignerToolFrames.pas"/>
+        <DCCReference Include="Source\ObjectProperties\VectArtDesignerObjectPropertiesControl.pas"/>
+        <DCCReference Include="Source\ObjectProperties\VectArtDesignerObjectPropertiesFrame.pas">
+            <Form>ObjectPropertiesFrame</Form>
+            <DesignClass>TFrame</DesignClass>
+        </DCCReference>
+        <DCCReference Include="Source\ToolPalette\VectArtDesignerToolPaletteFrame.pas">
+            <Form>ToolPaletteFrame</Form>
+            <DesignClass>TFrame</DesignClass>
+        </DCCReference>
+        <DCCReference Include="Source\ToolPalette\VectArtDesignerToolPalette.pas"/>
+        <BuildConfiguration Include="Base">
+            <Key>Base</Key>
+        </BuildConfiguration>
+        <BuildConfiguration Include="Debug">
+            <Key>Cfg_1</Key>
+            <CfgParent>Base</CfgParent>
+        </BuildConfiguration>
+        <BuildConfiguration Include="Release">
+            <Key>Cfg_2</Key>
+            <CfgParent>Base</CfgParent>
+        </BuildConfiguration>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Delphi.Personality.12</Borland.Personality>
+        <Borland.ProjectType>VCLApplication</Borland.ProjectType>
+        <BorlandProject>
+            <Delphi.Personality>
+                <Source>
+                    <Source Name="MainSource">ScreenDesignMaker.dpr</Source>
+                </Source>
+            </Delphi.Personality>
+            <Platforms>
+                <Platform value="Win32">False</Platform>
+                <Platform value="Win64">True</Platform>
+            </Platforms>
+        </BorlandProject>
+        <ProjectFileVersion>12</ProjectFileVersion>
+    </ProjectExtensions>
+    <Import Project="$(BDS)\Bin\CodeGear.Delphi.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Delphi.Targets')"/>
+    <Import Project="$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj" Condition="Exists('$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj')"/>
+    <Target Name="PrepareScreenDesignOutput" BeforeTargets="Build">
+        <MakeDir Directories="$(ScreenDesignBuildDir);$(DCC_DcuOutput)"/>
+    </Target>
+    <Target Name="CopyScreenDesignSkiaRuntime" AfterTargets="Build" Condition="'$(Platform)'=='Win64'">
+        <Copy SourceFiles="$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll" DestinationFiles="$(ScreenDesignBuildDir)\sk4d.dll" SkipUnchangedFiles="true"/>
+    </Target>
+</Project>

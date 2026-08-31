@@ -102,6 +102,7 @@ begin
           ImageValue.Locked := False;
           ImageValue.Opacity := ImageLayer.Opacity;
           ImageValue.PngData := Copy(ImageLayer.PngData);
+          ImageValue.SourceFileName := ImageLayer.SourceFileName;
           ImageValue.SourceKind := ImageLayer.SourceKind;
           ImageValue.Visible := ImageLayer.Visible;
           for J := 0 to High(ImageLayer.Points) do

@@ -49,15 +49,13 @@ procedure TVectArtLayerOperations.AddRectangle;
 var
   AfterSelection: TArray<Integer>;
   BeforeSelection: TArray<Integer>;
-  CanvasLayer: TVectArtCanvasLayer;
   Data: TVectArtRectangleData;
   Index: Integer;
   Left: Single;
   Top: Single;
 begin
-  CanvasLayer := FDocument.CanvasLayer;
-  Left := (CanvasLayer.Width - DEFAULT_RECTANGLE_WIDTH) / 2;
-  Top := (CanvasLayer.Height - DEFAULT_RECTANGLE_HEIGHT) / 2;
+  Left := -DEFAULT_RECTANGLE_WIDTH / 2;
+  Top := -DEFAULT_RECTANGLE_HEIGHT / 2;
   Data.Bounds := TRectF.Create(Left, Top, Left + DEFAULT_RECTANGLE_WIDTH,
     Top + DEFAULT_RECTANGLE_HEIGHT);
   if FEditorState <> nil then

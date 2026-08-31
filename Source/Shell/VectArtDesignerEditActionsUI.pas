@@ -5,15 +5,12 @@ interface
 
 uses
   System.Classes, System.Types, Vcl.Controls, Vcl.ExtCtrls,
-  VectArtDarkPopupMenu, VectArtDesignerDocument,
-  VectArtDesignerEditHistory;
+  VectArtDarkPopupMenu, VectArtDesignerEditHistory;
 
 type
   TVectArtEditShortcutControl = class(TCustomControl)
   private
     FHistory: TVectArtEditHistory;
-    FOnOpenRequest: TNotifyEvent;
-    FOnSaveRequest: TNotifyEvent;
     function ButtonEnabled(Index: Integer): Boolean;
     function ButtonRect(Index: Integer): TRect;
     procedure DrawButton(Index: Integer; const Caption: string);
@@ -27,54 +24,35 @@ type
     constructor Create(AOwner: TComponent); override;
     procedure RefreshState;
     property History: TVectArtEditHistory read FHistory write SetHistory;
-    property OnOpenRequest: TNotifyEvent read FOnOpenRequest
-      write FOnOpenRequest;
-    property OnSaveRequest: TNotifyEvent read FOnSaveRequest
-      write FOnSaveRequest;
   end;
 
   TVectArtEditActionsUI = class(TComponent)
   private
     FCanvasSettingsItem: TPanel;
     FCanvasSettingsVisible: Boolean;
-    FDocument: TVectArtDocument;
     FHistory: TVectArtEditHistory;
     FMenu: TVectArtDarkPopupMenu;
-    FMifCompatibleModeItem: TPanel;
-    FOnOpenRequest: TNotifyEvent;
-    FOnSaveRequest: TNotifyEvent;
     FOnCanvasSettingsRequest: TNotifyEvent;
     FRedoItem: TPanel;
     FShortcutControl: TVectArtEditShortcutControl;
-    FStandardModeItem: TPanel;
     FUndoItem: TPanel;
     procedure CanvasSettingsClick(Sender: TObject);
-    procedure MifCompatibleModeClick(Sender: TObject);
     function NewMenuItem(const Caption: string; Top: Integer;
       ClickHandler: TNotifyEvent): TPanel;
     procedure RedoClick(Sender: TObject);
-    procedure SetDocument(const Value: TVectArtDocument);
     procedure SetHistory(const Value: TVectArtEditHistory);
     procedure SetCanvasSettingsVisible(const Value: Boolean);
-    procedure SetOnOpenRequest(const Value: TNotifyEvent);
-    procedure SetOnSaveRequest(const Value: TNotifyEvent);
-    procedure StandardModeClick(Sender: TObject);
     procedure UndoClick(Sender: TObject);
   public
     constructor CreateForHosts(AOwner: TComponent; AMainForm,
       AMenuBar, AShortcutHost: TWinControl);
     procedure RefreshState;
-    property Document: TVectArtDocument read FDocument write SetDocument;
     property History: TVectArtEditHistory read FHistory write SetHistory;
     property Menu: TVectArtDarkPopupMenu read FMenu;
     property CanvasSettingsVisible: Boolean read FCanvasSettingsVisible
       write SetCanvasSettingsVisible;
     property OnCanvasSettingsRequest: TNotifyEvent
       read FOnCanvasSettingsRequest write FOnCanvasSettingsRequest;
-    property OnOpenRequest: TNotifyEvent read FOnOpenRequest
-      write SetOnOpenRequest;
-    property OnSaveRequest: TNotifyEvent read FOnSaveRequest
-      write SetOnSaveRequest;
   end;
 
 implementation
@@ -83,7 +61,7 @@ uses
   System.Math, Vcl.Graphics;
 
 const
-  BUTTON_COUNT = 5;
+  BUTTON_COUNT = 2;
   BUTTON_WIDTH = 78;
   COLOR_BACKGROUND = TColor($00282828);
   COLOR_BUTTON = TColor($00303030);
@@ -95,10 +73,8 @@ const
 function TVectArtEditShortcutControl.ButtonEnabled(Index: Integer): Boolean;
 begin
   case Index of
-    1: Result := Assigned(FOnOpenRequest);
-    2: Result := Assigned(FOnSaveRequest);
-    3: Result := (FHistory <> nil) and FHistory.CanUndo;
-    4: Result := (FHistory <> nil) and FHistory.CanRedo;
+    0: Result := (FHistory <> nil) and FHistory.CanUndo;
+    1: Result := (FHistory <> nil) and FHistory.CanRedo;
   else
     Result := False;
   end;
@@ -150,40 +126,12 @@ begin
     Canvas.Pen.Color := COLOR_DISABLED;
   Canvas.Brush.Style := bsClear;
   case Index of
-    0:
-      begin
-        Canvas.Rectangle(Bounds.Left + 4, Bounds.Top + 2,
-          Bounds.Right - 3, Bounds.Bottom - 2);
-        Canvas.MoveTo(Bounds.Left + 10, Bounds.Top + 6);
-        Canvas.LineTo(Bounds.Left + 10, Bounds.Bottom - 6);
-        Canvas.MoveTo(Bounds.Left + 6, Bounds.Top + 10);
-        Canvas.LineTo(Bounds.Right - 6, Bounds.Top + 10);
-      end;
-    1:
-      begin
-        Canvas.MoveTo(Bounds.Left + 2, Bounds.Top + 7);
-        Canvas.LineTo(Bounds.Left + 8, Bounds.Top + 7);
-        Canvas.LineTo(Bounds.Left + 11, Bounds.Top + 4);
-        Canvas.LineTo(Bounds.Right - 2, Bounds.Top + 4);
-        Canvas.LineTo(Bounds.Right - 4, Bounds.Bottom - 3);
-        Canvas.LineTo(Bounds.Left + 3, Bounds.Bottom - 3);
-        Canvas.LineTo(Bounds.Left + 2, Bounds.Top + 7);
-      end;
-    2:
-      begin
-        Canvas.Rectangle(Bounds.Left + 3, Bounds.Top + 2,
-          Bounds.Right - 3, Bounds.Bottom - 2);
-        Canvas.Rectangle(Bounds.Left + 7, Bounds.Top + 3,
-          Bounds.Right - 7, Bounds.Top + 9);
-        Canvas.Rectangle(Bounds.Left + 7, Bounds.Top + 13,
-          Bounds.Right - 7, Bounds.Bottom - 3);
-      end;
-    3, 4:
+    0, 1:
       begin
         Canvas.Arc(Bounds.Left + 3, Bounds.Top + 4, Bounds.Right - 3,
           Bounds.Bottom - 2, Bounds.Right - 4, Bounds.Top + 7,
           Bounds.Left + 4, Bounds.Top + 7);
-        if Index = 3 then
+        if Index = 0 then
         begin
           Canvas.MoveTo(Bounds.Left + 3, Bounds.Top + 7);
           Canvas.LineTo(Bounds.Left + 8, Bounds.Top + 3);
@@ -209,13 +157,9 @@ begin
   if Button = mbLeft then
   begin
     Index := EnsureRange(X div BUTTON_WIDTH, 0, BUTTON_COUNT - 1);
-    if (Index = 1) and Assigned(FOnOpenRequest) then
-      FOnOpenRequest(Self)
-    else if (Index = 2) and Assigned(FOnSaveRequest) then
-      FOnSaveRequest(Self)
-    else if (Index = 3) and (FHistory <> nil) and FHistory.CanUndo then
+    if (Index = 0) and (FHistory <> nil) and FHistory.CanUndo then
       FHistory.Undo
-    else if (Index = 4) and (FHistory <> nil) and FHistory.CanRedo then
+    else if (Index = 1) and (FHistory <> nil) and FHistory.CanRedo then
       FHistory.Redo;
   end;
   inherited MouseDown(Button, Shift, X, Y);
@@ -224,7 +168,7 @@ end;
 procedure TVectArtEditShortcutControl.Paint;
 const
   CAPTIONS: array[0..BUTTON_COUNT - 1] of string =
-    ('New', 'Open', 'Save', 'Undo', 'Redo');
+    ('Undo', 'Redo');
 var
   I: Integer;
 begin
@@ -253,28 +197,16 @@ constructor TVectArtEditActionsUI.CreateForHosts(AOwner: TComponent;
 begin
   inherited Create(AOwner);
   FMenu := TVectArtDarkPopupMenu.CreateForHosts(Self, AMainForm, AMenuBar,
-    '編集', 56, 36, 190, 160);
+    '編集', 0, 36, 190, 96);
   FUndoItem := NewMenuItem('Undo    Ctrl+Z', 0, UndoClick);
   FRedoItem := NewMenuItem('Redo    Ctrl+Y', 32, RedoClick);
   FCanvasSettingsItem := NewMenuItem('キャンバスの設定', 64,
     CanvasSettingsClick);
-  FMifCompatibleModeItem := NewMenuItem('□ モード: MIF互換', 96,
-    MifCompatibleModeClick);
-  FStandardModeItem := NewMenuItem('✓ モード: 標準', 128,
-    StandardModeClick);
   FCanvasSettingsVisible := True;
 
   FShortcutControl := TVectArtEditShortcutControl.Create(Self);
   FShortcutControl.Parent := AShortcutHost;
   FShortcutControl.Align := alClient;
-end;
-
-procedure TVectArtEditActionsUI.MifCompatibleModeClick(Sender: TObject);
-begin
-  FMenu.Close;
-  if FDocument <> nil then
-    FDocument.EditingMode := vemMifCompatible;
-  RefreshState;
 end;
 
 procedure TVectArtEditActionsUI.CanvasSettingsClick(Sender: TObject);
@@ -306,23 +238,6 @@ begin
   else FUndoItem.Font.Color := COLOR_DISABLED;
   if FRedoItem.Enabled then FRedoItem.Font.Color := COLOR_TEXT
   else FRedoItem.Font.Color := COLOR_DISABLED;
-  if (FDocument <> nil) and
-    (FDocument.EditingMode = vemMifCompatible) then
-  begin
-    FMifCompatibleModeItem.Caption := '✓ モード: MIF互換';
-    FStandardModeItem.Caption := '□ モード: 標準';
-  end
-  else
-  begin
-    FMifCompatibleModeItem.Caption := '□ モード: MIF互換';
-    FStandardModeItem.Caption := '✓ モード: 標準';
-  end;
-end;
-
-procedure TVectArtEditActionsUI.SetDocument(const Value: TVectArtDocument);
-begin
-  FDocument := Value;
-  RefreshState;
 end;
 
 procedure TVectArtEditActionsUI.SetHistory(const Value: TVectArtEditHistory);
@@ -338,39 +253,9 @@ begin
   FCanvasSettingsVisible := Value;
   FCanvasSettingsItem.Visible := Value;
   if Value then
-  begin
-    FMifCompatibleModeItem.Top := 96;
-    FStandardModeItem.Top := 128;
-    FMenu.PopupHeight := 160
-  end
+    FMenu.PopupHeight := 96
   else
-  begin
-    FMifCompatibleModeItem.Top := 64;
-    FStandardModeItem.Top := 96;
-    FMenu.PopupHeight := 128;
-  end;
-end;
-
-procedure TVectArtEditActionsUI.SetOnOpenRequest(const Value: TNotifyEvent);
-begin
-  FOnOpenRequest := Value;
-  FShortcutControl.OnOpenRequest := Value;
-  RefreshState;
-end;
-
-procedure TVectArtEditActionsUI.SetOnSaveRequest(const Value: TNotifyEvent);
-begin
-  FOnSaveRequest := Value;
-  FShortcutControl.OnSaveRequest := Value;
-  RefreshState;
-end;
-
-procedure TVectArtEditActionsUI.StandardModeClick(Sender: TObject);
-begin
-  FMenu.Close;
-  if FDocument <> nil then
-    FDocument.EditingMode := vemStandard;
-  RefreshState;
+    FMenu.PopupHeight := 64;
 end;
 
 procedure TVectArtEditActionsUI.UndoClick(Sender: TObject);

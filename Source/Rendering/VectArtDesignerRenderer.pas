@@ -1,5 +1,5 @@
-// Documentの表示オブジェクトを、各ホストで共有できる透明RGBA8画像へ描画する。
-// 現在の線種と線端マーカー描画はMIF互換装飾を使用する。
+﻿// Documentの表示オブジェクトを、各ホストで共有できる透明RGBA8画像へ描画する。
+// 線種、線端、接合形式をSkiaのストロークへ反映する。
 unit VectArtDesignerRenderer;
 
 interface
@@ -121,7 +121,6 @@ var
   ImagePaint: ISkPaint;
   RasterImage: ISkImage;
   EdgeWidth: Single;
-  MarkerGeometry: TVectArtMarkerGeometry;
   SignedHeight: Single;
   RotationDegrees: Single;
   Layer: TVectArtLayer;
@@ -137,36 +136,6 @@ var
   StrokePaint: ISkPaint;
   Surface: ISkSurface;
 
-  procedure DrawMarker(Marker: TVectArtMifLineMarker; const Tip,
-    InsidePoint: TPointF; MarkerSize: Single; MifAntiAlias: Boolean);
-  var
-    K: Integer;
-    MarkerPath: ISkPath;
-    MarkerPathBuilder: ISkPathBuilder;
-  begin
-    MarkerGeometry := BuildMifLineMarkerGeometry(Ord(Marker), Tip, InsidePoint,
-      LineLayer.StrokeWidth, MarkerSize);
-    if Length(MarkerGeometry.PrimaryPoints) < 2 then Exit;
-    MarkerPathBuilder := TSkPathBuilder.Create;
-    MarkerPathBuilder.MoveTo(MarkerGeometry.PrimaryPoints[0]);
-    for K := 1 to High(MarkerGeometry.PrimaryPoints) do
-      MarkerPathBuilder.LineTo(MarkerGeometry.PrimaryPoints[K]);
-    if MarkerGeometry.PrimaryClosed then MarkerPathBuilder.Close;
-    MarkerPath := MarkerPathBuilder.Detach;
-    if MarkerGeometry.Filled then
-    begin
-      Paint.Color := StrokePaint.Color;
-      Paint.AntiAlias := MifAntiAlias;
-      Canvas.DrawPath(MarkerPath, Paint);
-    end
-    else
-    begin
-      StrokePaint.PathEffect := nil;
-      StrokePaint.StrokeCap := TSkStrokeCap.Round;
-      StrokePaint.StrokeWidth := Max(LineLayer.StrokeWidth, 0.1);
-      Canvas.DrawPath(MarkerPath, StrokePaint);
-    end;
-  end;
 begin
   if Document = nil then
     raise EArgumentNilException.Create('Document');
@@ -200,6 +169,7 @@ begin
   ImagePaint := TSkPaint.Create;
   ImagePaint.AntiAlias := True;
   Canvas.Scale(ScaleX, ScaleY);
+  Canvas.Translate(CanvasLayer.Width * 0.5, CanvasLayer.Height * 0.5);
   for I := 1 to Document.LayerCount - 1 do
   begin
     Layer := Document[I];
@@ -244,7 +214,7 @@ begin
     if Layer is TVectArtLineLayer then
     begin
       LineLayer := TVectArtLineLayer(Layer);
-      StrokePaint.AntiAlias := LineLayer.MifAntiAlias;
+      StrokePaint.AntiAlias := True;
       StrokeWidth := Max(Max(LineLayer.StrokeWidth, 0.1),
         MinimumStrokeWidth);
       StrokePaint.Color := VclColorToAlphaColor(LineLayer.StrokeColor,
@@ -272,10 +242,6 @@ begin
         StrokePaint.StrokeJoin := TSkStrokeJoin.Miter;
       end;
       Canvas.DrawLine(LineLayer.StartPoint, LineLayer.EndPoint, StrokePaint);
-      DrawMarker(LineLayer.MifStartMarker, LineLayer.StartPoint,
-        LineLayer.EndPoint, LineLayer.MifStartMarkerSize, LineLayer.MifAntiAlias);
-      DrawMarker(LineLayer.MifEndMarker, LineLayer.EndPoint,
-        LineLayer.StartPoint, LineLayer.MifEndMarkerSize, LineLayer.MifAntiAlias);
       Continue;
     end;
     if Layer is TVectArtPathLayer then

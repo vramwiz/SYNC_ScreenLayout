@@ -33,7 +33,6 @@ begin
       EditorForm.Position := poScreenCenter;
       EditorForm.SetFileDropCaptionEnabled(True);
       EditorForm.SetCanvasSettingsVisible(False);
-      EditorForm.SetFileMenuVisible(False);
       EditorForm.SetReferenceBackgroundRgba(BackgroundPixels,
         BackgroundWidth, BackgroundHeight);
       if (SerializedData <> '') and

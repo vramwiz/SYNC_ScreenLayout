@@ -1,4 +1,4 @@
-// 図形作成ツールの入力状態、プレビュー、新規レイヤー確定を管理する。
+﻿// 図形作成ツールの入力状態、プレビュー、新規レイヤー確定を管理する。
 unit VectArtDesignerShapeCreation;
 
 interface
@@ -48,7 +48,7 @@ implementation
 
 uses
   System.Math, System.SysUtils,
-  VectArtDesignerLayerStructureCommands;
+  VectArtDesignerGeometry, VectArtDesignerLayerStructureCommands;
 
 const
   MIN_DRAG_SIZE = 3;
@@ -71,18 +71,17 @@ begin
     FCurrentPoint.Y - FStartPoint.Y) < MIN_DRAG_SIZE then
     Exit;
   Data.StartPoint := TPointF.Create(
-    (FStartPoint.X - FCanvasBounds.Left) / FZoom,
-    (FStartPoint.Y - FCanvasBounds.Top) / FZoom);
+    ScreenToLogicalX(FStartPoint.X, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(FStartPoint.Y, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height));
   Data.EndPoint := TPointF.Create(
-    (FCurrentPoint.X - FCanvasBounds.Left) / FZoom,
-    (FCurrentPoint.Y - FCanvasBounds.Top) / FZoom);
+    ScreenToLogicalX(FCurrentPoint.X, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(FCurrentPoint.Y, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height));
   Data.Locked := False;
   Data.LineCap := FEditorState.LineCap;
-  Data.MifAntiAlias := FEditorState.LineMifAntiAlias;
-  Data.MifEndMarker := FEditorState.LineMifEndMarker;
-  Data.MifEndMarkerSize := FEditorState.LineMifEndMarkerSize;
-  Data.MifStartMarker := FEditorState.LineMifStartMarker;
-  Data.MifStartMarkerSize := FEditorState.LineMifStartMarkerSize;
   Data.LineJoin := FEditorState.LineJoin;
   Data.Name := NextLineName;
   Data.Opacity := FEditorState.RectangleOpacity;
@@ -114,8 +113,10 @@ begin
   SetLength(Data.Points, Length(FPathPoints));
   for I := 0 to High(FPathPoints) do
     Data.Points[I] := TPointF.Create(
-      (FPathPoints[I].X - FCanvasBounds.Left) / FZoom,
-      (FPathPoints[I].Y - FCanvasBounds.Top) / FZoom);
+      ScreenToLogicalX(FPathPoints[I].X, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Width),
+      ScreenToLogicalY(FPathPoints[I].Y, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Height));
   Data.Closed := Closed;
   Data.Filled := Closed;
   Data.FillColor := FEditorState.RectangleFillColor;
@@ -176,10 +177,14 @@ begin
   if (ScreenBounds.Width < MIN_DRAG_SIZE) or
     (ScreenBounds.Height < MIN_DRAG_SIZE) then
     Exit;
-  LogicalLeft := (ScreenBounds.Left - FCanvasBounds.Left) / FZoom;
-  LogicalTop := (ScreenBounds.Top - FCanvasBounds.Top) / FZoom;
-  LogicalRight := (ScreenBounds.Right - FCanvasBounds.Left) / FZoom;
-  LogicalBottom := (ScreenBounds.Bottom - FCanvasBounds.Top) / FZoom;
+  LogicalLeft := ScreenToLogicalX(ScreenBounds.Left, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Width);
+  LogicalTop := ScreenToLogicalY(ScreenBounds.Top, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Height);
+  LogicalRight := ScreenToLogicalX(ScreenBounds.Right, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Width);
+  LogicalBottom := ScreenToLogicalY(ScreenBounds.Bottom, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Height);
   Data.Bounds := TRectF.Create(LogicalLeft, LogicalTop, LogicalRight,
     LogicalBottom);
   Data.FillColor := FEditorState.RectangleFillColor;

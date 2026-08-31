@@ -13,11 +13,27 @@
 - このリポジトリはAviUtl2の画面レイアウトプラグイン専用とし、もう一方は単独アプリとして扱う。
 - このプラグインは、シリアライズされた配置データをもとに画面レイアウトを表示・編集し、
   編集結果を再びシリアライズしてAviUtl2へ返す。
+- 単独アプリ向けのMIF／SVGファイル入出力と、MIF互換／標準の編集モード切替は持たない。
+- 配置データの論理座標はキャンバス中央を `(0, 0)` とし、右方向を+X、下方向を+Yとする。
+- オブジェクトプロパティの `X`、`Y` は、矩形、画像、パス、および複数選択の外接範囲の
+  中心座標を表す。
+- 線のオブジェクトプロパティは `X`、`Y` を中点、`Length` を長さ、`Angle` を角度として扱う。
+  角度は右向きを0度とし、論理座標の+Y方向に合わせて画面上の時計回りを正とする。
+- JSON version 1の左上原点データは、読み込み時に中央原点へ変換し、現在のversion 3として保存する。
+- JSONの画像レイヤーは `sourceFile` で外部画像を参照できる。相対パスはJSONファイルの場所を
+  基準に解決し、参照先が存在しないレイヤーはDocumentへ生成しない。
+- version 2以前の `pngBase64` は既存データ読込の互換用として扱い、新しい外部参照では使用しない。
 
 ## プロジェクト構成
 
 - Delphiプロジェクトはリポジトリルートの `SYNC_ScreenLayout_Filter.dpr` と
   `SYNC_ScreenLayout_Filter.dproj` を使用する。
+- `ScreenDesignMaker.dpr` と `ScreenDesignMaker.dproj` は、同じ編集画面をAviUtl2なしで
+  起動・デバッグするWin64 VCLアプリである。AviUtl2固有のユニットは参照しない。
+- ScreenDesignMakerだけは「ファイル」メニューからDocumentのJSON読込・保存ができる。
+  ファイル選択にはVCLの新しいダイアログ `TFileOpenDialog` と `TFileSaveDialog` を使用する。
+- ScreenDesignMakerの成果物は `Win64\ScreenDesignMaker\Debug` または
+  `Win64\ScreenDesignMaker\Release` へ出力し、`sk4d.dll` も同じ場所へコピーする。
 - プロジェクトから階層を上がる相対参照は使用せず、`Lib` と `Source` 以下への下方向の参照だけを使用する。
 - 画面レイアウトプラグイン固有のホスト処理は `Source\PlacementPlugin` に配置する。
 - 共通UI、モデル、描画、永続化、補助コントロールは、用途に応じて `Source` または `Lib` 以下へ配置する。

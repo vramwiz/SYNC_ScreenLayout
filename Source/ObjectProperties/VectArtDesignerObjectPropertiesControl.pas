@@ -1,5 +1,5 @@
-// 選択Rectangleの位置、サイズ、塗り色を表示・編集するダークテーマ用Controlを提供する。
-// 共通項目と現在のMIF互換装飾を扱い、将来の標準装飾パネルはこのControlへ追記しない。
+﻿// 選択オブジェクトの位置、サイズ、描画属性を表示・編集するダークテーマ用Controlを提供する。
+// 共通項目と線・パスの描画属性を扱う。
 unit VectArtDesignerObjectPropertiesControl;
 
 interface
@@ -526,17 +526,25 @@ end;
 
 procedure TVectArtObjectPropertiesControl.ApplyGeometry;
 var
+  AngleRadians: Double;
   Bounds: TRectF;
   HeightValue: Double;
   I: Integer;
   LayerIndices: TArray<Integer>;
+  LineLayer: TVectArtLineLayer;
   NewBounds: TArray<TRectF>;
+  NewEndPoint: TPointF;
   NewImagePoints: TVectArtImagePoints;
+  NewLeft: Single;
   NewSelectionBounds: TRectF;
+  NewStartPoint: TPointF;
+  NewTop: Single;
   OldBounds: TArray<TRectF>;
   OldPoints: TArray<TPointF>;
   OldImagePoints: TVectArtImagePoints;
+  OldEndPoint: TPointF;
   OldSelectionBounds: TRectF;
+  OldStartPoint: TPointF;
   PathLayer: TVectArtPathLayer;
   ImageLayer: TVectArtImageLayer;
   PathPoints: TArray<TPointF>;
@@ -560,6 +568,33 @@ begin
     RefreshFromDocument;
     Exit;
   end;
+  if (FDocument.SelectionCount = 1) and
+    (FDocument[FDocument.SelectedIndex] is TVectArtLineLayer) then
+  begin
+    LineLayer := TVectArtLineLayer(FDocument[FDocument.SelectedIndex]);
+    OldStartPoint := LineLayer.StartPoint;
+    OldEndPoint := LineLayer.EndPoint;
+    WidthValue := Max(WidthValue, MIN_OBJECT_SIZE);
+    AngleRadians := DegToRad(HeightValue);
+    NewStartPoint := TPointF.Create(
+      XValue - Cos(AngleRadians) * WidthValue * 0.5,
+      YValue - Sin(AngleRadians) * WidthValue * 0.5);
+    NewEndPoint := TPointF.Create(
+      XValue + Cos(AngleRadians) * WidthValue * 0.5,
+      YValue + Sin(AngleRadians) * WidthValue * 0.5);
+    if SameValue(OldStartPoint.X, NewStartPoint.X) and
+      SameValue(OldStartPoint.Y, NewStartPoint.Y) and
+      SameValue(OldEndPoint.X, NewEndPoint.X) and
+      SameValue(OldEndPoint.Y, NewEndPoint.Y) then
+      Exit;
+    FDocument.SetLinePoints(FDocument.SelectedIndex, NewStartPoint,
+      NewEndPoint);
+    if FEditHistory <> nil then
+      FEditHistory.AddApplied(TVectArtLinePointsCommand.Create(FDocument,
+        FDocument.SelectedIndex, OldStartPoint, OldEndPoint, NewStartPoint,
+        NewEndPoint));
+    Exit;
+  end;
   WidthValue := Max(WidthValue, MIN_OBJECT_SIZE);
   HeightValue := Max(HeightValue, MIN_OBJECT_SIZE);
   if (FDocument.SelectionCount = 1) and
@@ -576,17 +611,25 @@ begin
       RefreshFromDocument;
       Exit;
     end;
-    NewImagePoints[0] := TPointF.Create(XValue, YValue);
-    NewImagePoints[1] := TPointF.Create(XValue +
+    NewImagePoints[0] := TPointF.Create(
+      XValue - (OldImagePoints[1].X - OldImagePoints[0].X) / ULength *
+        WidthValue * 0.5 -
+        (OldImagePoints[3].X - OldImagePoints[0].X) / VLength *
+        HeightValue * 0.5,
+      YValue - (OldImagePoints[1].Y - OldImagePoints[0].Y) / ULength *
+        WidthValue * 0.5 -
+        (OldImagePoints[3].Y - OldImagePoints[0].Y) / VLength *
+        HeightValue * 0.5);
+    NewImagePoints[1] := TPointF.Create(NewImagePoints[0].X +
       (OldImagePoints[1].X - OldImagePoints[0].X) / ULength * WidthValue,
-      YValue + (OldImagePoints[1].Y - OldImagePoints[0].Y) / ULength *
-        WidthValue);
-    NewImagePoints[3] := TPointF.Create(XValue +
+      NewImagePoints[0].Y +
+        (OldImagePoints[1].Y - OldImagePoints[0].Y) / ULength * WidthValue);
+    NewImagePoints[3] := TPointF.Create(NewImagePoints[0].X +
       (OldImagePoints[3].X - OldImagePoints[0].X) / VLength * HeightValue,
-      YValue + (OldImagePoints[3].Y - OldImagePoints[0].Y) / VLength *
-        HeightValue);
-    NewImagePoints[2] := TPointF.Create(NewImagePoints[1].X +
-      NewImagePoints[3].X - NewImagePoints[0].X,
+      NewImagePoints[0].Y +
+        (OldImagePoints[3].Y - OldImagePoints[0].Y) / VLength * HeightValue);
+    NewImagePoints[2] := TPointF.Create(
+      NewImagePoints[1].X + NewImagePoints[3].X - NewImagePoints[0].X,
       NewImagePoints[1].Y + NewImagePoints[3].Y - NewImagePoints[0].Y);
     FDocument.SetImagePoints(FDocument.SelectedIndex, NewImagePoints);
     if FEditHistory <> nil then
@@ -608,11 +651,13 @@ begin
     end;
     ScaleX := WidthValue / OldSelectionBounds.Width;
     ScaleY := HeightValue / OldSelectionBounds.Height;
+    NewLeft := XValue - WidthValue * 0.5;
+    NewTop := YValue - HeightValue * 0.5;
     SetLength(PathPoints, Length(OldPoints));
     for PointIndex := 0 to High(OldPoints) do
       PathPoints[PointIndex] := TPointF.Create(
-        XValue + (OldPoints[PointIndex].X - OldSelectionBounds.Left) * ScaleX,
-        YValue + (OldPoints[PointIndex].Y - OldSelectionBounds.Top) * ScaleY);
+        NewLeft + (OldPoints[PointIndex].X - OldSelectionBounds.Left) * ScaleX,
+        NewTop + (OldPoints[PointIndex].Y - OldSelectionBounds.Top) * ScaleY);
     FDocument.SetPathPoints(FDocument.SelectedIndex, PathPoints);
     if FEditHistory <> nil then
       FEditHistory.AddApplied(TVectArtPathPointsCommand.Create(FDocument,
@@ -621,8 +666,9 @@ begin
   end;
   if not SelectedBounds(OldSelectionBounds) then
     Exit;
-  NewSelectionBounds := TRectF.Create(XValue, YValue, XValue + WidthValue,
-    YValue + HeightValue);
+  NewSelectionBounds := TRectF.Create(XValue - WidthValue * 0.5,
+    YValue - HeightValue * 0.5, XValue + WidthValue * 0.5,
+    YValue + HeightValue * 0.5);
   ScaleX := NewSelectionBounds.Width / OldSelectionBounds.Width;
   ScaleY := NewSelectionBounds.Height / OldSelectionBounds.Height;
   LayerIndices := GetSelectedRectangleIndices;
@@ -852,6 +898,7 @@ var
   ColorValue: TColor;
   HeaderText: string;
   HexValue: Integer;
+  IsLineSelection: Boolean;
   SwatchRect: TRect;
 begin
   Canvas.Brush.Color := COLOR_BACKGROUND;
@@ -870,8 +917,19 @@ begin
   Canvas.Font.Color := COLOR_LABEL;
   Canvas.TextOut(12, 43, 'X');
   Canvas.TextOut((ClientWidth div 2) + 4, 43, 'Y');
-  Canvas.TextOut(12, 91, 'Width');
-  Canvas.TextOut((ClientWidth div 2) + 4, 91, 'Height');
+  IsLineSelection := (FDocument <> nil) and
+    (FDocument.SelectionCount = 1) and
+    (FDocument[FDocument.SelectedIndex] is TVectArtLineLayer);
+  if IsLineSelection then
+  begin
+    Canvas.TextOut(12, 91, 'Length');
+    Canvas.TextOut((ClientWidth div 2) + 4, 91, 'Angle (deg)');
+  end
+  else
+  begin
+    Canvas.TextOut(12, 91, 'Width');
+    Canvas.TextOut((ClientWidth div 2) + 4, 91, 'Height');
+  end;
   Canvas.TextOut(12, 139, 'Fill color');
   Canvas.TextOut(12, 190, 'Stroke color');
   Canvas.TextOut(12, 239, 'Stroke width (0 = none)');
@@ -933,8 +991,8 @@ begin
       RectangleLayer := TVectArtRectangleLayer(
         FDocument[FDocument.SelectedIndex]);
       Bounds := RectangleLayer.Bounds;
-      FXEdit.Text := FormatFloat('0.##', Bounds.Left);
-      FYEdit.Text := FormatFloat('0.##', Bounds.Top);
+      FXEdit.Text := FormatFloat('0.##', (Bounds.Left + Bounds.Right) * 0.5);
+      FYEdit.Text := FormatFloat('0.##', (Bounds.Top + Bounds.Bottom) * 0.5);
       FWidthEdit.Text := FormatFloat('0.##', Bounds.Width);
       FHeightEdit.Text := FormatFloat('0.##', Bounds.Height);
       ColorValue := ColorToRGB(RectangleLayer.FillColor);
@@ -965,8 +1023,10 @@ begin
       (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) then
     begin
       ImageLayer := TVectArtImageLayer(FDocument[FDocument.SelectedIndex]);
-      FXEdit.Text := FormatFloat('0.##', ImageLayer.Points[0].X);
-      FYEdit.Text := FormatFloat('0.##', ImageLayer.Points[0].Y);
+      FXEdit.Text := FormatFloat('0.##',
+        (ImageLayer.Points[0].X + ImageLayer.Points[2].X) * 0.5);
+      FYEdit.Text := FormatFloat('0.##',
+        (ImageLayer.Points[0].Y + ImageLayer.Points[2].Y) * 0.5);
       FWidthEdit.Text := FormatFloat('0.##', Hypot(
         ImageLayer.Points[1].X - ImageLayer.Points[0].X,
         ImageLayer.Points[1].Y - ImageLayer.Points[0].Y));
@@ -997,8 +1057,8 @@ begin
     begin
       PathLayer := TVectArtPathLayer(FDocument[FDocument.SelectedIndex]);
       Bounds := PointsBounds(PathLayer.Points);
-      FXEdit.Text := FormatFloat('0.##', Bounds.Left);
-      FYEdit.Text := FormatFloat('0.##', Bounds.Top);
+      FXEdit.Text := FormatFloat('0.##', (Bounds.Left + Bounds.Right) * 0.5);
+      FYEdit.Text := FormatFloat('0.##', (Bounds.Top + Bounds.Bottom) * 0.5);
       FWidthEdit.Text := FormatFloat('0.##', Bounds.Width);
       FHeightEdit.Text := FormatFloat('0.##', Bounds.Height);
       ColorValue := ColorToRGB(PathLayer.FillColor);
@@ -1043,10 +1103,16 @@ begin
       (FDocument[FDocument.SelectedIndex] is TVectArtLineLayer) then
     begin
       LineLayer := TVectArtLineLayer(FDocument[FDocument.SelectedIndex]);
-      FXEdit.Text := FormatFloat('0.##', LineLayer.StartPoint.X);
-      FYEdit.Text := FormatFloat('0.##', LineLayer.StartPoint.Y);
-      FWidthEdit.Text := FormatFloat('0.##', LineLayer.EndPoint.X);
-      FHeightEdit.Text := FormatFloat('0.##', LineLayer.EndPoint.Y);
+      FXEdit.Text := FormatFloat('0.##',
+        (LineLayer.StartPoint.X + LineLayer.EndPoint.X) * 0.5);
+      FYEdit.Text := FormatFloat('0.##',
+        (LineLayer.StartPoint.Y + LineLayer.EndPoint.Y) * 0.5);
+      FWidthEdit.Text := FormatFloat('0.##', Hypot(
+        LineLayer.EndPoint.X - LineLayer.StartPoint.X,
+        LineLayer.EndPoint.Y - LineLayer.StartPoint.Y));
+      FHeightEdit.Text := FormatFloat('0.##', RadToDeg(ArcTan2(
+        LineLayer.EndPoint.Y - LineLayer.StartPoint.Y,
+        LineLayer.EndPoint.X - LineLayer.StartPoint.X)));
       ClearEditValue(FColorEdit);
       FOpacityEdit.Text := FormatFloat('0.##', LineLayer.Opacity * 100);
       StrokeColorValue := ColorToRGB(LineLayer.StrokeColor);
@@ -1056,14 +1122,14 @@ begin
       FStrokeWidthEdit.Text := FormatFloat('0.##', LineLayer.StrokeWidth);
       FMifStrokeStyleCombo.SetPendingItemIndex(Ord(LineLayer.MifStrokeStyle));
       SetEditorsEnabled(True);
-      FXEdit.Enabled := False;
-      FYEdit.Enabled := False;
-      FWidthEdit.Enabled := False;
-      FHeightEdit.Enabled := False;
       FColorEdit.Enabled := False;
       FOpacityEdit.Enabled := False;
       if LineLayer.Locked then
       begin
+        FXEdit.Enabled := False;
+        FYEdit.Enabled := False;
+        FWidthEdit.Enabled := False;
+        FHeightEdit.Enabled := False;
         FStrokeColorEdit.Enabled := False;
         FStrokeWidthEdit.Enabled := False;
         FMifStrokeStyleCombo.Enabled := False;
@@ -1072,8 +1138,8 @@ begin
     else if (FDocument <> nil) and (FDocument.SelectionCount > 1) and
       SelectedBounds(Bounds) then
     begin
-      FXEdit.Text := FormatFloat('0.##', Bounds.Left);
-      FYEdit.Text := FormatFloat('0.##', Bounds.Top);
+      FXEdit.Text := FormatFloat('0.##', (Bounds.Left + Bounds.Right) * 0.5);
+      FYEdit.Text := FormatFloat('0.##', (Bounds.Top + Bounds.Bottom) * 0.5);
       FWidthEdit.Text := FormatFloat('0.##', Bounds.Width);
       FHeightEdit.Text := FormatFloat('0.##', Bounds.Height);
       LayerIndices := GetSelectedRectangleIndices;

@@ -60,7 +60,6 @@
         <DCCReference Include="Source\Shell\VectArtDesignerMainForm.pas">
             <Form>MainForm</Form>
         </DCCReference>
-        <DCCReference Include="Source\Shell\VectArtDesignerFileActionsUI.pas"/>
         <DCCReference Include="Source\Shell\VectArtDesignerEditActionsUI.pas"/>
         <DCCReference Include="Source\ObjectProperties\VectArtDesignerStrokeStyleCombo.pas"/>
         <DCCReference Include="Source\Shell\VectArtDesignerLineToolbar.pas"/>
@@ -75,10 +74,6 @@
         <DCCReference Include="Source\Core\Commands\VectArtDesignerLayerStructureCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\VectArtDesignerLayerBatchCommands.pas"/>
         <DCCReference Include="Source\Core\VectArtDesignerEditHistory.pas"/>
-        <DCCReference Include="Source\Persistence\Mif\VectArtDesignerMifContainer.pas"/>
-        <DCCReference Include="Source\Persistence\Mif\VectArtDesignerMifDocument.pas"/>
-        <DCCReference Include="Source\Persistence\Mif\VectArtDesignerMifDebugLog.pas"/>
-        <DCCReference Include="Source\Persistence\Svg\VectArtDesignerSvgDocument.pas"/>
         <DCCReference Include="Source\Persistence\VectArtDesignerDocumentJson.pas"/>
         <DCCReference Include="Source\Editor\VectArtDesignerCanvas.pas"/>
         <DCCReference Include="Source\Editor\VectArtDesignerCanvasInteraction.pas"/>

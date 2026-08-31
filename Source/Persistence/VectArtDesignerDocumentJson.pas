@@ -8,19 +8,23 @@ uses
 
 // Documentを埋め込み用JSONへ変換する。既存キー名は内部のMif改名後も維持する。
 function SerializeVectArtDocument(Document: TVectArtDocument): string;
-// 既存キーを含むJSONをDocumentへ適用する。Documentを所有しない。
+// 既存キーを含むJSONをDocumentへ適用し、version 1の左上原点座標は中央原点へ移行する。
 function TryDeserializeVectArtDocument(const Text: string;
   Document: TVectArtDocument; out ErrorMessage: string): Boolean;
+// JSONファイルを読み込み、存在しない外部参照を持つレイヤーだけを除外してDocumentへ適用する。
+function TryLoadVectArtDocumentFromJsonFile(const FileName: string;
+  Document: TVectArtDocument; out SkippedReferenceCount: Integer;
+  out ErrorMessage: string): Boolean;
 
 implementation
 
 uses
-  System.Generics.Collections, System.JSON, System.Math, System.NetEncoding,
-  System.SysUtils, System.Types,
+  System.Generics.Collections, System.IOUtils, System.JSON, System.Math,
+  System.NetEncoding, System.SysUtils, System.Types,
   Vcl.Graphics;
 
 const
-  DOCUMENT_FORMAT_VERSION = 1;
+  DOCUMENT_FORMAT_VERSION = 3;
 
 type
   TRequiredJSONValueClass = class of TJSONValue;
@@ -110,8 +114,11 @@ begin
           ImageJson.AddPair('sourceKind', 'logo')
         else
           ImageJson.AddPair('sourceKind', 'image');
-        ImageJson.AddPair('pngBase64',
-          TNetEncoding.Base64.EncodeBytesToString(Image.PngData));
+        if Image.SourceFileName <> '' then
+          ImageJson.AddPair('sourceFile', Image.SourceFileName)
+        else
+          ImageJson.AddPair('pngBase64',
+            TNetEncoding.Base64.EncodeBytesToString(Image.PngData));
         ImageJson.AddPair('opacity', TJSONNumber.Create(Image.Opacity));
         ImageJson.AddPair('visible', TJSONBool.Create(Image.Visible));
         ImageJson.AddPair('locked', TJSONBool.Create(Image.Locked));
@@ -148,13 +155,6 @@ begin
           TJSONNumber.Create(Ord(Line.MifStrokeStyle)));
         LineJson.AddPair('lineCap', TJSONNumber.Create(Ord(Line.LineCap)));
         LineJson.AddPair('lineJoin', TJSONNumber.Create(Ord(Line.LineJoin)));
-        LineJson.AddPair('antiAlias', TJSONBool.Create(Line.MifAntiAlias));
-        LineJson.AddPair('endMarker', TJSONNumber.Create(Ord(Line.MifEndMarker)));
-        LineJson.AddPair('endMarkerSize', TJSONNumber.Create(Line.MifEndMarkerSize));
-        LineJson.AddPair('startMarker',
-          TJSONNumber.Create(Ord(Line.MifStartMarker)));
-        LineJson.AddPair('startMarkerSize',
-          TJSONNumber.Create(Line.MifStartMarkerSize));
         LineJson.AddPair('visible', TJSONBool.Create(Line.Visible));
         LineJson.AddPair('locked', TJSONBool.Create(Line.Locked));
         LayersJson.AddElement(LineJson);
@@ -231,8 +231,9 @@ begin
   end;
 end;
 
-function TryDeserializeVectArtDocument(const Text: string;
-  Document: TVectArtDocument; out ErrorMessage: string): Boolean;
+function TryDeserializeVectArtDocumentCore(const Text, BaseDirectory: string;
+  Document: TVectArtDocument; out SkippedReferenceCount: Integer;
+  out ErrorMessage: string): Boolean;
 var
   Canvas: TVectArtCanvasLayer;
   CanvasColor: Integer;
@@ -247,6 +248,8 @@ var
   DiscardedImage: TVectArtImageData;
   I: Integer;
   ImageData: TArray<TVectArtImageData>;
+  ImageFileName: string;
+  ImageFileValue: TJSONValue;
   ImageValue: TVectArtImageData;
   Json: TJSONValue;
   LayerJson: TJSONObject;
@@ -262,14 +265,17 @@ var
   PointsJson: TJSONArray;
   Root: TJSONObject;
   SelectedIndex: Integer;
+  LoadedSelectedIndex: Integer;
   SourceKind: string;
   LineCapValue: Integer;
   LineJoinValue: Integer;
-  LineMarkerValue: Integer;
+  LegacyOffsetX: Single;
+  LegacyOffsetY: Single;
   MifStrokeStyleValue: Integer;
   Version: Integer;
 begin
   Result := False;
+  SkippedReferenceCount := 0;
   ErrorMessage := '';
   if Document = nil then
   begin
@@ -284,7 +290,7 @@ begin
         raise EConvertError.Create('Serialized layout is not a JSON object');
       Root := TJSONObject(Json);
       Version := ReadInteger(Root, 'version');
-      if Version <> DOCUMENT_FORMAT_VERSION then
+      if not InRange(Version, 1, DOCUMENT_FORMAT_VERSION) then
         raise EConvertError.CreateFmt('Unsupported layout version: %d',
           [Version]);
 
@@ -295,6 +301,16 @@ begin
       CanvasTransparent := ReadBoolean(CanvasJson, 'transparent');
       if (CanvasWidth <= 0) or (CanvasHeight <= 0) then
         raise EConvertError.Create('Canvas size must be positive');
+      if Version = 1 then
+      begin
+        LegacyOffsetX := CanvasWidth * 0.5;
+        LegacyOffsetY := CanvasHeight * 0.5;
+      end
+      else
+      begin
+        LegacyOffsetX := 0;
+        LegacyOffsetY := 0;
+      end;
 
       LayersJson := TJSONArray(RequireValue(Root, 'layers', TJSONArray));
       SetLength(RectangleData, LayersJson.Count);
@@ -310,6 +326,7 @@ begin
         LayerTypes[I] := ReadString(LayerJson, 'type');
         if LayerTypes[I] = 'image' then
         begin
+          ImageValue.SourceFileName := '';
           ImageValue.Name := ReadString(LayerJson, 'name');
           SourceKind := ReadString(LayerJson, 'sourceKind');
           if SourceKind = 'logo' then
@@ -319,8 +336,27 @@ begin
           else
             raise EConvertError.CreateFmt(
               'Image layer %d has an invalid source kind', [I]);
-          ImageValue.PngData := TNetEncoding.Base64.DecodeStringToBytes(
-            ReadString(LayerJson, 'pngBase64'));
+          ImageFileValue := LayerJson.GetValue('sourceFile');
+          if ImageFileValue is TJSONString then
+          begin
+            ImageValue.SourceFileName := TJSONString(ImageFileValue).Value;
+            ImageFileName := ImageValue.SourceFileName;
+            if (ImageFileName <> '') and not TPath.IsPathRooted(ImageFileName)
+              and (BaseDirectory <> '') then
+              ImageFileName := TPath.Combine(BaseDirectory, ImageFileName);
+            if (ImageFileName = '') or not TFile.Exists(ImageFileName) then
+            begin
+              LayerTypes[I] := '';
+              Inc(SkippedReferenceCount);
+              Continue;
+            end;
+            ImageFileName := ExpandFileName(ImageFileName);
+            ImageValue.SourceFileName := ImageFileName;
+            ImageValue.PngData := TFile.ReadAllBytes(ImageFileName);
+          end
+          else
+            ImageValue.PngData := TNetEncoding.Base64.DecodeStringToBytes(
+              ReadString(LayerJson, 'pngBase64'));
           ImageValue.Opacity := ReadSingle(LayerJson, 'opacity');
           ImageValue.Visible := ReadBoolean(LayerJson, 'visible');
           ImageValue.Locked := ReadBoolean(LayerJson, 'locked');
@@ -336,7 +372,8 @@ begin
                 'Image layer %d point %d is invalid', [I, PointIndex]);
             PointJson := TJSONObject(PointsJson.Items[PointIndex]);
             ImageValue.Points[PointIndex] := TPointF.Create(
-              ReadSingle(PointJson, 'x'), ReadSingle(PointJson, 'y'));
+              ReadSingle(PointJson, 'x') - LegacyOffsetX,
+              ReadSingle(PointJson, 'y') - LegacyOffsetY);
           end;
           ImageData[I] := ImageValue;
           Continue;
@@ -345,9 +382,11 @@ begin
         begin
           LineValue.Name := ReadString(LayerJson, 'name');
           LineValue.StartPoint := TPointF.Create(
-            ReadSingle(LayerJson, 'startX'), ReadSingle(LayerJson, 'startY'));
-          LineValue.EndPoint := TPointF.Create(ReadSingle(LayerJson, 'endX'),
-            ReadSingle(LayerJson, 'endY'));
+            ReadSingle(LayerJson, 'startX') - LegacyOffsetX,
+            ReadSingle(LayerJson, 'startY') - LegacyOffsetY);
+          LineValue.EndPoint := TPointF.Create(
+            ReadSingle(LayerJson, 'endX') - LegacyOffsetX,
+            ReadSingle(LayerJson, 'endY') - LegacyOffsetY);
           LineValue.Opacity := ReadSingle(LayerJson, 'opacity');
           LineValue.StrokeColor := TColor(ReadInteger(LayerJson,
             'strokeColor'));
@@ -376,36 +415,6 @@ begin
               Ord(High(TVectArtLineJoin))) then
               LineValue.LineJoin := TVectArtLineJoin(LineJoinValue);
           end;
-          LineValue.MifAntiAlias := True;
-          if LayerJson.GetValue('antiAlias') is TJSONBool then
-            LineValue.MifAntiAlias := TJSONBool(
-              LayerJson.GetValue('antiAlias')).AsBoolean;
-          LineValue.MifEndMarker := vlmNone;
-          LineValue.MifEndMarkerSize := 4.0;
-          if LayerJson.GetValue('endMarker') is TJSONNumber then
-          begin
-            LineMarkerValue := TJSONNumber(
-              LayerJson.GetValue('endMarker')).AsInt;
-            if InRange(LineMarkerValue, Ord(Low(TVectArtMifLineMarker)),
-              Ord(High(TVectArtMifLineMarker))) then
-              LineValue.MifEndMarker := TVectArtMifLineMarker(LineMarkerValue);
-          end;
-          if LayerJson.GetValue('endMarkerSize') is TJSONNumber then
-            LineValue.MifEndMarkerSize := Max(TJSONNumber(
-              LayerJson.GetValue('endMarkerSize')).AsDouble, 1.0);
-          LineValue.MifStartMarker := vlmNone;
-          LineValue.MifStartMarkerSize := 4.0;
-          if LayerJson.GetValue('startMarker') is TJSONNumber then
-          begin
-            LineMarkerValue := TJSONNumber(
-              LayerJson.GetValue('startMarker')).AsInt;
-            if InRange(LineMarkerValue, Ord(Low(TVectArtMifLineMarker)),
-              Ord(High(TVectArtMifLineMarker))) then
-              LineValue.MifStartMarker := TVectArtMifLineMarker(LineMarkerValue);
-          end;
-          if LayerJson.GetValue('startMarkerSize') is TJSONNumber then
-            LineValue.MifStartMarkerSize := Max(TJSONNumber(
-              LayerJson.GetValue('startMarkerSize')).AsDouble, 1.0);
           LineValue.Visible := ReadBoolean(LayerJson, 'visible');
           LineValue.Locked := ReadBoolean(LayerJson, 'locked');
           LineData[I] := LineValue;
@@ -462,7 +471,8 @@ begin
                 'Path layer %d point %d is invalid', [I, PointIndex]);
             PointJson := TJSONObject(PointsJson.Items[PointIndex]);
             PathValue.Points[PointIndex] := TPointF.Create(
-              ReadSingle(PointJson, 'x'), ReadSingle(PointJson, 'y'));
+              ReadSingle(PointJson, 'x') - LegacyOffsetX,
+              ReadSingle(PointJson, 'y') - LegacyOffsetY);
           end;
           PathData[I] := PathValue;
           Continue;
@@ -472,10 +482,10 @@ begin
             [I]);
         Data.Name := ReadString(LayerJson, 'name');
         Data.Bounds := TRectF.Create(
-          ReadSingle(LayerJson, 'left'),
-          ReadSingle(LayerJson, 'top'),
-          ReadSingle(LayerJson, 'right'),
-          ReadSingle(LayerJson, 'bottom'));
+          ReadSingle(LayerJson, 'left') - LegacyOffsetX,
+          ReadSingle(LayerJson, 'top') - LegacyOffsetY,
+          ReadSingle(LayerJson, 'right') - LegacyOffsetX,
+          ReadSingle(LayerJson, 'bottom') - LegacyOffsetY);
         Data.FillColor := TColor(ReadInteger(LayerJson, 'fillColor'));
         Data.Opacity := ReadSingle(LayerJson, 'opacity');
         Data.RotationDegrees := 0.0;
@@ -523,16 +533,21 @@ begin
       Canvas.Height := CanvasHeight;
       Canvas.BackgroundColor := TColor(CanvasColor);
       Canvas.Transparent := CanvasTransparent;
+      LoadedSelectedIndex := -1;
       for I := 0 to High(RectangleData) do
+      begin
         if LayerTypes[I] = 'rectangle' then
           Document.InsertRectangle(Document.LayerCount, RectangleData[I])
         else if LayerTypes[I] = 'line' then
           Document.InsertLine(Document.LayerCount, LineData[I])
         else if LayerTypes[I] = 'image' then
           Document.InsertImage(Document.LayerCount, ImageData[I])
-        else
+        else if LayerTypes[I] = 'path' then
           Document.InsertPath(Document.LayerCount, PathData[I]);
-      Document.SelectedIndex := SelectedIndex;
+        if (LayerTypes[I] <> '') and (SelectedIndex = I + 1) then
+          LoadedSelectedIndex := Document.LayerCount - 1;
+      end;
+      Document.SelectedIndex := LoadedSelectedIndex;
       Document.Changed;
       Result := True;
     except
@@ -541,6 +556,35 @@ begin
     end;
   finally
     Json.Free;
+  end;
+end;
+
+function TryDeserializeVectArtDocument(const Text: string;
+  Document: TVectArtDocument; out ErrorMessage: string): Boolean;
+var
+  SkippedReferenceCount: Integer;
+begin
+  Result := TryDeserializeVectArtDocumentCore(Text, '', Document,
+    SkippedReferenceCount, ErrorMessage);
+end;
+
+function TryLoadVectArtDocumentFromJsonFile(const FileName: string;
+  Document: TVectArtDocument; out SkippedReferenceCount: Integer;
+  out ErrorMessage: string): Boolean;
+var
+  JsonText: string;
+begin
+  Result := False;
+  SkippedReferenceCount := 0;
+  ErrorMessage := '';
+  try
+    JsonText := TFile.ReadAllText(FileName, TEncoding.UTF8);
+    Result := TryDeserializeVectArtDocumentCore(JsonText,
+      ExtractFilePath(ExpandFileName(FileName)), Document,
+      SkippedReferenceCount, ErrorMessage);
+  except
+    on E: Exception do
+      ErrorMessage := E.Message;
   end;
 end;
 
