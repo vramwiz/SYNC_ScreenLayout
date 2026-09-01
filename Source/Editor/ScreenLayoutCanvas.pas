@@ -46,6 +46,7 @@ type
   protected
     function DoMouseWheel(Shift: TShiftState; WheelDelta: Integer;
       MousePos: TPoint): Boolean; override;
+    procedure KeyDown(var Key: Word; Shift: TShiftState); override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState;
       X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
@@ -115,6 +116,32 @@ type
     StartPoint: TPoint;
     EndPoint: TPoint;
   end;
+
+function BuildVertexKindIconPoints(const Bounds: TRect;
+  Kind: TScreenLayoutVertexKind): TArray<TPoint>;
+var
+  CenterX: Integer;
+begin
+  CenterX := (Bounds.Left + Bounds.Right) div 2;
+  if Kind = slvkSharp then
+  begin
+    SetLength(Result, 3);
+    Result[0] := Point(Bounds.Left + 5, Bounds.Top + 5);
+    Result[1] := Point(CenterX, Bounds.Bottom - 5);
+    Result[2] := Point(Bounds.Right - 5, Bounds.Top + 5);
+  end
+  else
+  begin
+    SetLength(Result, 7);
+    Result[0] := Point(Bounds.Left + 5, Bounds.Top + 5);
+    Result[1] := Point(Bounds.Left + 5, Bounds.Bottom - 8);
+    Result[2] := Point(Bounds.Left + 7, Bounds.Bottom - 5);
+    Result[3] := Point(CenterX, Bounds.Bottom - 4);
+    Result[4] := Point(Bounds.Right - 7, Bounds.Bottom - 5);
+    Result[5] := Point(Bounds.Right - 5, Bounds.Bottom - 8);
+    Result[6] := Point(Bounds.Right - 5, Bounds.Top + 5);
+  end;
+end;
 
 function BuildStyledPreviewSegments(const StartPoint, EndPoint: TPoint;
   Width: Single; Style: TVectArtMifStrokeStyle): TArray<TPreviewLineSegment>;
@@ -426,6 +453,20 @@ begin
   Cursor := crDefault;
 end;
 
+procedure TVectArtCanvasControl.KeyDown(var Key: Word;
+  Shift: TShiftState);
+begin
+  FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
+    FCanvasBounds, FZoom);
+  if FShapeCreation.KeyDown(Key, Shift) then
+  begin
+    Key := 0;
+    Invalidate;
+    Exit;
+  end;
+  inherited KeyDown(Key, Shift);
+end;
+
 function TVectArtCanvasControl.GetEditHistory: TVectArtEditHistory;
 begin
   Result := FInteraction.EditHistory;
@@ -448,6 +489,13 @@ begin
   end;
   if Button = mbRight then
   begin
+    CalculateCanvasBounds;
+    FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+    if FInteraction.MouseDown(Button, Shift, X, Y) then
+    begin
+      Invalidate;
+      Exit;
+    end;
     FPanning := True;
     FPanStartMouse := Point(X, Y);
     FPanStartOffset := FPanOffset;
@@ -484,6 +532,7 @@ begin
       MouseCapture := True;
       Cursor := FInteraction.CursorAt(X, Y);
     end;
+    Invalidate;
     Exit;
   end;
   // 左ドラッグは将来の範囲選択用として、この段階では開始しない。
@@ -568,6 +617,9 @@ end;
 procedure TVectArtCanvasControl.Paint;
 begin
   CalculateCanvasBounds;
+  FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+  FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
+    FCanvasBounds, FZoom);
   UpdateRenderedDocument;
   if FDirect2DEnabled then
     try
@@ -633,6 +685,7 @@ end;
 
 procedure TVectArtCanvasControl.PaintDirect2D;
 var
+  BezierHandles: TScreenLayoutBezierHandles;
   CanvasLayer: TVectArtCanvasLayer;
   CellRect: TRect;
   CreationRect: TRect;
@@ -653,6 +706,9 @@ var
   LineStart: TPoint;
   PathPreview: TArray<TPoint>;
   PathVertexRects: TArray<TRect>;
+  SelectedShapeVertexRect: TRect;
+  ShapeKindButtons: TArray<TScreenLayoutVertexKindButton>;
+  ShapeKindIconPoints: TArray<TPoint>;
   ShapeVertexRects: TArray<TRect>;
   LogicalQuad: TVectArtQuad;
   PathLayer: TVectArtPathLayer;
@@ -919,6 +975,43 @@ begin
         Direct2DCanvas.Brush.Color := COLOR_SELECTION;
         Direct2DCanvas.FrameRect(ShapeVertexRects[I]);
       end;
+      if FInteraction.SelectedShapeVertexRect(SelectedShapeVertexRect) then
+      begin
+        Direct2DCanvas.Brush.Color := clWhite;
+        Direct2DCanvas.FillRect(SelectedShapeVertexRect);
+        Direct2DCanvas.Brush.Color := COLOR_SELECTION;
+        Direct2DCanvas.FrameRect(SelectedShapeVertexRect);
+      end;
+      if FInteraction.SelectedShapeBezierHandles(BezierHandles) then
+      begin
+        SetLength(ShapeKindIconPoints, 2);
+        ShapeKindIconPoints[0] := BezierHandles.IncomingPoint;
+        ShapeKindIconPoints[1] := BezierHandles.OutgoingPoint;
+        Direct2DCanvas.Pen.Color := COLOR_SELECTION;
+        Direct2DCanvas.Pen.Style := psDot;
+        Direct2DCanvas.Polyline(ShapeKindIconPoints);
+        Direct2DCanvas.Pen.Style := psSolid;
+        Direct2DCanvas.Brush.Color := clWhite;
+        Direct2DCanvas.FillRect(BezierHandles.IncomingRect);
+        Direct2DCanvas.FillRect(BezierHandles.OutgoingRect);
+        Direct2DCanvas.Brush.Color := COLOR_SELECTION;
+        Direct2DCanvas.FrameRect(BezierHandles.IncomingRect);
+        Direct2DCanvas.FrameRect(BezierHandles.OutgoingRect);
+      end;
+      ShapeKindButtons := FInteraction.SelectedShapeVertexKindButtons;
+      for I := 0 to High(ShapeKindButtons) do
+      begin
+        if ShapeKindButtons[I].Selected then
+          Direct2DCanvas.Brush.Color := TColor($00F0C060)
+        else
+          Direct2DCanvas.Brush.Color := clWhite;
+        Direct2DCanvas.FillRect(ShapeKindButtons[I].Bounds);
+        Direct2DCanvas.Brush.Color := COLOR_SELECTION;
+        Direct2DCanvas.FrameRect(ShapeKindButtons[I].Bounds);
+        ShapeKindIconPoints := BuildVertexKindIconPoints(
+          ShapeKindButtons[I].Bounds, ShapeKindButtons[I].Kind);
+        Direct2DCanvas.Polyline(ShapeKindIconPoints);
+      end;
       if FInteraction.RangeSelecting then
       begin
         RangeRect := FInteraction.RangeSelectionRect;
@@ -953,6 +1046,7 @@ end;
 
 procedure TVectArtCanvasControl.PaintGDI;
 var
+  BezierHandles: TScreenLayoutBezierHandles;
   CanvasLayer: TVectArtCanvasLayer;
   CreationRect: TRect;
   CellRect: TRect;
@@ -969,6 +1063,9 @@ var
   LineStart: TPoint;
   PathPreview: TArray<TPoint>;
   PathVertexRects: TArray<TRect>;
+  SelectedShapeVertexRect: TRect;
+  ShapeKindButtons: TArray<TScreenLayoutVertexKindButton>;
+  ShapeKindIconPoints: TArray<TPoint>;
   ShapeVertexRects: TArray<TRect>;
   LogicalQuad: TVectArtQuad;
   PathLayer: TVectArtPathLayer;
@@ -1209,6 +1306,43 @@ begin
     Canvas.FillRect(ShapeVertexRects[I]);
     Canvas.Brush.Color := COLOR_SELECTION;
     Canvas.FrameRect(ShapeVertexRects[I]);
+  end;
+  if FInteraction.SelectedShapeVertexRect(SelectedShapeVertexRect) then
+  begin
+    Canvas.Brush.Color := clWhite;
+    Canvas.FillRect(SelectedShapeVertexRect);
+    Canvas.Brush.Color := COLOR_SELECTION;
+    Canvas.FrameRect(SelectedShapeVertexRect);
+  end;
+  if FInteraction.SelectedShapeBezierHandles(BezierHandles) then
+  begin
+    SetLength(ShapeKindIconPoints, 2);
+    ShapeKindIconPoints[0] := BezierHandles.IncomingPoint;
+    ShapeKindIconPoints[1] := BezierHandles.OutgoingPoint;
+    Canvas.Pen.Color := COLOR_SELECTION;
+    Canvas.Pen.Style := psDot;
+    Canvas.Polyline(ShapeKindIconPoints);
+    Canvas.Pen.Style := psSolid;
+    Canvas.Brush.Color := clWhite;
+    Canvas.FillRect(BezierHandles.IncomingRect);
+    Canvas.FillRect(BezierHandles.OutgoingRect);
+    Canvas.Brush.Color := COLOR_SELECTION;
+    Canvas.FrameRect(BezierHandles.IncomingRect);
+    Canvas.FrameRect(BezierHandles.OutgoingRect);
+  end;
+  ShapeKindButtons := FInteraction.SelectedShapeVertexKindButtons;
+  for I := 0 to High(ShapeKindButtons) do
+  begin
+    if ShapeKindButtons[I].Selected then
+      Canvas.Brush.Color := TColor($00F0C060)
+    else
+      Canvas.Brush.Color := clWhite;
+    Canvas.FillRect(ShapeKindButtons[I].Bounds);
+    Canvas.Brush.Color := COLOR_SELECTION;
+    Canvas.FrameRect(ShapeKindButtons[I].Bounds);
+    ShapeKindIconPoints := BuildVertexKindIconPoints(
+      ShapeKindButtons[I].Bounds, ShapeKindButtons[I].Kind);
+    Canvas.Polyline(ShapeKindIconPoints);
   end;
   if FInteraction.RangeSelecting then
   begin

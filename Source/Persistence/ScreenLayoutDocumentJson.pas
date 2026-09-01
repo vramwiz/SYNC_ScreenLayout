@@ -66,6 +66,9 @@ function SerializeVectArtDocument(Document: TVectArtDocument): string;
 var
   Canvas: TVectArtCanvasLayer;
   CanvasJson: TJSONObject;
+  ContourIndex: Integer;
+  ContourJson: TJSONObject;
+  ContoursJson: TJSONArray;
   I: Integer;
   Image: TVectArtImageLayer;
   ImageJson: TJSONObject;
@@ -80,6 +83,12 @@ var
   RectangleJson: TJSONObject;
   Root: TJSONObject;
   SerializedSelectedIndex: Integer;
+  Shape: TScreenLayoutShapeLayer;
+  ShapeContours: TArray<TScreenLayoutContour>;
+  ShapeJson: TJSONObject;
+  VertexIndex: Integer;
+  VertexJson: TJSONObject;
+  VerticesJson: TJSONArray;
 begin
   if Document = nil then
     raise EArgumentNilException.Create('Document');
@@ -175,6 +184,70 @@ begin
           SerializedSelectedIndex := LayersJson.Count;
         Continue;
       end;
+      if Layer is TScreenLayoutShapeLayer then
+      begin
+        Shape := TScreenLayoutShapeLayer(Layer);
+        ShapeJson := TJSONObject.Create;
+        ShapeJson.AddPair('type', 'shape');
+        ShapeJson.AddPair('name', Shape.Name);
+        ShapeJson.AddPair('opacity', TJSONNumber.Create(Shape.Opacity));
+        ShapeJson.AddPair('fillColor',
+          TJSONNumber.Create(Integer(Shape.FillColor)));
+        ShapeJson.AddPair('fillRule',
+          TJSONNumber.Create(Ord(Shape.FillRule)));
+        ShapeJson.AddPair('strokeColor',
+          TJSONNumber.Create(Integer(Shape.StrokeColor)));
+        ShapeJson.AddPair('strokeWidth',
+          TJSONNumber.Create(Shape.StrokeWidth));
+        ShapeJson.AddPair('strokeStyle',
+          TJSONNumber.Create(Ord(Shape.StrokeStyle)));
+        ShapeJson.AddPair('lineJoin',
+          TJSONNumber.Create(Ord(Shape.StrokeJoin)));
+        ShapeJson.AddPair('antiAlias', TJSONBool.Create(Shape.MifAntiAlias));
+        ShapeJson.AddPair('visible', TJSONBool.Create(Shape.Visible));
+        ShapeJson.AddPair('locked', TJSONBool.Create(Shape.Locked));
+        ContoursJson := TJSONArray.Create;
+        ShapeContours := Shape.Contours;
+        for ContourIndex := 0 to High(ShapeContours) do
+        begin
+          ContourJson := TJSONObject.Create;
+          VerticesJson := TJSONArray.Create;
+          for VertexIndex := 0 to
+            High(ShapeContours[ContourIndex].Vertices) do
+          begin
+            VertexJson := TJSONObject.Create;
+            with ShapeContours[ContourIndex].Vertices[VertexIndex] do
+            begin
+              VertexJson.AddPair('x', TJSONNumber.Create(Position.X));
+              VertexJson.AddPair('y', TJSONNumber.Create(Position.Y));
+              VertexJson.AddPair('incomingX',
+                TJSONNumber.Create(IncomingControl.X));
+              VertexJson.AddPair('incomingY',
+                TJSONNumber.Create(IncomingControl.Y));
+              VertexJson.AddPair('outgoingX',
+                TJSONNumber.Create(OutgoingControl.X));
+              VertexJson.AddPair('outgoingY',
+                TJSONNumber.Create(OutgoingControl.Y));
+              if Kind = slvkBezier then
+                VertexJson.AddPair('kind', 'bezier')
+              else
+                VertexJson.AddPair('kind', 'sharp');
+              if OutgoingSegment = slskCubicBezier then
+                VertexJson.AddPair('outgoingSegment', 'cubicBezier')
+              else
+                VertexJson.AddPair('outgoingSegment', 'line');
+            end;
+            VerticesJson.AddElement(VertexJson);
+          end;
+          ContourJson.AddPair('vertices', VerticesJson);
+          ContoursJson.AddElement(ContourJson);
+        end;
+        ShapeJson.AddPair('contours', ContoursJson);
+        LayersJson.AddElement(ShapeJson);
+        if I = Document.SelectedIndex then
+          SerializedSelectedIndex := LayersJson.Count;
+        Continue;
+      end;
       if not (Layer is TVectArtRectangleLayer) then
         Continue;
       Rectangle := TVectArtRectangleLayer(Layer);
@@ -218,10 +291,15 @@ var
   CanvasJson: TJSONObject;
   CanvasTransparent: Boolean;
   CanvasWidth: Integer;
+  ContourIndex: Integer;
+  ContourJson: TJSONObject;
+  ContoursJson: TJSONArray;
   Data: TVectArtRectangleData;
   Discarded: TVectArtRectangleData;
   DiscardedPath: TVectArtPathData;
   DiscardedImage: TVectArtImageData;
+  DiscardedShape: TScreenLayoutShapeData;
+  FillRuleValue: Integer;
   I: Integer;
   ImageData: TArray<TVectArtImageData>;
   ImageFileName: string;
@@ -238,8 +316,15 @@ var
   PointsJson: TJSONArray;
   Root: TJSONObject;
   SelectedIndex: Integer;
+  SegmentKind: string;
+  ShapeData: TArray<TScreenLayoutShapeData>;
+  ShapeValue: TScreenLayoutShapeData;
   LoadedSelectedIndex: Integer;
   SourceKind: string;
+  VertexIndex: Integer;
+  VertexJson: TJSONObject;
+  VertexKind: string;
+  VerticesJson: TJSONArray;
   LineCapValue: Integer;
   LineJoinValue: Integer;
   MifStrokeStyleValue: Integer;
@@ -276,6 +361,7 @@ begin
       SetLength(RectangleData, LayersJson.Count);
       SetLength(PathData, LayersJson.Count);
       SetLength(ImageData, LayersJson.Count);
+      SetLength(ShapeData, LayersJson.Count);
       SetLength(LayerTypes, LayersJson.Count);
       for I := 0 to LayersJson.Count - 1 do
       begin
@@ -389,6 +475,101 @@ begin
           PathData[I] := PathValue;
           Continue;
         end;
+        if LayerTypes[I] = 'shape' then
+        begin
+          ShapeValue.Name := ReadString(LayerJson, 'name');
+          ShapeValue.Opacity := ReadSingle(LayerJson, 'opacity');
+          ShapeValue.FillColor := TColor(ReadInteger(LayerJson,
+            'fillColor'));
+          FillRuleValue := ReadInteger(LayerJson, 'fillRule');
+          if not InRange(FillRuleValue, Ord(Low(TScreenLayoutFillRule)),
+            Ord(High(TScreenLayoutFillRule))) then
+            raise EConvertError.CreateFmt(
+              'Shape layer %d has an invalid fill rule', [I]);
+          ShapeValue.FillRule := TScreenLayoutFillRule(FillRuleValue);
+          ShapeValue.StrokeColor := TColor(ReadInteger(LayerJson,
+            'strokeColor'));
+          ShapeValue.StrokeWidth := Max(ReadSingle(LayerJson,
+            'strokeWidth'), 0.0);
+          MifStrokeStyleValue := ReadInteger(LayerJson, 'strokeStyle');
+          if not InRange(MifStrokeStyleValue,
+            Ord(Low(TVectArtMifStrokeStyle)),
+            Ord(High(TVectArtMifStrokeStyle))) then
+            raise EConvertError.CreateFmt(
+              'Shape layer %d has an invalid stroke style', [I]);
+          ShapeValue.StrokeStyle :=
+            TVectArtMifStrokeStyle(MifStrokeStyleValue);
+          LineJoinValue := ReadInteger(LayerJson, 'lineJoin');
+          if not InRange(LineJoinValue, Ord(Low(TVectArtLineJoin)),
+            Ord(High(TVectArtLineJoin))) then
+            raise EConvertError.CreateFmt(
+              'Shape layer %d has an invalid line join', [I]);
+          ShapeValue.StrokeJoin := TVectArtLineJoin(LineJoinValue);
+          ShapeValue.MifAntiAlias := ReadBoolean(LayerJson, 'antiAlias');
+          ShapeValue.Visible := ReadBoolean(LayerJson, 'visible');
+          ShapeValue.Locked := ReadBoolean(LayerJson, 'locked');
+          ContoursJson := TJSONArray(RequireValue(LayerJson, 'contours',
+            TJSONArray));
+          if ContoursJson.Count = 0 then
+            raise EConvertError.CreateFmt(
+              'Shape layer %d must contain at least one contour', [I]);
+          SetLength(ShapeValue.Contours, ContoursJson.Count);
+          for ContourIndex := 0 to ContoursJson.Count - 1 do
+          begin
+            if not (ContoursJson.Items[ContourIndex] is TJSONObject) then
+              raise EConvertError.CreateFmt(
+                'Shape layer %d contour %d is invalid', [I, ContourIndex]);
+            ContourJson := TJSONObject(ContoursJson.Items[ContourIndex]);
+            VerticesJson := TJSONArray(RequireValue(ContourJson, 'vertices',
+              TJSONArray));
+            if VerticesJson.Count < 3 then
+              raise EConvertError.CreateFmt(
+                'Shape layer %d contour %d has too few vertices',
+                [I, ContourIndex]);
+            SetLength(ShapeValue.Contours[ContourIndex].Vertices,
+              VerticesJson.Count);
+            for VertexIndex := 0 to VerticesJson.Count - 1 do
+            begin
+              if not (VerticesJson.Items[VertexIndex] is TJSONObject) then
+                raise EConvertError.CreateFmt(
+                  'Shape layer %d contour %d vertex %d is invalid',
+                  [I, ContourIndex, VertexIndex]);
+              VertexJson := TJSONObject(VerticesJson.Items[VertexIndex]);
+              with ShapeValue.Contours[ContourIndex].Vertices[
+                VertexIndex] do
+              begin
+                Position := TPointF.Create(ReadSingle(VertexJson, 'x'),
+                  ReadSingle(VertexJson, 'y'));
+                IncomingControl := TPointF.Create(
+                  ReadSingle(VertexJson, 'incomingX'),
+                  ReadSingle(VertexJson, 'incomingY'));
+                OutgoingControl := TPointF.Create(
+                  ReadSingle(VertexJson, 'outgoingX'),
+                  ReadSingle(VertexJson, 'outgoingY'));
+                VertexKind := ReadString(VertexJson, 'kind');
+                if VertexKind = 'sharp' then
+                  Kind := slvkSharp
+                else if VertexKind = 'bezier' then
+                  Kind := slvkBezier
+                else
+                  raise EConvertError.CreateFmt(
+                    'Shape layer %d contour %d vertex %d has an invalid kind',
+                    [I, ContourIndex, VertexIndex]);
+                SegmentKind := ReadString(VertexJson, 'outgoingSegment');
+                if SegmentKind = 'line' then
+                  OutgoingSegment := slskLine
+                else if SegmentKind = 'cubicBezier' then
+                  OutgoingSegment := slskCubicBezier
+                else
+                  raise EConvertError.CreateFmt(
+                    'Shape layer %d contour %d vertex %d has an invalid ' +
+                    'outgoing segment', [I, ContourIndex, VertexIndex]);
+              end;
+            end;
+          end;
+          ShapeData[I] := ShapeValue;
+          Continue;
+        end;
         if LayerTypes[I] <> 'rectangle' then
           raise EConvertError.CreateFmt('Layer %d has an unsupported type',
             [I]);
@@ -418,6 +599,9 @@ begin
           Document.RemovePath(Document.LayerCount - 1, DiscardedPath)
         else if Document[Document.LayerCount - 1] is TVectArtImageLayer then
           Document.RemoveImage(Document.LayerCount - 1, DiscardedImage)
+        else if Document[Document.LayerCount - 1] is
+          TScreenLayoutShapeLayer then
+          Document.RemoveShape(Document.LayerCount - 1, DiscardedShape)
         else
           raise EInvalidOp.Create('Document contains an unsupported layer');
       Canvas.Width := CanvasWidth;
@@ -432,7 +616,9 @@ begin
         else if LayerTypes[I] = 'image' then
           Document.InsertImage(Document.LayerCount, ImageData[I])
         else if LayerTypes[I] = 'path' then
-          Document.InsertPath(Document.LayerCount, PathData[I]);
+          Document.InsertPath(Document.LayerCount, PathData[I])
+        else if LayerTypes[I] = 'shape' then
+          Document.InsertShape(Document.LayerCount, ShapeData[I]);
         if (LayerTypes[I] <> '') and (SelectedIndex = I + 1) then
           LoadedSelectedIndex := Document.LayerCount - 1;
       end;

@@ -19,6 +19,15 @@ function ScreenLayoutShapeContoursBounds(
 // 各アンカーの前後頂点から、閉輪郭の自動平滑化制御点を再計算する。
 procedure RecalculateScreenLayoutSmoothContour(
   var Contour: TScreenLayoutContour);
+// 指定頂点とその前後区間を、鋭角または滑らかなベジェ接続へ変更する。
+procedure SetScreenLayoutShapeVertexKind(var Contour: TScreenLayoutContour;
+  VertexIndex: Integer; Kind: TScreenLayoutVertexKind);
+// 指定区間を分割し、輪郭の見た目を維持した新頂点の番号を返す。
+function InsertScreenLayoutShapeVertex(var Contour: TScreenLayoutContour;
+  SegmentIndex: Integer; Parameter: Single): Integer;
+// 指定頂点を削除する。閉輪郭を維持できない場合はFalseを返す。
+function DeleteScreenLayoutShapeVertex(var Contour: TScreenLayoutContour;
+  VertexIndex: Integer): Boolean;
 // 全アンカーを同じ量だけ移動した輪郭群の複製を返す。
 function TranslateScreenLayoutShapeContours(
   const Source: TArray<TScreenLayoutContour>; DX,
@@ -32,6 +41,41 @@ implementation
 
 uses
   System.Math;
+
+function LerpPoint(const StartPoint, EndPoint: TPointF;
+  Parameter: Single): TPointF;
+begin
+  Result := TPointF.Create(StartPoint.X +
+    (EndPoint.X - StartPoint.X) * Parameter,
+    StartPoint.Y + (EndPoint.Y - StartPoint.Y) * Parameter);
+end;
+
+procedure RecalculateScreenLayoutSmoothVertex(var Contour: TScreenLayoutContour;
+  VertexIndex: Integer);
+var
+  NextPosition: TPointF;
+  PreviousPosition: TPointF;
+begin
+  if (VertexIndex < 0) or (VertexIndex > High(Contour.Vertices)) then
+    Exit;
+  if Contour.Vertices[VertexIndex].Kind = slvkSharp then
+  begin
+    Contour.Vertices[VertexIndex].IncomingControl := TPointF.Zero;
+    Contour.Vertices[VertexIndex].OutgoingControl := TPointF.Zero;
+    Exit;
+  end;
+  PreviousPosition := Contour.Vertices[
+    (VertexIndex + Length(Contour.Vertices) - 1) mod
+    Length(Contour.Vertices)].Position;
+  NextPosition := Contour.Vertices[
+    (VertexIndex + 1) mod Length(Contour.Vertices)].Position;
+  Contour.Vertices[VertexIndex].IncomingControl := TPointF.Create(
+    (PreviousPosition.X - NextPosition.X) / 6,
+    (PreviousPosition.Y - NextPosition.Y) / 6);
+  Contour.Vertices[VertexIndex].OutgoingControl := TPointF.Create(
+    (NextPosition.X - PreviousPosition.X) / 6,
+    (NextPosition.Y - PreviousPosition.Y) / 6);
+end;
 
 procedure IncludeShapeBoundsPoint(var Bounds: TRectF; var Found: Boolean;
   const PointValue: TPointF);
@@ -88,7 +132,8 @@ begin
           not SameValue(OutgoingControl.Y,
           Right[ContourIndex].Vertices[VertexIndex].OutgoingControl.Y) or
           (OutgoingSegment <>
-          Right[ContourIndex].Vertices[VertexIndex].OutgoingSegment) then
+          Right[ContourIndex].Vertices[VertexIndex].OutgoingSegment) or
+          (Kind <> Right[ContourIndex].Vertices[VertexIndex].Kind) then
           Exit(False);
   end;
   Result := True;
@@ -132,6 +177,12 @@ begin
     Exit;
   for I := 0 to High(Contour.Vertices) do
   begin
+    if Contour.Vertices[I].Kind = slvkSharp then
+    begin
+      Contour.Vertices[I].IncomingControl := TPointF.Zero;
+      Contour.Vertices[I].OutgoingControl := TPointF.Zero;
+      Continue;
+    end;
     PreviousPosition := Contour.Vertices[
       (I + Length(Contour.Vertices) - 1) mod Length(Contour.Vertices)].Position;
     NextPosition := Contour.Vertices[
@@ -143,6 +194,146 @@ begin
       (NextPosition.X - PreviousPosition.X) / 6,
       (NextPosition.Y - PreviousPosition.Y) / 6);
   end;
+end;
+
+procedure SetScreenLayoutShapeVertexKind(var Contour: TScreenLayoutContour;
+  VertexIndex: Integer; Kind: TScreenLayoutVertexKind);
+var
+  NextIndex: Integer;
+  NextPosition: TPointF;
+  PreviousIndex: Integer;
+  PreviousPosition: TPointF;
+begin
+  if (VertexIndex < 0) or (VertexIndex > High(Contour.Vertices)) then
+    Exit;
+  PreviousIndex := (VertexIndex + Length(Contour.Vertices) - 1) mod
+    Length(Contour.Vertices);
+  NextIndex := (VertexIndex + 1) mod Length(Contour.Vertices);
+  Contour.Vertices[VertexIndex].Kind := Kind;
+  if Kind = slvkSharp then
+  begin
+    Contour.Vertices[VertexIndex].IncomingControl := TPointF.Zero;
+    Contour.Vertices[VertexIndex].OutgoingControl := TPointF.Zero;
+  end
+  else
+  begin
+    PreviousPosition := Contour.Vertices[PreviousIndex].Position;
+    NextPosition := Contour.Vertices[NextIndex].Position;
+    Contour.Vertices[VertexIndex].IncomingControl := TPointF.Create(
+      (PreviousPosition.X - NextPosition.X) / 6,
+      (PreviousPosition.Y - NextPosition.Y) / 6);
+    Contour.Vertices[VertexIndex].OutgoingControl := TPointF.Create(
+      (NextPosition.X - PreviousPosition.X) / 6,
+      (NextPosition.Y - PreviousPosition.Y) / 6);
+  end;
+  if (Contour.Vertices[PreviousIndex].Kind = slvkBezier) or
+    (Contour.Vertices[VertexIndex].Kind = slvkBezier) then
+    Contour.Vertices[PreviousIndex].OutgoingSegment := slskCubicBezier
+  else
+    Contour.Vertices[PreviousIndex].OutgoingSegment := slskLine;
+  if (Contour.Vertices[VertexIndex].Kind = slvkBezier) or
+    (Contour.Vertices[NextIndex].Kind = slvkBezier) then
+    Contour.Vertices[VertexIndex].OutgoingSegment := slskCubicBezier
+  else
+    Contour.Vertices[VertexIndex].OutgoingSegment := slskLine;
+end;
+
+function InsertScreenLayoutShapeVertex(var Contour: TScreenLayoutContour;
+  SegmentIndex: Integer; Parameter: Single): Integer;
+var
+  ControlA: TPointF;
+  ControlB: TPointF;
+  I: Integer;
+  NewVertex: TScreenLayoutVertex;
+  NewVertices: TArray<TScreenLayoutVertex>;
+  NextIndex: Integer;
+  PointA: TPointF;
+  PointB: TPointF;
+  PointC: TPointF;
+  PointD: TPointF;
+  SplitA: TPointF;
+  SplitB: TPointF;
+  SplitPoint: TPointF;
+begin
+  Result := -1;
+  if (SegmentIndex < 0) or (SegmentIndex > High(Contour.Vertices)) then
+    Exit;
+  Parameter := EnsureRange(Parameter, 0.001, 0.999);
+  NextIndex := (SegmentIndex + 1) mod Length(Contour.Vertices);
+  PointA := Contour.Vertices[SegmentIndex].Position;
+  PointD := Contour.Vertices[NextIndex].Position;
+  NewVertex := Default(TScreenLayoutVertex);
+  if Contour.Vertices[SegmentIndex].OutgoingSegment = slskCubicBezier then
+  begin
+    PointB := TPointF.Create(PointA.X +
+      Contour.Vertices[SegmentIndex].OutgoingControl.X, PointA.Y +
+      Contour.Vertices[SegmentIndex].OutgoingControl.Y);
+    PointC := TPointF.Create(PointD.X +
+      Contour.Vertices[NextIndex].IncomingControl.X, PointD.Y +
+      Contour.Vertices[NextIndex].IncomingControl.Y);
+    ControlA := LerpPoint(PointA, PointB, Parameter);
+    SplitA := LerpPoint(PointB, PointC, Parameter);
+    ControlB := LerpPoint(PointC, PointD, Parameter);
+    SplitB := LerpPoint(ControlA, SplitA, Parameter);
+    SplitA := LerpPoint(SplitA, ControlB, Parameter);
+    SplitPoint := LerpPoint(SplitB, SplitA, Parameter);
+    Contour.Vertices[SegmentIndex].OutgoingControl := TPointF.Create(
+      ControlA.X - PointA.X, ControlA.Y - PointA.Y);
+    Contour.Vertices[NextIndex].IncomingControl := TPointF.Create(
+      ControlB.X - PointD.X, ControlB.Y - PointD.Y);
+    NewVertex.Position := SplitPoint;
+    NewVertex.IncomingControl := TPointF.Create(SplitB.X - SplitPoint.X,
+      SplitB.Y - SplitPoint.Y);
+    NewVertex.OutgoingControl := TPointF.Create(SplitA.X - SplitPoint.X,
+      SplitA.Y - SplitPoint.Y);
+    NewVertex.OutgoingSegment := slskCubicBezier;
+    NewVertex.Kind := slvkBezier;
+  end
+  else
+  begin
+    NewVertex.Position := LerpPoint(PointA, PointD, Parameter);
+    NewVertex.OutgoingSegment := slskLine;
+    NewVertex.Kind := slvkSharp;
+  end;
+  Result := SegmentIndex + 1;
+  SetLength(NewVertices, Length(Contour.Vertices) + 1);
+  for I := 0 to Result - 1 do
+    NewVertices[I] := Contour.Vertices[I];
+  NewVertices[Result] := NewVertex;
+  for I := Result to High(Contour.Vertices) do
+    NewVertices[I + 1] := Contour.Vertices[I];
+  Contour.Vertices := NewVertices;
+end;
+
+function DeleteScreenLayoutShapeVertex(var Contour: TScreenLayoutContour;
+  VertexIndex: Integer): Boolean;
+var
+  I: Integer;
+  NewVertices: TArray<TScreenLayoutVertex>;
+  NextIndex: Integer;
+  PreviousIndex: Integer;
+begin
+  Result := False;
+  if (Length(Contour.Vertices) <= 3) or (VertexIndex < 0) or
+    (VertexIndex > High(Contour.Vertices)) then
+    Exit;
+  SetLength(NewVertices, Length(Contour.Vertices) - 1);
+  for I := 0 to VertexIndex - 1 do
+    NewVertices[I] := Contour.Vertices[I];
+  for I := VertexIndex + 1 to High(Contour.Vertices) do
+    NewVertices[I - 1] := Contour.Vertices[I];
+  Contour.Vertices := NewVertices;
+  NextIndex := VertexIndex mod Length(Contour.Vertices);
+  PreviousIndex := (NextIndex + Length(Contour.Vertices) - 1) mod
+    Length(Contour.Vertices);
+  if (Contour.Vertices[PreviousIndex].Kind = slvkBezier) or
+    (Contour.Vertices[NextIndex].Kind = slvkBezier) then
+    Contour.Vertices[PreviousIndex].OutgoingSegment := slskCubicBezier
+  else
+    Contour.Vertices[PreviousIndex].OutgoingSegment := slskLine;
+  RecalculateScreenLayoutSmoothVertex(Contour, PreviousIndex);
+  RecalculateScreenLayoutSmoothVertex(Contour, NextIndex);
+  Result := True;
 end;
 
 function TranslateScreenLayoutShapeContours(
@@ -178,10 +369,15 @@ begin
   begin
     for VertexIndex := 0 to High(Result[ContourIndex].Vertices) do
       with Result[ContourIndex].Vertices[VertexIndex] do
+      begin
         Position := TPointF.Create(TargetBounds.Left +
           (Position.X - SourceBounds.Left) * ScaleX,
           TargetBounds.Top + (Position.Y - SourceBounds.Top) * ScaleY);
-    RecalculateScreenLayoutSmoothContour(Result[ContourIndex]);
+        IncomingControl := TPointF.Create(IncomingControl.X * ScaleX,
+          IncomingControl.Y * ScaleY);
+        OutgoingControl := TPointF.Create(OutgoingControl.X * ScaleX,
+          OutgoingControl.Y * ScaleY);
+      end;
   end;
 end;
 

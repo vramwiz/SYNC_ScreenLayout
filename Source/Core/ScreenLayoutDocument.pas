@@ -23,6 +23,8 @@ type
   TVectArtLineJoin = (vljMiter, vljBevel, vljRound);
   // 各頂点から次頂点へ向かう閉輪郭区間の表現形式。
   TScreenLayoutSegmentKind = (slskLine, slskCubicBezier);
+  // Shape編集時にユーザーが選ぶ頂点の接続形式。
+  TScreenLayoutVertexKind = (slvkSharp, slvkBezier);
   // 穴や重複輪郭を含むShapeの内外判定規則。
   TScreenLayoutFillRule = (slfrEvenOdd, slfrNonZero);
 
@@ -31,6 +33,7 @@ type
     IncomingControl: TPointF;       // 頂点から入力側制御点への相対座標。
     OutgoingControl: TPointF;       // 頂点から出力側制御点への相対座標。
     OutgoingSegment: TScreenLayoutSegmentKind; // 次頂点までの区間種別。
+    Kind: TScreenLayoutVertexKind;  // 鋭角または滑らかなベジェ接続。
   end;
 
   TScreenLayoutContour = record
@@ -358,7 +361,8 @@ begin
           not SameValue(OutgoingControl.Y,
           Right[ContourIndex].Vertices[VertexIndex].OutgoingControl.Y) or
           (OutgoingSegment <>
-          Right[ContourIndex].Vertices[VertexIndex].OutgoingSegment) then
+          Right[ContourIndex].Vertices[VertexIndex].OutgoingSegment) or
+          (Kind <> Right[ContourIndex].Vertices[VertexIndex].Kind) then
           Exit(False);
       end;
   end;

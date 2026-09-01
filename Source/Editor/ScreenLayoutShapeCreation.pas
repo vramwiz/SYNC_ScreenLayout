@@ -19,6 +19,8 @@ type
     FEditHistory: TVectArtEditHistory;
     FModifiers: TShiftState;
     FPathPoints: TArray<TPoint>;
+    FShapeVertexKinds: TArray<TScreenLayoutVertexKind>; // 確定済みShape頂点の種別。
+    FNextShapeVertexKind: TScreenLayoutVertexKind;      // 次のクリックへ適用する種別。
     FStartPoint: TPoint;
     FZoom: Single;
     function ClampToCanvas(const Point: TPoint): TPoint;
@@ -30,6 +32,7 @@ type
     function NextPathName: string;
     function NextRectangleName: string;
     function NextShapeName: string;
+    function BuildShapePreview(out Points: TArray<TPoint>): Boolean;
   public
     // 新規図形入力に必要なDocument、履歴、ツール、表示座標系を設定する。
     procedure Configure(ADocument: TVectArtDocument;
@@ -53,6 +56,8 @@ type
     function PreviewRect: TRect;
     // ドラッグ作成中の直線プレビュー端点を返す。
     function PreviewLine(out StartPoint, EndPoint: TPoint): Boolean;
+    // V／Bキーを次に確定するShape頂点の種別として受け付ける。
+    function KeyDown(Key: Word; Shift: TShiftState): Boolean;
     property Active: Boolean read FActive;
   end;
 
@@ -66,12 +71,49 @@ uses
 const
   MIN_DRAG_SIZE = 3;
   PATH_CLOSE_DISTANCE = 8;
+  SHAPE_PREVIEW_CURVE_STEPS = 16;
+
+procedure ConfigureShapeContourSegments(var Contour: TScreenLayoutContour);
+var
+  I: Integer;
+  NextIndex: Integer;
+begin
+  RecalculateScreenLayoutSmoothContour(Contour);
+  for I := 0 to High(Contour.Vertices) do
+  begin
+    NextIndex := (I + 1) mod Length(Contour.Vertices);
+    if (Contour.Vertices[I].Kind = slvkBezier) or
+      (Contour.Vertices[NextIndex].Kind = slvkBezier) then
+      Contour.Vertices[I].OutgoingSegment := slskCubicBezier
+    else
+      Contour.Vertices[I].OutgoingSegment := slskLine;
+  end;
+end;
+
+function ShapeCubicPoint(const StartPoint, Control1, Control2,
+  EndPoint: TPointF; Parameter: Single): TPointF;
+var
+  Inverse: Single;
+begin
+  Inverse := 1 - Parameter;
+  Result := TPointF.Create(
+    Inverse * Inverse * Inverse * StartPoint.X +
+      3 * Inverse * Inverse * Parameter * Control1.X +
+      3 * Inverse * Parameter * Parameter * Control2.X +
+      Parameter * Parameter * Parameter * EndPoint.X,
+    Inverse * Inverse * Inverse * StartPoint.Y +
+      3 * Inverse * Inverse * Parameter * Control1.Y +
+      3 * Inverse * Parameter * Parameter * Control2.Y +
+      Parameter * Parameter * Parameter * EndPoint.Y);
+end;
 
 procedure TVectArtShapeCreation.CancelPath;
 begin
   FActive := False;
   FCreationTool := vetSelect;
   SetLength(FPathPoints, 0);
+  SetLength(FShapeVertexKinds, 0);
+  FNextShapeVertexKind := slvkSharp;
 end;
 
 procedure TVectArtShapeCreation.CreateShape;
@@ -87,14 +129,18 @@ begin
   SetLength(Data.Contours, 1);
   SetLength(Data.Contours[0].Vertices, Length(FPathPoints));
   for I := 0 to High(FPathPoints) do
+  begin
     Data.Contours[0].Vertices[I].Position := TPointF.Create(
       ScreenToLogicalX(FPathPoints[I].X, FCanvasBounds, FZoom,
         FDocument.CanvasLayer.Width),
       ScreenToLogicalY(FPathPoints[I].Y, FCanvasBounds, FZoom,
         FDocument.CanvasLayer.Height));
-  for I := 0 to High(Data.Contours[0].Vertices) do
-    Data.Contours[0].Vertices[I].OutgoingSegment := slskCubicBezier;
-  RecalculateScreenLayoutSmoothContour(Data.Contours[0]);
+    if I <= High(FShapeVertexKinds) then
+      Data.Contours[0].Vertices[I].Kind := FShapeVertexKinds[I]
+    else
+      Data.Contours[0].Vertices[I].Kind := slvkSharp;
+  end;
+  ConfigureShapeContourSegments(Data.Contours[0]);
   Data.FillColor := FEditorState.RectangleFillColor;
   Data.FillRule := slfrEvenOdd;
   Data.Locked := False;
@@ -289,6 +335,10 @@ begin
       FActive := True;
       FCreationTool := FEditorState.CurrentTool;
       FPathPoints := [PointValue];
+      if FCreationTool = vetShape then
+        FShapeVertexKinds := [FNextShapeVertexKind]
+      else
+        SetLength(FShapeVertexKinds, 0);
     end
     else if (Length(FPathPoints) >= 3) and
       (Hypot(PointValue.X - FPathPoints[0].X,
@@ -298,6 +348,11 @@ begin
     begin
       SetLength(FPathPoints, Length(FPathPoints) + 1);
       FPathPoints[High(FPathPoints)] := PointValue;
+      if FCreationTool = vetShape then
+      begin
+        SetLength(FShapeVertexKinds, Length(FPathPoints));
+        FShapeVertexKinds[High(FShapeVertexKinds)] := FNextShapeVertexKind;
+      end;
     end;
     FCurrentPoint := PointValue;
     Exit;
@@ -306,6 +361,22 @@ begin
   FStartPoint := PointValue;
   FCurrentPoint := FStartPoint;
   FModifiers := Shift;
+end;
+
+function TVectArtShapeCreation.KeyDown(Key: Word;
+  Shift: TShiftState): Boolean;
+begin
+  Result := False;
+  if (FEditorState = nil) or (FEditorState.CurrentTool <> vetShape) or
+    ((Shift * [ssCtrl, ssAlt]) <> []) then
+    Exit;
+  if Key = Ord('V') then
+    FNextShapeVertexKind := slvkSharp
+  else if Key = Ord('B') then
+    FNextShapeVertexKind := slvkBezier
+  else
+    Exit;
+  Result := True;
 end;
 
 function TVectArtShapeCreation.MouseMove(Shift: TShiftState;
@@ -442,9 +513,81 @@ begin
     Points := nil;
     Exit;
   end;
+  if FEditorState.CurrentTool = vetShape then
+    Exit(BuildShapePreview(Points));
   Points := Copy(FPathPoints);
   SetLength(Points, Length(Points) + 1);
   Points[High(Points)] := FCurrentPoint;
+end;
+
+function TVectArtShapeCreation.BuildShapePreview(
+  out Points: TArray<TPoint>): Boolean;
+var
+  Control1: TPointF;
+  Control2: TPointF;
+  Contour: TScreenLayoutContour;
+  EndPoint: TPointF;
+  I: Integer;
+  NextIndex: Integer;
+  OutputIndex: Integer;
+  Parameter: Single;
+  PreviewPoint: TPointF;
+  StartPoint: TPointF;
+  Step: Integer;
+begin
+  Result := FActive and (Length(FPathPoints) > 0);
+  if not Result then
+  begin
+    Points := nil;
+    Exit;
+  end;
+  SetLength(Contour.Vertices, Length(FPathPoints) + 1);
+  for I := 0 to High(FPathPoints) do
+  begin
+    Contour.Vertices[I].Position := TPointF.Create(FPathPoints[I].X,
+      FPathPoints[I].Y);
+    if I <= High(FShapeVertexKinds) then
+      Contour.Vertices[I].Kind := FShapeVertexKinds[I]
+    else
+      Contour.Vertices[I].Kind := slvkSharp;
+  end;
+  Contour.Vertices[High(Contour.Vertices)].Position :=
+    TPointF.Create(FCurrentPoint.X, FCurrentPoint.Y);
+  Contour.Vertices[High(Contour.Vertices)].Kind := FNextShapeVertexKind;
+  ConfigureShapeContourSegments(Contour);
+  SetLength(Points, 1 + High(Contour.Vertices) *
+    SHAPE_PREVIEW_CURVE_STEPS);
+  OutputIndex := 0;
+  Points[OutputIndex] := Point(Round(Contour.Vertices[0].Position.X),
+    Round(Contour.Vertices[0].Position.Y));
+  for I := 0 to High(Contour.Vertices) - 1 do
+  begin
+    NextIndex := I + 1;
+    StartPoint := Contour.Vertices[I].Position;
+    EndPoint := Contour.Vertices[NextIndex].Position;
+    if Contour.Vertices[I].OutgoingSegment = slskLine then
+    begin
+      Inc(OutputIndex);
+      Points[OutputIndex] := Point(Round(EndPoint.X), Round(EndPoint.Y));
+      Continue;
+    end;
+    Control1 := TPointF.Create(StartPoint.X +
+      Contour.Vertices[I].OutgoingControl.X, StartPoint.Y +
+      Contour.Vertices[I].OutgoingControl.Y);
+    Control2 := TPointF.Create(EndPoint.X +
+      Contour.Vertices[NextIndex].IncomingControl.X, EndPoint.Y +
+      Contour.Vertices[NextIndex].IncomingControl.Y);
+    for Step := 1 to SHAPE_PREVIEW_CURVE_STEPS do
+    begin
+      Parameter := Step / SHAPE_PREVIEW_CURVE_STEPS;
+      PreviewPoint := ShapeCubicPoint(StartPoint, Control1, Control2,
+        EndPoint, Parameter);
+      Inc(OutputIndex);
+      Points[OutputIndex] := Point(Round(PreviewPoint.X),
+        Round(PreviewPoint.Y));
+    end;
+  end;
+  SetLength(Points, OutputIndex + 1);
 end;
 
 function TVectArtShapeCreation.PreviewLine(out StartPoint,

@@ -11,7 +11,24 @@ uses
 
 type
   TVectArtCanvasDragMode = (vcdmNone, vcdmMove, vcdmResize, vcdmRotate,
-    vcdmRangeSelect, vcdmPathVertex, vcdmShapeVertex);
+    vcdmRangeSelect, vcdmPathVertex, vcdmShapeVertex,
+    vcdmShapeBezierHandle);
+
+  TScreenLayoutBezierHandleKind = (slbhNone, slbhIncoming, slbhOutgoing);
+
+  TScreenLayoutBezierHandles = record
+    IncomingPoint: TPoint; // 入力側制御点の画面座標。
+    IncomingRect: TRect;   // 入力側制御点のクリック範囲。
+    OutgoingPoint: TPoint; // 出力側制御点の画面座標。
+    OutgoingRect: TRect;   // 出力側制御点のクリック範囲。
+    VertexPoint: TPoint;   // 接線が通る選択頂点の画面座標。
+  end;
+
+  TScreenLayoutVertexKindButton = record
+    Bounds: TRect;                    // クリック可能な画面座標範囲。
+    Kind: TScreenLayoutVertexKind;   // 選択時に設定する頂点種別。
+    Selected: Boolean;               // 現在の頂点種別と一致する状態。
+  end;
 
   TVectArtCanvasInteraction = class
   private
@@ -39,6 +56,9 @@ type
     FPathVertexIndex: Integer;
     FShapeContourIndex: Integer;
     FShapeVertexIndex: Integer;
+    FShapeBezierHandle: TScreenLayoutBezierHandleKind;
+    FSelectedShapeContourIndex: Integer; // 種別ボタンを表示する輪郭番号。
+    FSelectedShapeVertexIndex: Integer;  // 種別ボタンを表示する頂点番号。
     FDragStartMouse: TPoint;
     FAxisAlignedSelection: Boolean;
     FMoveOccurred: Boolean;
@@ -68,6 +88,16 @@ type
     function HitTestPathVertex(X, Y: Integer): Integer;
     function HitTestShapeVertex(X, Y: Integer; out ContourIndex,
       VertexIndex: Integer): Boolean;
+    function HitTestShapeVertexKindButton(X, Y: Integer;
+      out Kind: TScreenLayoutVertexKind): Boolean;
+    function HitTestShapeBezierHandle(X, Y: Integer;
+      out HandleKind: TScreenLayoutBezierHandleKind): Boolean;
+    function HitTestShapeSegment(X, Y: Integer; out ContourIndex,
+      SegmentIndex: Integer; out Parameter: Single): Boolean;
+    procedure ApplySelectedShapeVertexKind(Kind: TScreenLayoutVertexKind);
+    procedure InsertShapeVertex(ContourIndex, SegmentIndex: Integer;
+      Parameter: Single);
+    function DeleteShapeVertex(ContourIndex, VertexIndex: Integer): Boolean;
     function LayerScreenRect(Index: Integer): TRect;
     function ResizedBounds(X, Y: Integer): TRectF;
     function SelectionContainsLockedLayer: Boolean;
@@ -101,6 +131,14 @@ type
     function SelectedPathVertexRects: TArray<TRect>;
     // 単一選択されたShapeの全輪郭アンカーを画面座標の矩形列として返す。
     function SelectedShapeVertexRects: TArray<TRect>;
+    // 選択頂点の外側へ表示する鋭角／ベジェ種別ボタンを返す。
+    function SelectedShapeVertexKindButtons:
+      TArray<TScreenLayoutVertexKindButton>;
+    // 種別編集対象として選択されたShapeアンカーの画面座標を返す。
+    function SelectedShapeVertexRect(out VertexRect: TRect): Boolean;
+    // 選択中のベジェ頂点について、接線と両側の制御ハンドルを返す。
+    function SelectedShapeBezierHandles(
+      out Handles: TScreenLayoutBezierHandles): Boolean;
     property Dragging: Boolean read GetDragging;
     property AxisAlignedSelection: Boolean read FAxisAlignedSelection;
     property EditHistory: TVectArtEditHistory read FEditHistory
@@ -120,6 +158,12 @@ const
   MIN_RECTANGLE_SIZE = 16.0;
   MOVE_DRAG_THRESHOLD = 6;
   PATH_VERTEX_HANDLE_SIZE = 9;
+  BEZIER_CONTROL_HANDLE_SIZE = 9;
+  VERTEX_KIND_BUTTON_GAP = 4;
+  VERTEX_KIND_BUTTON_OFFSET = 34;
+  VERTEX_KIND_BUTTON_SIZE = 22;
+  SHAPE_SEGMENT_HIT_DISTANCE = 6.0;
+  SHAPE_BEZIER_HIT_SUBDIVISIONS = 32;
 
 function ImagePointsBounds(const Points: TVectArtImagePoints): TRectF;
 var
@@ -147,8 +191,8 @@ begin
     Result := MIN_RECTANGLE_SIZE;
 end;
 
-function DistanceToSegment(const PointValue, StartPoint,
-  EndPoint: TPointF): Single;
+function DistanceToSegmentParameter(const PointValue, StartPoint,
+  EndPoint: TPointF; out Parameter: Single): Single;
 var
   DX: Single;
   DY: Single;
@@ -165,6 +209,33 @@ begin
     Projection := 0;
   Result := Hypot(PointValue.X - (StartPoint.X + Projection * DX),
     PointValue.Y - (StartPoint.Y + Projection * DY));
+  Parameter := Projection;
+end;
+
+function DistanceToSegment(const PointValue, StartPoint,
+  EndPoint: TPointF): Single;
+var
+  Parameter: Single;
+begin
+  Result := DistanceToSegmentParameter(PointValue, StartPoint, EndPoint,
+    Parameter);
+end;
+
+function CubicBezierPoint(const StartPoint, Control1, Control2,
+  EndPoint: TPointF; Parameter: Single): TPointF;
+var
+  Inverse: Single;
+begin
+  Inverse := 1 - Parameter;
+  Result := TPointF.Create(
+    Inverse * Inverse * Inverse * StartPoint.X +
+      3 * Inverse * Inverse * Parameter * Control1.X +
+      3 * Inverse * Parameter * Parameter * Control2.X +
+      Parameter * Parameter * Parameter * EndPoint.X,
+    Inverse * Inverse * Inverse * StartPoint.Y +
+      3 * Inverse * Inverse * Parameter * Control1.Y +
+      3 * Inverse * Parameter * Parameter * Control2.Y +
+      Parameter * Parameter * Parameter * EndPoint.Y);
 end;
 
 constructor TVectArtCanvasInteraction.Create;
@@ -174,6 +245,9 @@ begin
   FPathVertexIndex := -1;
   FShapeContourIndex := -1;
   FShapeVertexIndex := -1;
+  FShapeBezierHandle := slbhNone;
+  FSelectedShapeContourIndex := -1;
+  FSelectedShapeVertexIndex := -1;
   FSelectionModeLayerIndex := -1;
 end;
 
@@ -190,6 +264,8 @@ begin
   begin
     FAxisAlignedSelection := False;
     FSelectionModeLayerIndex := SelectedLayerIndex;
+    FSelectedShapeContourIndex := -1;
+    FSelectedShapeVertexIndex := -1;
   end;
   FDocument := ADocument;
   FCanvasBounds := ACanvasBounds;
@@ -226,7 +302,11 @@ var
   Handle: TVectArtSelectionHandle;
   LayerIndex: Integer;
   SelectionRect: TRect;
+  ShapeBezierHandle: TScreenLayoutBezierHandleKind;
   ShapeContourIndex: Integer;
+  ShapeSegmentIndex: Integer;
+  ShapeSegmentParameter: Single;
+  ShapeVertexKind: TScreenLayoutVertexKind;
   ShapeVertexIndex: Integer;
 begin
   Result := crDefault;
@@ -238,14 +318,22 @@ begin
     Exit(RotationHandleCursor);
   if FDragMode = vcdmRangeSelect then
     Exit(crCross);
-  if FDragMode in [vcdmPathVertex, vcdmShapeVertex] then
+  if FDragMode in [vcdmPathVertex, vcdmShapeVertex,
+    vcdmShapeBezierHandle] then
     Exit(crSizeAll);
   if FDocument = nil then
     Exit;
+  if HitTestShapeVertexKindButton(X, Y, ShapeVertexKind) then
+    Exit(crHandPoint);
+  if HitTestShapeBezierHandle(X, Y, ShapeBezierHandle) then
+    Exit(crSizeAll);
   if HitTestPathVertex(X, Y) >= 0 then
     Exit(crSizeAll);
   if HitTestShapeVertex(X, Y, ShapeContourIndex, ShapeVertexIndex) then
     Exit(crSizeAll);
+  if HitTestShapeSegment(X, Y, ShapeContourIndex, ShapeSegmentIndex,
+    ShapeSegmentParameter) then
+    Exit(crCross);
   SelectionRect := SelectedLayersScreenRect;
   if not SelectionRect.IsEmpty and not SelectionContainsLockedLayer then
   begin
@@ -265,6 +353,99 @@ begin
   if (LayerIndex >= 0) and not FDocument[LayerIndex].Locked and
     not SelectionContainsLockedLayer then
     Result := crSizeAll;
+end;
+
+procedure TVectArtCanvasInteraction.ApplySelectedShapeVertexKind(
+  Kind: TScreenLayoutVertexKind);
+var
+  NewContours: TArray<TScreenLayoutContour>;
+  OldContours: TArray<TScreenLayoutContour>;
+  ShapeLayer: TScreenLayoutShapeLayer;
+begin
+  if (FDocument = nil) or (FDocument.SelectionCount <> 1) or
+    (FDocument.SelectedIndex <= 0) or
+    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(FDocument[FDocument.SelectedIndex]);
+  if ShapeLayer.Locked or (FSelectedShapeContourIndex < 0) or
+    (FSelectedShapeVertexIndex < 0) then
+    Exit;
+  OldContours := ShapeLayer.Contours;
+  if (FSelectedShapeContourIndex > High(OldContours)) or
+    (FSelectedShapeVertexIndex >
+    High(OldContours[FSelectedShapeContourIndex].Vertices)) or
+    (OldContours[FSelectedShapeContourIndex].Vertices[
+    FSelectedShapeVertexIndex].Kind = Kind) then
+    Exit;
+  NewContours := CloneScreenLayoutShapeContours(OldContours);
+  SetScreenLayoutShapeVertexKind(NewContours[FSelectedShapeContourIndex],
+    FSelectedShapeVertexIndex, Kind);
+  FDocument.SetShapeContours(FDocument.SelectedIndex, NewContours);
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutShapeContoursCommand.Create(
+      FDocument, FDocument.SelectedIndex, OldContours, NewContours));
+end;
+
+procedure TVectArtCanvasInteraction.InsertShapeVertex(ContourIndex,
+  SegmentIndex: Integer; Parameter: Single);
+var
+  NewContours: TArray<TScreenLayoutContour>;
+  NewVertexIndex: Integer;
+  OldContours: TArray<TScreenLayoutContour>;
+  ShapeLayer: TScreenLayoutShapeLayer;
+begin
+  if (FDocument = nil) or (FDocument.SelectionCount <> 1) or
+    (FDocument.SelectedIndex <= 0) or
+    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(FDocument[FDocument.SelectedIndex]);
+  if ShapeLayer.Locked then
+    Exit;
+  OldContours := ShapeLayer.Contours;
+  if (ContourIndex < 0) or (ContourIndex > High(OldContours)) then
+    Exit;
+  NewContours := CloneScreenLayoutShapeContours(OldContours);
+  NewVertexIndex := InsertScreenLayoutShapeVertex(NewContours[ContourIndex],
+    SegmentIndex, Parameter);
+  if NewVertexIndex < 0 then
+    Exit;
+  FDocument.SetShapeContours(FDocument.SelectedIndex, NewContours);
+  FSelectedShapeContourIndex := ContourIndex;
+  FSelectedShapeVertexIndex := NewVertexIndex;
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutShapeContoursCommand.Create(
+      FDocument, FDocument.SelectedIndex, OldContours, NewContours));
+end;
+
+function TVectArtCanvasInteraction.DeleteShapeVertex(ContourIndex,
+  VertexIndex: Integer): Boolean;
+var
+  NewContours: TArray<TScreenLayoutContour>;
+  OldContours: TArray<TScreenLayoutContour>;
+  ShapeLayer: TScreenLayoutShapeLayer;
+begin
+  Result := False;
+  if (FDocument = nil) or (FDocument.SelectionCount <> 1) or
+    (FDocument.SelectedIndex <= 0) or
+    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(FDocument[FDocument.SelectedIndex]);
+  if ShapeLayer.Locked then
+    Exit;
+  OldContours := ShapeLayer.Contours;
+  if (ContourIndex < 0) or (ContourIndex > High(OldContours)) then
+    Exit;
+  NewContours := CloneScreenLayoutShapeContours(OldContours);
+  if not DeleteScreenLayoutShapeVertex(NewContours[ContourIndex],
+    VertexIndex) then
+    Exit;
+  FDocument.SetShapeContours(FDocument.SelectedIndex, NewContours);
+  FSelectedShapeContourIndex := -1;
+  FSelectedShapeVertexIndex := -1;
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutShapeContoursCommand.Create(
+      FDocument, FDocument.SelectedIndex, OldContours, NewContours));
+  Result := True;
 end;
 
 procedure TVectArtCanvasInteraction.CommitRotationCommand;
@@ -700,6 +881,7 @@ begin
   FPathVertexIndex := -1;
   FShapeContourIndex := -1;
   FShapeVertexIndex := -1;
+  FShapeBezierHandle := slbhNone;
   FDragIsImage := False;
   FDragIsPath := False;
   FDragIsShape := False;
@@ -778,6 +960,153 @@ begin
     end;
   ContourIndex := -1;
   VertexIndex := -1;
+end;
+
+function TVectArtCanvasInteraction.HitTestShapeVertexKindButton(X,
+  Y: Integer; out Kind: TScreenLayoutVertexKind): Boolean;
+var
+  ButtonInfo: TScreenLayoutVertexKindButton;
+  Buttons: TArray<TScreenLayoutVertexKindButton>;
+begin
+  Result := False;
+  Kind := slvkSharp;
+  Buttons := SelectedShapeVertexKindButtons;
+  for ButtonInfo in Buttons do
+    if PtInRect(ButtonInfo.Bounds, Point(X, Y)) then
+    begin
+      Kind := ButtonInfo.Kind;
+      Exit(True);
+    end;
+end;
+
+function TVectArtCanvasInteraction.HitTestShapeBezierHandle(X, Y: Integer;
+  out HandleKind: TScreenLayoutBezierHandleKind): Boolean;
+var
+  Handles: TScreenLayoutBezierHandles;
+begin
+  Result := False;
+  HandleKind := slbhNone;
+  if not SelectedShapeBezierHandles(Handles) then
+    Exit;
+  if PtInRect(Handles.IncomingRect, Point(X, Y)) then
+  begin
+    HandleKind := slbhIncoming;
+    Exit(True);
+  end;
+  if PtInRect(Handles.OutgoingRect, Point(X, Y)) then
+  begin
+    HandleKind := slbhOutgoing;
+    Exit(True);
+  end;
+end;
+
+function TVectArtCanvasInteraction.HitTestShapeSegment(X, Y: Integer;
+  out ContourIndex, SegmentIndex: Integer; out Parameter: Single): Boolean;
+var
+  BestDistance: Single;
+  Contours: TArray<TScreenLayoutContour>;
+  Control1: TPointF;
+  Control2: TPointF;
+  CurrentContourIndex: Integer;
+  CurrentDistance: Single;
+  CurrentParameter: Single;
+  CurrentSegmentIndex: Integer;
+  EndParameter: Single;
+  EndPoint: TPointF;
+  LocalParameter: Single;
+  MousePoint: TPointF;
+  NextIndex: Integer;
+  ShapeLayer: TScreenLayoutShapeLayer;
+  StartParameter: Single;
+  StartPoint: TPointF;
+  SubdivisionIndex: Integer;
+  SubdivisionStart: TPointF;
+  SubdivisionEnd: TPointF;
+begin
+  Result := False;
+  ContourIndex := -1;
+  SegmentIndex := -1;
+  Parameter := 0;
+  if (FDocument = nil) or (FDocument.SelectionCount <> 1) or
+    (FDocument.SelectedIndex <= 0) or
+    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(FDocument[FDocument.SelectedIndex]);
+  if ShapeLayer.Locked then
+    Exit;
+  Contours := ShapeLayer.Contours;
+  MousePoint := TPointF.Create(X, Y);
+  BestDistance := 1.0E30;
+  for CurrentContourIndex := 0 to High(Contours) do
+    for CurrentSegmentIndex := 0 to
+      High(Contours[CurrentContourIndex].Vertices) do
+    begin
+      NextIndex := (CurrentSegmentIndex + 1) mod
+        Length(Contours[CurrentContourIndex].Vertices);
+      StartPoint := TPointF.Create(ToScreenX(Contours[CurrentContourIndex].
+        Vertices[CurrentSegmentIndex].Position.X),
+        ToScreenY(Contours[CurrentContourIndex].Vertices[
+        CurrentSegmentIndex].Position.Y));
+      EndPoint := TPointF.Create(ToScreenX(Contours[CurrentContourIndex].
+        Vertices[NextIndex].Position.X),
+        ToScreenY(Contours[CurrentContourIndex].Vertices[
+        NextIndex].Position.Y));
+      if Contours[CurrentContourIndex].Vertices[
+        CurrentSegmentIndex].OutgoingSegment = slskLine then
+      begin
+        CurrentDistance := DistanceToSegmentParameter(MousePoint,
+          StartPoint, EndPoint, CurrentParameter);
+        if CurrentDistance < BestDistance then
+        begin
+          BestDistance := CurrentDistance;
+          ContourIndex := CurrentContourIndex;
+          SegmentIndex := CurrentSegmentIndex;
+          Parameter := CurrentParameter;
+        end;
+        Continue;
+      end;
+      Control1 := TPointF.Create(ToScreenX(Contours[CurrentContourIndex].
+        Vertices[CurrentSegmentIndex].Position.X +
+        Contours[CurrentContourIndex].Vertices[
+        CurrentSegmentIndex].OutgoingControl.X),
+        ToScreenY(Contours[CurrentContourIndex].Vertices[
+        CurrentSegmentIndex].Position.Y + Contours[CurrentContourIndex].
+        Vertices[CurrentSegmentIndex].OutgoingControl.Y));
+      Control2 := TPointF.Create(ToScreenX(Contours[CurrentContourIndex].
+        Vertices[NextIndex].Position.X + Contours[CurrentContourIndex].
+        Vertices[NextIndex].IncomingControl.X),
+        ToScreenY(Contours[CurrentContourIndex].Vertices[
+        NextIndex].Position.Y + Contours[CurrentContourIndex].Vertices[
+        NextIndex].IncomingControl.Y));
+      for SubdivisionIndex := 0 to SHAPE_BEZIER_HIT_SUBDIVISIONS - 1 do
+      begin
+        StartParameter := SubdivisionIndex /
+          SHAPE_BEZIER_HIT_SUBDIVISIONS;
+        EndParameter := (SubdivisionIndex + 1) /
+          SHAPE_BEZIER_HIT_SUBDIVISIONS;
+        SubdivisionStart := CubicBezierPoint(StartPoint, Control1, Control2,
+          EndPoint, StartParameter);
+        SubdivisionEnd := CubicBezierPoint(StartPoint, Control1, Control2,
+          EndPoint, EndParameter);
+        CurrentDistance := DistanceToSegmentParameter(MousePoint,
+          SubdivisionStart, SubdivisionEnd, LocalParameter);
+        if CurrentDistance < BestDistance then
+        begin
+          BestDistance := CurrentDistance;
+          ContourIndex := CurrentContourIndex;
+          SegmentIndex := CurrentSegmentIndex;
+          Parameter := (SubdivisionIndex + LocalParameter) /
+            SHAPE_BEZIER_HIT_SUBDIVISIONS;
+        end;
+      end;
+    end;
+  Result := BestDistance <= SHAPE_SEGMENT_HIT_DISTANCE;
+  if not Result then
+  begin
+    ContourIndex := -1;
+    SegmentIndex := -1;
+    Parameter := 0;
+  end;
 end;
 
 function TVectArtCanvasInteraction.GetDragging: Boolean;
@@ -1112,6 +1441,8 @@ end;
 function TVectArtCanvasInteraction.MouseDown(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer): Boolean;
 var
+  ClickedContourIndex: Integer;
+  ClickedVertexIndex: Integer;
   CenterX: Single;
   CenterY: Single;
   Geometry: TVectArtSelectionGeometry;
@@ -1119,11 +1450,45 @@ var
   ImageLayer: TVectArtImageLayer;
   RectangleLayer: TVectArtRectangleLayer;
   SelectionRect: TRect;
+  SegmentIndex: Integer;
+  SegmentParameter: Single;
+  BezierHandle: TScreenLayoutBezierHandleKind;
+  VertexKind: TScreenLayoutVertexKind;
   WasSelected: Boolean;
 begin
   Result := False;
-  if (Button <> mbLeft) or (FDocument = nil) or (FZoom <= 0) then
+  if (FDocument = nil) or (FZoom <= 0) then
     Exit;
+  if Button = mbRight then
+  begin
+    if HitTestShapeVertex(X, Y, ClickedContourIndex,
+      ClickedVertexIndex) then
+    begin
+      DeleteShapeVertex(ClickedContourIndex, ClickedVertexIndex);
+      Exit(True);
+    end;
+    Exit(False);
+  end;
+  if Button <> mbLeft then
+    Exit;
+  if HitTestShapeVertexKindButton(X, Y, VertexKind) then
+  begin
+    ApplySelectedShapeVertexKind(VertexKind);
+    Exit(False);
+  end;
+  if HitTestShapeBezierHandle(X, Y, BezierHandle) then
+  begin
+    FDragMode := vcdmShapeBezierHandle;
+    FShapeBezierHandle := BezierHandle;
+    FShapeContourIndex := FSelectedShapeContourIndex;
+    FShapeVertexIndex := FSelectedShapeVertexIndex;
+    FDragLayerIndex := FDocument.SelectedIndex;
+    FDragIsShape := True;
+    FDragStartShapeContours := CloneScreenLayoutShapeContours(
+      TScreenLayoutShapeLayer(FDocument[FDragLayerIndex]).Contours);
+    FDragStartMouse := Point(X, Y);
+    Exit(True);
+  end;
   if ssCtrl in Shift then
   begin
     FDragLayerIndex := HitTestLayer(X, Y);
@@ -1147,6 +1512,8 @@ begin
   if HitTestShapeVertex(X, Y, FShapeContourIndex, FShapeVertexIndex) and
     not SelectionContainsLockedLayer then
   begin
+    FSelectedShapeContourIndex := FShapeContourIndex;
+    FSelectedShapeVertexIndex := FShapeVertexIndex;
     FDragMode := vcdmShapeVertex;
     FDragLayerIndex := FDocument.SelectedIndex;
     FDragIsShape := True;
@@ -1155,6 +1522,14 @@ begin
     FDragStartMouse := Point(X, Y);
     Exit(True);
   end;
+  if HitTestShapeSegment(X, Y, ClickedContourIndex, SegmentIndex,
+    SegmentParameter) then
+  begin
+    InsertShapeVertex(ClickedContourIndex, SegmentIndex, SegmentParameter);
+    Exit(False);
+  end;
+  FSelectedShapeContourIndex := -1;
+  FSelectedShapeVertexIndex := -1;
   SelectionRect := SelectedLayersScreenRect;
   if not SelectionRect.IsEmpty and not SelectionContainsLockedLayer then
   begin
@@ -1281,8 +1656,11 @@ end;
 function TVectArtCanvasInteraction.MouseMove(Shift: TShiftState;
   X, Y: Integer): Boolean;
 var
+  Angle: Single;
   CenterX: Single;
   CenterY: Single;
+  ControlLength: Single;
+  ControlVector: TPointF;
   CurrentMouseAngle: Single;
   DX: Single;
   DY: Single;
@@ -1292,6 +1670,7 @@ var
   NewImagePoints: TVectArtImagePoints;
   NewPathPoints: TArray<TPointF>;
   NewShapeContours: TArray<TScreenLayoutContour>;
+  OppositeLength: Single;
   ImageBounds: TRectF;
   RectangleLayer: TVectArtRectangleLayer;
 begin
@@ -1322,6 +1701,59 @@ begin
     FDocument.SetPathPoints(FDragLayerIndex, NewPathPoints);
     Exit(True);
   end;
+  if FDragMode = vcdmShapeBezierHandle then
+  begin
+    if (FDragLayerIndex <= 0) or (FShapeContourIndex < 0) or
+      (FShapeVertexIndex < 0) or
+      not (FDocument[FDragLayerIndex] is TScreenLayoutShapeLayer) then
+      Exit(True);
+    NewShapeContours := CloneScreenLayoutShapeContours(
+      FDragStartShapeContours);
+    with NewShapeContours[FShapeContourIndex].Vertices[
+      FShapeVertexIndex] do
+      ControlVector := TPointF.Create(ToLogicalX(X) - Position.X,
+        ToLogicalY(Y) - Position.Y);
+    ControlLength := Hypot(ControlVector.X, ControlVector.Y);
+    if (ssShift in Shift) and (ControlLength > 0.001) then
+    begin
+      Angle := ArcTan2(ControlVector.Y, ControlVector.X);
+      Angle := Round(Angle / (Pi / 12)) * (Pi / 12);
+      ControlVector := TPointF.Create(Cos(Angle) * ControlLength,
+        Sin(Angle) * ControlLength);
+    end;
+    if FShapeBezierHandle = slbhIncoming then
+    begin
+      OppositeLength := Hypot(
+        FDragStartShapeContours[FShapeContourIndex].Vertices[
+        FShapeVertexIndex].OutgoingControl.X,
+        FDragStartShapeContours[FShapeContourIndex].Vertices[
+        FShapeVertexIndex].OutgoingControl.Y);
+      NewShapeContours[FShapeContourIndex].Vertices[
+        FShapeVertexIndex].IncomingControl := ControlVector;
+      if ControlLength > 0.001 then
+        NewShapeContours[FShapeContourIndex].Vertices[
+          FShapeVertexIndex].OutgoingControl := TPointF.Create(
+          -ControlVector.X / ControlLength * OppositeLength,
+          -ControlVector.Y / ControlLength * OppositeLength);
+    end
+    else if FShapeBezierHandle = slbhOutgoing then
+    begin
+      OppositeLength := Hypot(
+        FDragStartShapeContours[FShapeContourIndex].Vertices[
+        FShapeVertexIndex].IncomingControl.X,
+        FDragStartShapeContours[FShapeContourIndex].Vertices[
+        FShapeVertexIndex].IncomingControl.Y);
+      NewShapeContours[FShapeContourIndex].Vertices[
+        FShapeVertexIndex].OutgoingControl := ControlVector;
+      if ControlLength > 0.001 then
+        NewShapeContours[FShapeContourIndex].Vertices[
+          FShapeVertexIndex].IncomingControl := TPointF.Create(
+          -ControlVector.X / ControlLength * OppositeLength,
+          -ControlVector.Y / ControlLength * OppositeLength);
+    end;
+    FDocument.SetShapeContours(FDragLayerIndex, NewShapeContours);
+    Exit(True);
+  end;
   if FDragMode = vcdmShapeVertex then
   begin
     if (FDragLayerIndex <= 0) or (FShapeContourIndex < 0) or
@@ -1336,8 +1768,6 @@ begin
         FDocument.CanvasLayer.Width * 0.5),
       EnsureRange(ToLogicalY(Y), FDocument.CanvasLayer.Height * -0.5,
         FDocument.CanvasLayer.Height * 0.5));
-    RecalculateScreenLayoutSmoothContour(
-      NewShapeContours[FShapeContourIndex]);
     FDocument.SetShapeContours(FDragLayerIndex, NewShapeContours);
     Exit(True);
   end;
@@ -1452,7 +1882,7 @@ begin
     if FDragMode = vcdmRangeSelect then
       ApplyRangeSelection;
     if FDragMode in [vcdmMove, vcdmResize, vcdmPathVertex,
-      vcdmShapeVertex] then
+      vcdmShapeVertex, vcdmShapeBezierHandle] then
       if FDragIsImage then
         CommitImagePointsCommand
       else if FDragIsPath then
@@ -1539,6 +1969,173 @@ begin
         Y - HalfSize + PATH_VERTEX_HANDLE_SIZE);
       Inc(ResultIndex);
     end;
+end;
+
+function TVectArtCanvasInteraction.SelectedShapeVertexKindButtons:
+  TArray<TScreenLayoutVertexKindButton>;
+var
+  Bounds: TRectF;
+  ButtonCenterX: Single;
+  ButtonCenterY: Single;
+  ButtonIndex: Integer;
+  CenterX: Integer;
+  CenterY: Integer;
+  Contours: TArray<TScreenLayoutContour>;
+  DirectionLength: Single;
+  DirectionX: Single;
+  DirectionY: Single;
+  HalfDistance: Single;
+  HalfSize: Integer;
+  ShapeLayer: TScreenLayoutShapeLayer;
+  TargetX: Single;
+  TargetY: Single;
+  TangentX: Single;
+  TangentY: Single;
+  Vertex: TScreenLayoutVertex;
+  VertexX: Integer;
+  VertexY: Integer;
+begin
+  Result := nil;
+  if (FDocument = nil) or (FDocument.SelectionCount <> 1) or
+    (FDocument.SelectedIndex <= 0) or
+    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(FDocument[FDocument.SelectedIndex]);
+  if ShapeLayer.Locked or (FSelectedShapeContourIndex < 0) or
+    (FSelectedShapeVertexIndex < 0) then
+    Exit;
+  Contours := ShapeLayer.Contours;
+  if (FSelectedShapeContourIndex > High(Contours)) or
+    (FSelectedShapeVertexIndex >
+    High(Contours[FSelectedShapeContourIndex].Vertices)) then
+    Exit;
+  Vertex := Contours[FSelectedShapeContourIndex].Vertices[
+    FSelectedShapeVertexIndex];
+  Bounds := ScreenLayoutShapeContoursBounds(Contours);
+  VertexX := ToScreenX(Vertex.Position.X);
+  VertexY := ToScreenY(Vertex.Position.Y);
+  CenterX := ToScreenX((Bounds.Left + Bounds.Right) * 0.5);
+  CenterY := ToScreenY((Bounds.Top + Bounds.Bottom) * 0.5);
+  DirectionX := VertexX - CenterX;
+  DirectionY := VertexY - CenterY;
+  DirectionLength := Hypot(DirectionX, DirectionY);
+  if DirectionLength < 0.001 then
+  begin
+    DirectionX := 0;
+    DirectionY := -1;
+  end
+  else
+  begin
+    DirectionX := DirectionX / DirectionLength;
+    DirectionY := DirectionY / DirectionLength;
+  end;
+  TargetX := VertexX + DirectionX * VERTEX_KIND_BUTTON_OFFSET;
+  TargetY := VertexY + DirectionY * VERTEX_KIND_BUTTON_OFFSET;
+  TangentX := -DirectionY;
+  TangentY := DirectionX;
+  HalfDistance := (VERTEX_KIND_BUTTON_SIZE + VERTEX_KIND_BUTTON_GAP) * 0.5;
+  HalfSize := VERTEX_KIND_BUTTON_SIZE div 2;
+  SetLength(Result, 2);
+  for ButtonIndex := 0 to High(Result) do
+  begin
+    if ButtonIndex = 0 then
+    begin
+      Result[ButtonIndex].Kind := slvkSharp;
+      ButtonCenterX := TargetX - TangentX * HalfDistance;
+      ButtonCenterY := TargetY - TangentY * HalfDistance;
+    end
+    else
+    begin
+      Result[ButtonIndex].Kind := slvkBezier;
+      ButtonCenterX := TargetX + TangentX * HalfDistance;
+      ButtonCenterY := TargetY + TangentY * HalfDistance;
+    end;
+    Result[ButtonIndex].Bounds := Rect(Round(ButtonCenterX) - HalfSize,
+      Round(ButtonCenterY) - HalfSize, Round(ButtonCenterX) + HalfSize,
+      Round(ButtonCenterY) + HalfSize);
+    Result[ButtonIndex].Selected := Result[ButtonIndex].Kind = Vertex.Kind;
+  end;
+end;
+
+function TVectArtCanvasInteraction.SelectedShapeVertexRect(
+  out VertexRect: TRect): Boolean;
+var
+  Contours: TArray<TScreenLayoutContour>;
+  HalfSize: Integer;
+  ShapeLayer: TScreenLayoutShapeLayer;
+  Vertex: TScreenLayoutVertex;
+  X: Integer;
+  Y: Integer;
+begin
+  Result := False;
+  VertexRect := TRect.Empty;
+  if (FDocument = nil) or (FDocument.SelectionCount <> 1) or
+    (FDocument.SelectedIndex <= 0) or
+    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(FDocument[FDocument.SelectedIndex]);
+  Contours := ShapeLayer.Contours;
+  if ShapeLayer.Locked or (FSelectedShapeContourIndex < 0) or
+    (FSelectedShapeContourIndex > High(Contours)) or
+    (FSelectedShapeVertexIndex < 0) or
+    (FSelectedShapeVertexIndex >
+    High(Contours[FSelectedShapeContourIndex].Vertices)) then
+    Exit;
+  Vertex := Contours[FSelectedShapeContourIndex].Vertices[
+    FSelectedShapeVertexIndex];
+  X := ToScreenX(Vertex.Position.X);
+  Y := ToScreenY(Vertex.Position.Y);
+  HalfSize := PATH_VERTEX_HANDLE_SIZE div 2;
+  VertexRect := Rect(X - HalfSize, Y - HalfSize,
+    X - HalfSize + PATH_VERTEX_HANDLE_SIZE,
+    Y - HalfSize + PATH_VERTEX_HANDLE_SIZE);
+  Result := True;
+end;
+
+function TVectArtCanvasInteraction.SelectedShapeBezierHandles(
+  out Handles: TScreenLayoutBezierHandles): Boolean;
+var
+  Contours: TArray<TScreenLayoutContour>;
+  HalfSize: Integer;
+  ShapeLayer: TScreenLayoutShapeLayer;
+  Vertex: TScreenLayoutVertex;
+begin
+  Result := False;
+  Handles := Default(TScreenLayoutBezierHandles);
+  if (FDocument = nil) or (FDocument.SelectionCount <> 1) or
+    (FDocument.SelectedIndex <= 0) or
+    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutShapeLayer(FDocument[FDocument.SelectedIndex]);
+  Contours := ShapeLayer.Contours;
+  if ShapeLayer.Locked or (FSelectedShapeContourIndex < 0) or
+    (FSelectedShapeContourIndex > High(Contours)) or
+    (FSelectedShapeVertexIndex < 0) or
+    (FSelectedShapeVertexIndex >
+    High(Contours[FSelectedShapeContourIndex].Vertices)) then
+    Exit;
+  Vertex := Contours[FSelectedShapeContourIndex].Vertices[
+    FSelectedShapeVertexIndex];
+  if Vertex.Kind <> slvkBezier then
+    Exit;
+  Handles.VertexPoint := Point(ToScreenX(Vertex.Position.X),
+    ToScreenY(Vertex.Position.Y));
+  Handles.IncomingPoint := Point(ToScreenX(Vertex.Position.X +
+    Vertex.IncomingControl.X), ToScreenY(Vertex.Position.Y +
+    Vertex.IncomingControl.Y));
+  Handles.OutgoingPoint := Point(ToScreenX(Vertex.Position.X +
+    Vertex.OutgoingControl.X), ToScreenY(Vertex.Position.Y +
+    Vertex.OutgoingControl.Y));
+  HalfSize := BEZIER_CONTROL_HANDLE_SIZE div 2;
+  Handles.IncomingRect := Rect(Handles.IncomingPoint.X - HalfSize,
+    Handles.IncomingPoint.Y - HalfSize,
+    Handles.IncomingPoint.X - HalfSize + BEZIER_CONTROL_HANDLE_SIZE,
+    Handles.IncomingPoint.Y - HalfSize + BEZIER_CONTROL_HANDLE_SIZE);
+  Handles.OutgoingRect := Rect(Handles.OutgoingPoint.X - HalfSize,
+    Handles.OutgoingPoint.Y - HalfSize,
+    Handles.OutgoingPoint.X - HalfSize + BEZIER_CONTROL_HANDLE_SIZE,
+    Handles.OutgoingPoint.Y - HalfSize + BEZIER_CONTROL_HANDLE_SIZE);
+  Result := True;
 end;
 
 function TVectArtCanvasInteraction.AxisAlignedResizedBounds(X, Y: Integer;
