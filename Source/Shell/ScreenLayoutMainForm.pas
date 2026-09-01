@@ -196,6 +196,7 @@ begin
   lblShortcutItems.Visible := False;
   FEditActionsUI := TVectArtEditActionsUI.CreateForHosts(Self, Self,
     pnlMenuBar, pnlShortcutBar);
+  FEditActionsUI.Document := FDocument;
   FEditActionsUI.History := FEditHistory;
   FEditActionsUI.OnCanvasSettingsRequest := CanvasSettingsRequest;
   pnlViewMenuButton.Left := 36;

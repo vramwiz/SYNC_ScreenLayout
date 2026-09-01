@@ -25,6 +25,9 @@
 - 基本図形には複数の閉輪郭を持つ万能図形データを使用する。輪郭は直線または3次ベジェの
   区間からなり、穴や離れた領域も1図形として保持できる。ShapeツールはV／Bキーで鋭角と
   ベジェ頂点を切り替えて作成でき、輪郭、制御点、頂点・区間種別、描画設定をJSONへ保存する。
+- Shapeの加算・AND・XORは選択中の最背面Shape、減算は最後に選択したアクティブShapeを
+  結果の基準とし、ほかの選択Shapeを演算後に取り除く。結果は複数輪郭とEven-Odd規則で
+  保持し、操作全体を1回のUndo／Redo対象とする。
 - Document JSONは専用形式のversion 4とし、異なるversionとの互換性を持たない。専用の
   `line` レイヤーは保存せず、直線も `closed: false` かつ2頂点の `path` として保存する。
 - JSONの画像レイヤーは `sourceFile` で外部画像を参照できる。相対パスはJSONファイルの場所を
@@ -43,6 +46,12 @@
 - プロジェクトから階層を上がる相対参照は使用せず、`Lib` と `Source` 以下への下方向の参照だけを使用する。
 - 画面レイアウトプラグイン固有のホスト処理は `Source\PlacementPlugin` に配置する。
 - 共通UI、モデル、描画、永続化、補助コントロールは、用途に応じて `Source` または `Lib` 以下へ配置する。
+- Shape論理演算は `ScreenLayoutShapeBooleanGeometry` がSkia Pathから輪郭への変換、
+  `ScreenLayoutShapeBooleanCommands` がUndo／Redo、`ScreenLayoutShapeBooleanOperations` が
+  選択状態と演算手順の調整を担当する。
+- キャンバス入力は `ScreenLayoutCanvasInteraction` が選択、共通変形、操作の振り分けを担当し、
+  `ScreenLayoutShapeInteraction` がShapeの頂点選択、区間分割、頂点削除、種別変更、
+  ベジェ制御点の操作と表示用幾何を担当する。
 - このリポジトリ固有の共有ユニット名には `ScreenLayout` 接頭辞を使用し、分離元アプリの
   `VectArtDesigner` 接頭辞は使用しない。
 - Google Skiaの文字描画ランタイムは `Lib\Skia\Win64\sk4d.dll` を使用する。

@@ -28,10 +28,10 @@ type
     procedure DrawImageThumbnail(ACanvas: TCustomCanvas;
       const ThumbnailRect: TRect; ImageLayer: TVectArtImageLayer);
     procedure DrawLayerItem(ACanvas: TCanvas; const ItemRect: TRect;
-      Layer: TVectArtLayer; Selected: Boolean); overload;
+      Layer: TVectArtLayer; Selected, Active: Boolean); overload;
     procedure DrawLayerItem(ACanvas: TDirect2DCanvas;
       const ItemRect: TRect; Layer: TVectArtLayer;
-      Selected: Boolean); overload;
+      Selected, Active: Boolean); overload;
     function FitThumbnailRect(const AvailableRect: TRect;
       LogicalWidth, LogicalHeight: Integer): TRect;
   public
@@ -65,6 +65,7 @@ const
   COLOR_ROW_BACKGROUND    = TColor($00272727);
   COLOR_ROW_BORDER        = TColor($00424242);
   COLOR_ROW_SELECTED      = TColor($003D352A);
+  COLOR_ROW_ACTIVE        = TColor($00D69C4A); // 減算の左辺にもなるアクティブ行の識別色。
   COLOR_TEXT_PRIMARY      = TColor($00E6E6E6);
   COLOR_TEXT_SECONDARY    = TColor($00A8A8A8);
   COLOR_THUMB_BORDER      = TColor($00606060);
@@ -274,7 +275,7 @@ begin
 end;
 
 procedure TVectArtLayerRenderer.DrawLayerItem(ACanvas: TCanvas;
-  const ItemRect: TRect; Layer: TVectArtLayer; Selected: Boolean);
+  const ItemRect: TRect; Layer: TVectArtLayer; Selected, Active: Boolean);
 var
   CanvasLayer: TVectArtCanvasLayer;
   CellRect: TRect;
@@ -303,6 +304,14 @@ begin
   ACanvas.Brush.Style := bsClear;
   ACanvas.Pen.Color := COLOR_ROW_BORDER;
   ACanvas.FrameRect(ItemRect);
+  if Active then
+  begin
+    ACanvas.Brush.Style := bsSolid;
+    ACanvas.Brush.Color := COLOR_ROW_ACTIVE;
+    ACanvas.FillRect(Rect(ItemRect.Left, ItemRect.Top,
+      ItemRect.Left + 3, ItemRect.Bottom));
+    ACanvas.Brush.Style := bsClear;
+  end;
 
   ThumbnailArea := Rect(ItemRect.Left + 30,
     ItemRect.Top + (ItemRect.Height - THUMBNAIL_HEIGHT) div 2,
@@ -481,7 +490,7 @@ begin
 end;
 
 procedure TVectArtLayerRenderer.DrawLayerItem(ACanvas: TDirect2DCanvas;
-  const ItemRect: TRect; Layer: TVectArtLayer; Selected: Boolean);
+  const ItemRect: TRect; Layer: TVectArtLayer; Selected, Active: Boolean);
 var
   CanvasLayer: TVectArtCanvasLayer;
   CellRect: TRect;
@@ -509,6 +518,14 @@ begin
   ACanvas.Brush.Style := bsClear;
   ACanvas.Pen.Color := COLOR_ROW_BORDER;
   ACanvas.FrameRect(ItemRect);
+  if Active then
+  begin
+    ACanvas.Brush.Style := bsSolid;
+    ACanvas.Brush.Color := COLOR_ROW_ACTIVE;
+    ACanvas.FillRect(Rect(ItemRect.Left, ItemRect.Top,
+      ItemRect.Left + 3, ItemRect.Bottom));
+    ACanvas.Brush.Style := bsClear;
+  end;
 
   ThumbnailArea := Rect(ItemRect.Left + 30,
     ItemRect.Top + (ItemRect.Height - THUMBNAIL_HEIGHT) div 2,
@@ -748,7 +765,7 @@ begin
     if ItemRect.Bottom <= Bounds.Top then
       Break;
     DrawLayerItem(ACanvas, ItemRect, FDocument[I],
-      FDocument.IsLayerSelected(I));
+      FDocument.IsLayerSelected(I), FDocument.SelectedIndex = I);
   end;
 end;
 
@@ -770,7 +787,7 @@ begin
     if ItemRect.Bottom <= Bounds.Top then
       Break;
     DrawLayerItem(ACanvas, ItemRect, FDocument[I],
-      FDocument.IsLayerSelected(I));
+      FDocument.IsLayerSelected(I), FDocument.SelectedIndex = I);
   end;
 end;
 

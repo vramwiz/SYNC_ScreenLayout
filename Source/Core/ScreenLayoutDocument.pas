@@ -960,7 +960,10 @@ begin
       if not Selection.Contains(I) then
         Selection.Add(I);
     Selection.Sort;
-    SetSelectedLayers(Selection.ToArray);
+    // レイヤー操作用の昇順選択を保ちつつ、最後に指した範囲端をアクティブにする。
+    SetSelectedLayersCore(Selection.ToArray, False);
+    FSelectedIndex := TargetIndex;
+    SelectionChanged;
   finally
     Selection.Free;
   end;
@@ -1005,6 +1008,7 @@ end;
 
 procedure TVectArtDocument.ToggleSelectedLayer(Index: Integer);
 var
+  Added: Boolean;
   Selection: TList<Integer>;
 begin
   if (Index <= 0) or (Index >= FLayers.Count) then
@@ -1012,12 +1016,21 @@ begin
   Selection := TList<Integer>.Create;
   try
     Selection.AddRange(FSelectedLayers);
-    if Selection.Contains(Index) then
+    Added := not Selection.Contains(Index);
+    if not Added then
       Selection.Remove(Index)
     else
       Selection.Add(Index);
     Selection.Sort;
-    SetSelectedLayers(Selection.ToArray);
+    // 選択配列は積層順のまま保ち、Ctrlクリックした対象だけをアクティブとして別管理する。
+    SetSelectedLayersCore(Selection.ToArray, False);
+    if Added then
+      FSelectedIndex := Index
+    else if Selection.Count > 0 then
+      FSelectedIndex := Selection[Selection.Count - 1]
+    else
+      FSelectedIndex := -1;
+    SelectionChanged;
   finally
     Selection.Free;
   end;
