@@ -1,4 +1,4 @@
-// 同種の選択Rectangle、Path、画像一式の複製、挿入、選択更新を担当する。
+﻿// 同種の選択Rectangle、Path、画像一式の複製、挿入、選択更新を担当する。
 unit ScreenLayoutLayerDuplication;
 
 interface
@@ -14,7 +14,8 @@ implementation
 
 uses
   System.Classes, System.Generics.Collections, System.SysUtils, System.Types,
-  ScreenLayoutLayerBatchCommands;
+  ScreenLayoutEditCommands, ScreenLayoutLayerBatchCommands,
+  ScreenLayoutLayerStructureCommands;
 
 const
   DUPLICATE_OFFSET = 24;
@@ -24,6 +25,7 @@ var
   HasImages: Boolean;
   HasPaths: Boolean;
   HasRectangles: Boolean;
+  HasRoundedRectangles: Boolean;
   I: Integer;
 begin
   Result := (ADocument <> nil) and (ADocument.SelectionCount > 0);
@@ -32,13 +34,16 @@ begin
   HasImages := False;
   HasPaths := False;
   HasRectangles := False;
+  HasRoundedRectangles := False;
   for I := 0 to ADocument.LayerCount - 1 do
     if ADocument.IsLayerSelected(I) and
       ((I = 0) or ADocument[I].Locked) then
       Exit(False)
     else if ADocument.IsLayerSelected(I) then
     begin
-      if ADocument[I] is TVectArtRectangleLayer then
+      if ADocument[I] is TScreenLayoutRoundedRectangleLayer then
+        HasRoundedRectangles := True
+      else if ADocument[I] is TVectArtRectangleLayer then
         HasRectangles := True
       else if ADocument[I] is TVectArtImageLayer then
         HasImages := True
@@ -46,7 +51,8 @@ begin
         HasPaths := True
       else
         Exit(False);
-      if Ord(HasRectangles) + Ord(HasImages) + Ord(HasPaths) > 1 then
+      if Ord(HasRectangles) + Ord(HasRoundedRectangles) + Ord(HasImages) +
+        Ord(HasPaths) > 1 then
         Exit(False);
     end;
 end;
@@ -70,6 +76,7 @@ procedure DuplicateSelectedLayers(ADocument: TVectArtDocument;
 var
   AfterSelection: TArray<Integer>;
   BeforeSelection: TArray<Integer>;
+  CompoundCommand: TVectArtCompoundCommand;
   Data: TArray<TVectArtRectangleData>;
   DataList: TList<TVectArtRectangleData>;
   I: Integer;
@@ -86,6 +93,10 @@ var
   PathValue: TVectArtPathData;
   RectangleData: TVectArtRectangleData;
   RectangleLayer: TVectArtRectangleLayer;
+  RoundedData: TArray<TScreenLayoutRoundedRectangleData>;
+  RoundedDataList: TList<TScreenLayoutRoundedRectangleData>;
+  RoundedLayer: TScreenLayoutRoundedRectangleLayer;
+  RoundedValue: TScreenLayoutRoundedRectangleData;
   StartIndex: Integer;
   UsedNames: TStringList;
 begin
@@ -95,6 +106,7 @@ begin
   DataList := TList<TVectArtRectangleData>.Create;
   ImageDataList := TList<TVectArtImageData>.Create;
   PathDataList := TList<TVectArtPathData>.Create;
+  RoundedDataList := TList<TScreenLayoutRoundedRectangleData>.Create;
   NewIndices := TList<Integer>.Create;
   UsedNames := TStringList.Create;
   try
@@ -104,7 +116,21 @@ begin
     for I := 1 to ADocument.LayerCount - 1 do
       if ADocument.IsLayerSelected(I) then
       begin
-        if ADocument[I] is TVectArtImageLayer then
+        if ADocument[I] is TScreenLayoutRoundedRectangleLayer then
+        begin
+          RoundedLayer := TScreenLayoutRoundedRectangleLayer(ADocument[I]);
+          RoundedValue.Bounds := RoundedLayer.Bounds;
+          RoundedValue.Bounds.Offset(DUPLICATE_OFFSET, DUPLICATE_OFFSET);
+          RoundedValue.CornerRadii := RoundedLayer.CornerRadii;
+          RoundedValue.FillColor := RoundedLayer.FillColor;
+          RoundedValue.Locked := False;
+          RoundedValue.Name := CopyName(RoundedLayer.Name, UsedNames);
+          RoundedValue.Opacity := RoundedLayer.Opacity;
+          RoundedValue.RotationDegrees := RoundedLayer.RotationDegrees;
+          RoundedValue.Visible := RoundedLayer.Visible;
+          RoundedDataList.Add(RoundedValue);
+        end
+        else if ADocument[I] is TVectArtImageLayer then
         begin
           ImageLayer := TVectArtImageLayer(ADocument[I]);
           ImageValue.Name := CopyName(ImageLayer.Name, UsedNames);
@@ -124,19 +150,16 @@ begin
         begin
           PathLayer := TVectArtPathLayer(ADocument[I]);
           PathValue.Closed := PathLayer.Closed;
-          PathValue.FillColor := PathLayer.FillColor;
           PathValue.LineCap := PathLayer.LineCap;
-          PathValue.LineJoin := PathLayer.LineJoin;
           PathValue.Locked := False;
-          PathValue.MifAntiAlias := PathLayer.MifAntiAlias;
           PathValue.MifStrokeStyle := PathLayer.MifStrokeStyle;
           PathValue.Name := CopyName(PathLayer.Name, UsedNames);
           PathValue.Opacity := PathLayer.Opacity;
-          SetLength(PathValue.Points, Length(PathLayer.Points));
-          for J := 0 to High(PathLayer.Points) do
-            PathValue.Points[J] := TPointF.Create(
-              PathLayer.Points[J].X + DUPLICATE_OFFSET,
-              PathLayer.Points[J].Y + DUPLICATE_OFFSET);
+          PathValue.Vertices := PathLayer.Vertices;
+          for J := 0 to High(PathValue.Vertices) do
+            PathValue.Vertices[J].Position := TPointF.Create(
+              PathValue.Vertices[J].Position.X + DUPLICATE_OFFSET,
+              PathValue.Vertices[J].Position.Y + DUPLICATE_OFFSET);
           PathValue.StrokeColor := PathLayer.StrokeColor;
           PathValue.StrokeWidth := PathLayer.StrokeWidth;
           PathValue.Visible := PathLayer.Visible;
@@ -158,7 +181,17 @@ begin
       end;
 
     StartIndex := ADocument.LayerCount;
-    if PathDataList.Count > 0 then
+    if RoundedDataList.Count > 0 then
+    begin
+      RoundedData := RoundedDataList.ToArray;
+      for I := 0 to High(RoundedData) do
+      begin
+        Index := ADocument.InsertRoundedRectangle(ADocument.LayerCount,
+          RoundedData[I]);
+        NewIndices.Add(Index);
+      end;
+    end
+    else if PathDataList.Count > 0 then
     begin
       PathData := PathDataList.ToArray;
       for I := 0 to High(PathData) do
@@ -188,7 +221,16 @@ begin
     ADocument.SetSelectedLayers(NewIndices.ToArray);
     AfterSelection := ADocument.GetSelectedLayerIndices;
     if AEditHistory <> nil then
-      if PathDataList.Count > 0 then
+      if RoundedDataList.Count > 0 then
+      begin
+        CompoundCommand := TVectArtCompoundCommand.Create;
+        for I := 0 to High(RoundedData) do
+          CompoundCommand.Add(TScreenLayoutInsertRoundedRectangleCommand.Create(
+            ADocument, StartIndex + I, RoundedData[I], BeforeSelection,
+            AfterSelection));
+        AEditHistory.AddApplied(CompoundCommand);
+      end
+      else if PathDataList.Count > 0 then
         AEditHistory.AddApplied(TVectArtInsertPathsCommand.Create(
           ADocument, StartIndex, PathData, BeforeSelection, AfterSelection))
       else if ImageDataList.Count > 0 then
@@ -200,6 +242,7 @@ begin
   finally
     UsedNames.Free;
     NewIndices.Free;
+    RoundedDataList.Free;
     PathDataList.Free;
     ImageDataList.Free;
     DataList.Free;

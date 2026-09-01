@@ -1,5 +1,4 @@
-﻿// Line詳細設定で使うダークボタンと線端・接合・AAの選択アイコンを描画する。
-// 線端・接合形式とアンチエイリアスの選択ボタンを提供する。
+﻿// Line詳細設定で使うダークボタンと拡大した線端形状アイコンを描画する。
 unit ScreenLayoutLineStyleControls;
 
 interface
@@ -40,28 +39,6 @@ type
     procedure Paint; override;
   public
     property LineCap: TVectArtLineCap read FLineCap write FLineCap;
-    property Selected: Boolean read FSelected write SetSelected;
-  end;
-
-  TVectArtLineJoinButton = class(TVectArtDarkButton)
-  private
-    FLineJoin: TVectArtLineJoin;
-    FSelected: Boolean;
-    procedure SetSelected(Value: Boolean);
-  protected
-    procedure Paint; override;
-  public
-    property LineJoin: TVectArtLineJoin read FLineJoin write FLineJoin;
-    property Selected: Boolean read FSelected write SetSelected;
-  end;
-
-  TVectArtMifAntiAliasButton = class(TVectArtDarkButton)
-  private
-    FSelected: Boolean;
-    procedure SetSelected(Value: Boolean);
-  protected
-    procedure Paint; override;
-  public
     property Selected: Boolean read FSelected write SetSelected;
   end;
 
@@ -196,10 +173,11 @@ procedure TVectArtLineCapButton.Paint;
 var
   BackgroundColor: TColor;
   Bounds: TRect;
-  GuideLeft: Integer;
-  GuideRight: Integer;
+  EndX: Integer;
   MidY: Integer;
-  StrokeBounds: TRect;
+  Points: array[0..2] of TPoint;
+  ShaftLeft: Integer;
+  StrokeHalfWidth: Integer;
 begin
   inherited Paint;
   Bounds := ClientRect;
@@ -217,15 +195,16 @@ begin
     Canvas.Rectangle(Bounds);
   end;
 
-  GuideLeft := 11;
-  GuideRight := Width - 12;
+  ShaftLeft := 7;
+  EndX := Width - 10;
   MidY := Height div 2;
+  StrokeHalfWidth := Height div 6;
+  if StrokeHalfWidth < 3 then
+    StrokeHalfWidth := 3;
   Canvas.Pen.Color := TColor($00606060);
   Canvas.Pen.Style := psDot;
-  Canvas.MoveTo(GuideLeft, 5);
-  Canvas.LineTo(GuideLeft, Height - 5);
-  Canvas.MoveTo(GuideRight, 5);
-  Canvas.LineTo(GuideRight, Height - 5);
+  Canvas.MoveTo(EndX, 4);
+  Canvas.LineTo(EndX, Height - 4);
   Canvas.Pen.Style := psSolid;
   Canvas.Brush.Style := bsSolid;
   if Enabled then
@@ -239,120 +218,29 @@ begin
     Canvas.Pen.Color := COLOR_BUTTON_BORDER;
   end;
   case FLineCap of
-    vlcButt:
-      StrokeBounds := Rect(GuideLeft, MidY - 1, GuideRight + 1, MidY + 2);
     vlcSquare:
+      Canvas.FillRect(Rect(ShaftLeft, MidY - StrokeHalfWidth, EndX + 1,
+        MidY + StrokeHalfWidth + 1));
+    vlcRound:
       begin
-        StrokeBounds := Rect(GuideLeft, MidY - 1, GuideRight + 1, MidY + 2);
-        Canvas.FillRect(StrokeBounds);
-        Canvas.FillRect(Rect(GuideLeft - 3, MidY - 3, GuideLeft + 1, MidY + 4));
-        Canvas.FillRect(Rect(GuideRight, MidY - 3, GuideRight + 4, MidY + 4));
-        Exit;
+        Canvas.FillRect(Rect(ShaftLeft, MidY - StrokeHalfWidth, EndX + 1,
+          MidY + StrokeHalfWidth + 1));
+        Canvas.Ellipse(EndX - StrokeHalfWidth, MidY - StrokeHalfWidth,
+          EndX + StrokeHalfWidth + 1, MidY + StrokeHalfWidth + 1);
       end;
-  else
-    begin
-      StrokeBounds := Rect(GuideLeft, MidY - 1, GuideRight + 1, MidY + 2);
-      Canvas.FillRect(StrokeBounds);
-      Canvas.Ellipse(GuideLeft - 3, MidY - 3, GuideLeft + 4, MidY + 4);
-      Canvas.Ellipse(GuideRight - 3, MidY - 3, GuideRight + 4, MidY + 4);
-      Exit;
-    end;
+    vlcTriangle:
+      begin
+        Canvas.FillRect(Rect(ShaftLeft, MidY - StrokeHalfWidth, EndX + 1,
+          MidY + StrokeHalfWidth + 1));
+        Points[0] := Point(EndX, MidY - StrokeHalfWidth);
+        Points[1] := Point(EndX + StrokeHalfWidth, MidY);
+        Points[2] := Point(EndX, MidY + StrokeHalfWidth);
+        Canvas.Polygon(Points);
+      end;
   end;
-  Canvas.FillRect(StrokeBounds);
 end;
 
 procedure TVectArtLineCapButton.SetSelected(Value: Boolean);
-begin
-  if FSelected = Value then
-    Exit;
-  FSelected := Value;
-  Invalidate;
-end;
-
-{ TVectArtLineJoinButton }
-
-procedure TVectArtLineJoinButton.Paint;
-var
-  BackgroundColor: TColor;
-  Bounds: TRect;
-  CenterX: Integer;
-  Points: array[0..2] of TPoint;
-begin
-  inherited Paint;
-  Bounds := ClientRect;
-  Dec(Bounds.Right);
-  Dec(Bounds.Bottom);
-  if FSelected then
-  begin
-    if Enabled then
-      BackgroundColor := COLOR_BUTTON_SELECTED
-    else
-      BackgroundColor := COLOR_BUTTON_DISABLED;
-    Canvas.Brush.Style := bsSolid;
-    Canvas.Brush.Color := BackgroundColor;
-    Canvas.Pen.Color := COLOR_BUTTON_SELECTED_BORDER;
-    Canvas.Rectangle(Bounds);
-  end;
-
-  CenterX := Width div 2;
-  if Enabled then
-  begin
-    Canvas.Brush.Color := COLOR_TEXT;
-    Canvas.Pen.Color := COLOR_TEXT;
-  end
-  else
-  begin
-    Canvas.Brush.Color := COLOR_BUTTON_BORDER;
-    Canvas.Pen.Color := COLOR_BUTTON_BORDER;
-  end;
-  Canvas.Pen.Width := 3;
-  Canvas.MoveTo(8, Height - 8);
-  Canvas.LineTo(CenterX, 10);
-  Canvas.LineTo(Width - 8, Height - 8);
-  Canvas.Pen.Width := 1;
-  case FLineJoin of
-    vljMiter:
-      begin
-        Points[0] := Point(CenterX - 4, 12);
-        Points[1] := Point(CenterX, 4);
-        Points[2] := Point(CenterX + 4, 12);
-        Canvas.Polygon(Points);
-      end;
-    vljBevel:
-      Canvas.FillRect(Rect(CenterX - 4, 7, CenterX + 5, 13));
-    vljRound:
-      Canvas.Ellipse(CenterX - 5, 5, CenterX + 6, 16);
-  end;
-end;
-
-procedure TVectArtLineJoinButton.SetSelected(Value: Boolean);
-begin
-  if FSelected = Value then
-    Exit;
-  FSelected := Value;
-  Invalidate;
-end;
-
-{ TVectArtMifAntiAliasButton }
-
-procedure TVectArtMifAntiAliasButton.Paint;
-var
-  Bounds: TRect;
-begin
-  inherited Paint;
-  if not FSelected then
-    Exit;
-  Bounds := ClientRect;
-  Dec(Bounds.Right);
-  Dec(Bounds.Bottom);
-  Canvas.Brush.Style := bsClear;
-  Canvas.Pen.Color := COLOR_BUTTON_SELECTED_BORDER;
-  Canvas.Rectangle(Bounds);
-  InflateRect(Bounds, -2, -2);
-  Canvas.Rectangle(Bounds);
-end;
-
-procedure TVectArtMifAntiAliasButton.SetSelected(Value: Boolean);
 begin
   if FSelected = Value then
     Exit;

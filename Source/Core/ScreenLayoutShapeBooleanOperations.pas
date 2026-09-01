@@ -1,4 +1,4 @@
-﻿// 選択Shapeの論理演算を組み立て、結果レイヤーへの置換と履歴登録を調整する。
+﻿// 選択したShape／四角の論理演算を組み立て、結果Shapeへの置換と履歴登録を調整する。
 unit ScreenLayoutShapeBooleanOperations;
 
 interface
@@ -11,10 +11,10 @@ type
   TScreenLayoutShapeBooleanOperation = (slsboUnion, slsboSubtract,
     slsboIntersect, slsboXor);
 
-// 未ロックのShapeが2個以上選択されている場合にTrueを返す。
+// 未ロックのShape／Rectangle／角丸Rectangleが2個以上選択されている場合にTrueを返す。
 function CanExecuteScreenLayoutShapeBoolean(
   Document: TVectArtDocument): Boolean;
-// 減算はアクティブShape、それ以外は最背面Shapeを基準に選択Shapeを結果へ置換する。
+// 減算はアクティブ図形、それ以外は最背面図形を基準に選択図形を結果Shapeへ置換する。
 // Skiaの演算に失敗した場合だけFalseを返し、空の演算結果は成功として全対象を除去する。
 function ExecuteScreenLayoutShapeBoolean(Document: TVectArtDocument;
   EditHistory: TVectArtEditHistory;
@@ -23,7 +23,7 @@ function ExecuteScreenLayoutShapeBoolean(Document: TVectArtDocument;
 implementation
 
 uses
-  System.Skia,
+  System.Skia, Vcl.Graphics,
   ScreenLayoutShapeBooleanCommands, ScreenLayoutShapeBooleanGeometry,
   ScreenLayoutShapePath;
 
@@ -51,14 +51,31 @@ begin
   Result.FillColor := ShapeLayer.FillColor;
   Result.FillRule := ShapeLayer.FillRule;
   Result.Locked := ShapeLayer.Locked;
-  Result.MifAntiAlias := ShapeLayer.MifAntiAlias;
   Result.Name := ShapeLayer.Name;
   Result.Opacity := ShapeLayer.Opacity;
   Result.StrokeColor := ShapeLayer.StrokeColor;
-  Result.StrokeJoin := ShapeLayer.StrokeJoin;
   Result.StrokeStyle := ShapeLayer.StrokeStyle;
   Result.StrokeWidth := ShapeLayer.StrokeWidth;
   Result.Visible := ShapeLayer.Visible;
+end;
+
+function BooleanLayerData(Layer: TVectArtLayer): TScreenLayoutShapeData;
+var
+  RectangleLayer: TVectArtRectangleLayer;
+begin
+  if Layer is TScreenLayoutShapeLayer then
+    Exit(ShapeLayerData(TScreenLayoutShapeLayer(Layer)));
+  RectangleLayer := TVectArtRectangleLayer(Layer);
+  Result.Contours := nil;
+  Result.FillColor := RectangleLayer.FillColor;
+  Result.FillRule := slfrEvenOdd;
+  Result.Locked := RectangleLayer.Locked;
+  Result.Name := RectangleLayer.Name;
+  Result.Opacity := RectangleLayer.Opacity;
+  Result.StrokeColor := clBlack;
+  Result.StrokeStyle := vssSolid;
+  Result.StrokeWidth := 0;
+  Result.Visible := RectangleLayer.Visible;
 end;
 
 function CanExecuteScreenLayoutShapeBoolean(
@@ -73,7 +90,8 @@ begin
   SelectedIndices := Document.GetSelectedLayerIndices;
   for Index in SelectedIndices do
     if (Index <= 0) or (Index >= Document.LayerCount) or
-      not (Document[Index] is TScreenLayoutShapeLayer) or
+      not ((Document[Index] is TScreenLayoutShapeLayer) or
+        (Document[Index] is TVectArtRectangleLayer)) or
       Document[Index].Locked then
       Exit;
   Result := True;
@@ -88,10 +106,10 @@ var
   I: Integer;
   OperandPath: ISkPath;
   OriginalSelection: TArray<Integer>;
+  Layer: TVectArtLayer;
   ResultData: TScreenLayoutShapeData;
   ResultPath: ISkPath;
   SelectedIndices: TArray<Integer>;
-  ShapeLayer: TScreenLayoutShapeLayer;
 begin
   Result := False;
   if not CanExecuteScreenLayoutShapeBoolean(Document) then
@@ -103,15 +121,15 @@ begin
     BaseIndex := Document.SelectedIndex
   else
     BaseIndex := SelectedIndices[0];
-  ShapeLayer := TScreenLayoutShapeLayer(Document[BaseIndex]);
-  ResultData := ShapeLayerData(ShapeLayer);
-  ResultPath := BuildScreenLayoutShapePath(ShapeLayer);
+  Layer := Document[BaseIndex];
+  ResultData := BooleanLayerData(Layer);
+  ResultPath := BuildScreenLayoutBooleanPath(Layer);
   for I := 0 to High(SelectedIndices) do
   begin
     if SelectedIndices[I] = BaseIndex then
       Continue;
-    ShapeLayer := TScreenLayoutShapeLayer(Document[SelectedIndices[I]]);
-    OperandPath := BuildScreenLayoutShapePath(ShapeLayer);
+    Layer := Document[SelectedIndices[I]];
+    OperandPath := BuildScreenLayoutBooleanPath(Layer);
     case Operation of
       slsboUnion:
         ResultPath := ResultPath.Op(OperandPath, TSkPathOp.Union);

@@ -22,7 +22,6 @@ type
     FContextText: string;
     FMifStrokeStyleCombo: TVectArtMifStrokeStyleCombo;
     FLineCapButtons: array[TVectArtLineCap] of TVectArtLineCapButton;
-    FLineJoinButtons: array[TVectArtLineJoin] of TVectArtLineJoinButton;
     FStrokeWidthTrackBar: THorizontalTrackBarControl;
     FStrokeWidthEdit: TEdit;
     FTrackDocumentUpdateActive: Boolean;
@@ -41,7 +40,6 @@ type
     procedure DetailsClick(Sender: TObject);
     function IsDetailsControl(Control: TControl): Boolean;
     procedure LineCapClick(Sender: TObject);
-    procedure LineJoinClick(Sender: TObject);
     function SelectedLineIndices: TArray<Integer>;
     function SelectionHasLockedLine: Boolean;
     procedure StyleChanged(Sender: TObject);
@@ -58,8 +56,6 @@ type
     constructor CreateForHost(AOwner: TComponent; AHost: TWinControl);
     // 作成初期値または選択中の全Lineへ線端形状を適用し、必要なら履歴へ記録する。
     procedure ApplyLineCap(Value: TVectArtLineCap);
-    // 作成初期値または選択中の全Lineへ接合形式を適用する。
-    procedure ApplyLineJoin(Value: TVectArtLineJoin);
     // 作成初期値または選択中の全Lineへ線種を適用する。
     procedure ApplyMifStrokeStyle(Value: TVectArtMifStrokeStyle);
     // 作成初期値または選択中の全Lineへ線幅を適用する。
@@ -71,8 +67,6 @@ type
     property Document: TVectArtDocument read FDocument write FDocument;
     // 指定した線端形状の選択ボタンを返す。戻り値の所有権はSelfが保持する。
     function LineCapButton(Value: TVectArtLineCap): TVectArtLineCapButton;
-    // 指定した接合形式の選択ボタンを返す。戻り値の所有権はSelfが保持する。
-    function LineJoinButton(Value: TVectArtLineJoin): TVectArtLineJoinButton;
     property DetailsButton: TVectArtDarkButton read FDetailsButton;
     property DetailsPanel: TPanel read FDetailsPanel;
     property EditHistory: TVectArtEditHistory read FEditHistory
@@ -154,7 +148,6 @@ procedure TVectArtLineToolbarControl.BuildControls;
 var
   Cap: TVectArtLineCap;
   CaptionLabel: TLabel;
-  Join: TVectArtLineJoin;
   ParentForm: TCustomForm;
 begin
   FStrokeWidthTrackBar := THorizontalTrackBarControl.Create(Self);
@@ -204,7 +197,7 @@ begin
   FDetailsPanel.BevelOuter := bvRaised;
   FDetailsPanel.Color := COLOR_BACKGROUND;
   FDetailsPanel.ParentBackground := False;
-  FDetailsPanel.SetBounds(0, 0, 420, 180);
+  FDetailsPanel.SetBounds(0, 0, 420, 140);
   FDetailsPanel.Visible := False;
 
   FStrokeWidthTrackBar.Parent := FDetailsPanel;
@@ -247,32 +240,10 @@ begin
     FLineCapButtons[Cap].OnClick := LineCapClick;
     FLineCapButtons[Cap].ShowHint := True;
   end;
-  FLineCapButtons[vlcButt].Hint := UnicodeText([$5E73, $578B]);
   FLineCapButtons[vlcSquare].Hint := UnicodeText([$89D2, $578B]);
   FLineCapButtons[vlcRound].Hint := UnicodeText([$4E38, $578B]);
-  FLineCapButtons[vlcButt].Selected := True;
-
-  CaptionLabel := TLabel.Create(Self);
-  CaptionLabel.Parent := FDetailsPanel;
-  CaptionLabel.Caption := UnicodeText([$63A5, $5408, $5F62, $5F0F]);
-  CaptionLabel.Font.Name := 'Segoe UI';
-  CaptionLabel.Font.Height := -12;
-  CaptionLabel.Font.Color := COLOR_LABEL;
-  CaptionLabel.SetBounds(12, 146, 60, 20);
-
-  for Join := Low(TVectArtLineJoin) to High(TVectArtLineJoin) do
-  begin
-    FLineJoinButtons[Join] := TVectArtLineJoinButton.Create(Self);
-    FLineJoinButtons[Join].Parent := FDetailsPanel;
-    FLineJoinButtons[Join].LineJoin := Join;
-    FLineJoinButtons[Join].SetBounds(78 + Ord(Join) * 46, 135, 40, 34);
-    FLineJoinButtons[Join].OnClick := LineJoinClick;
-    FLineJoinButtons[Join].ShowHint := True;
-  end;
-  FLineJoinButtons[vljMiter].Hint := 'Miter';
-  FLineJoinButtons[vljBevel].Hint := 'Bevel';
-  FLineJoinButtons[vljRound].Hint := 'Round';
-  FLineJoinButtons[vljMiter].Selected := True;
+  FLineCapButtons[vlcTriangle].Hint := UnicodeText([$4E09, $89D2, $578B]);
+  FLineCapButtons[vlcSquare].Selected := True;
 
 end;
 
@@ -316,52 +287,6 @@ begin
       Command.Free;
     if FEditorState <> nil then
       FEditorState.LineCap := Value;
-  finally
-    FUpdating := False;
-  end;
-  RefreshState;
-end;
-
-procedure TVectArtLineToolbarControl.ApplyLineJoin(Value: TVectArtLineJoin);
-var
-  Command: TVectArtCompoundCommand;
-  I: Integer;
-  Indices: TArray<Integer>;
-  Layer: TVectArtPathLayer;
-begin
-  if FUpdating then
-    Exit;
-  Indices := SelectedLineIndices;
-  if (Length(Indices) > 0) and SelectionHasLockedLine then
-    Exit;
-  FUpdating := True;
-  try
-    Command := nil;
-    if (Length(Indices) > 0) and (FEditHistory <> nil) then
-      Command := TVectArtCompoundCommand.Create;
-    if FDocument <> nil then
-      FDocument.BeginUpdate;
-    try
-      for I := 0 to High(Indices) do
-      begin
-        Layer := TVectArtPathLayer(FDocument[Indices[I]]);
-        if Layer.LineJoin = Value then
-          Continue;
-        if Command <> nil then
-          Command.Add(TVectArtPathLineJoinCommand.Create(FDocument, Indices[I],
-            Layer.LineJoin, Value));
-        FDocument.SetPathLineJoin(Indices[I], Value);
-      end;
-    finally
-      if FDocument <> nil then
-        FDocument.EndUpdate;
-    end;
-    if (Command <> nil) and (Command.Count > 0) then
-      FEditHistory.AddApplied(Command)
-    else
-      Command.Free;
-    if FEditorState <> nil then
-      FEditorState.LineJoin := Value;
   finally
     FUpdating := False;
   end;
@@ -585,23 +510,10 @@ begin
   ApplyLineCap(TVectArtLineCapButton(Sender).LineCap);
 end;
 
-procedure TVectArtLineToolbarControl.LineJoinClick(Sender: TObject);
-begin
-  if FUpdating or not (Sender is TVectArtLineJoinButton) then
-    Exit;
-  ApplyLineJoin(TVectArtLineJoinButton(Sender).LineJoin);
-end;
-
 function TVectArtLineToolbarControl.LineCapButton(
   Value: TVectArtLineCap): TVectArtLineCapButton;
 begin
   Result := FLineCapButtons[Value];
-end;
-
-function TVectArtLineToolbarControl.LineJoinButton(
-  Value: TVectArtLineJoin): TVectArtLineJoinButton;
-begin
-  Result := FLineJoinButtons[Value];
 end;
 
 procedure TVectArtLineToolbarControl.Paint;
@@ -619,15 +531,12 @@ procedure TVectArtLineToolbarControl.RefreshState;
 var
   CommonStyle: Boolean;
   CommonLineCap: Boolean;
-  CommonLineJoin: Boolean;
   CommonWidth: Boolean;
   Cap: TVectArtLineCap;
   I: Integer;
   Indices: TArray<Integer>;
   Layer: TVectArtPathLayer;
   LineCapValue: TVectArtLineCap;
-  LineJoinValue: TVectArtLineJoin;
-  Join: TVectArtLineJoin;
   Locked: Boolean;
   StyleValue: TVectArtMifStrokeStyle;
   WidthValue: Single;
@@ -647,12 +556,10 @@ begin
       Layer := TVectArtPathLayer(FDocument[Indices[0]]);
       WidthValue := Layer.StrokeWidth;
       LineCapValue := Layer.LineCap;
-      LineJoinValue := Layer.LineJoin;
       StyleValue := Layer.MifStrokeStyle;
       CommonWidth := True;
       CommonStyle := True;
       CommonLineCap := True;
-      CommonLineJoin := True;
       for I := 1 to High(Indices) do
       begin
         Layer := TVectArtPathLayer(FDocument[Indices[I]]);
@@ -661,8 +568,6 @@ begin
         CommonStyle := CommonStyle and (Layer.MifStrokeStyle = StyleValue);
         CommonLineCap := CommonLineCap and
           (Layer.LineCap = LineCapValue);
-        CommonLineJoin := CommonLineJoin and
-          (Layer.LineJoin = LineJoinValue);
       end;
       if CommonWidth then
       begin
@@ -683,26 +588,22 @@ begin
       else
         for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
           FLineCapButtons[Cap].Selected := False;
-      if CommonLineJoin then
-        for Join := Low(TVectArtLineJoin) to High(TVectArtLineJoin) do
-          FLineJoinButtons[Join].Selected := Join = LineJoinValue
-      else
-        for Join := Low(TVectArtLineJoin) to High(TVectArtLineJoin) do
-          FLineJoinButtons[Join].Selected := False;
       Locked := SelectionHasLockedLine;
       FStrokeWidthEdit.Enabled := not Locked;
       FStrokeWidthTrackBar.Enabled := not Locked;
       FMifStrokeStyleCombo.Enabled := not Locked;
       for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
         FLineCapButtons[Cap].Enabled := not Locked;
-      for Join := Low(TVectArtLineJoin) to High(TVectArtLineJoin) do
-        FLineJoinButtons[Join].Enabled := not Locked;
     end
     else if (FDocument <> nil) and (FDocument.SelectionCount = 0) and
-      (FEditorState <> nil) and (FEditorState.CurrentTool = vetLine) then
+      (FEditorState <> nil) and
+      (FEditorState.CurrentTool in [vetLine, vetPath]) then
     begin
       Visible := True;
-      FContextText := 'Next Line';
+      if FEditorState.CurrentTool = vetPath then
+        FContextText := 'Next Path'
+      else
+        FContextText := 'Next Line';
       FStrokeWidthEdit.Text := FormatFloat('0.##',
         FEditorState.LineStrokeWidth);
       FStrokeWidthTrackBar.Position := EnsureRange(
@@ -714,11 +615,6 @@ begin
       begin
         FLineCapButtons[Cap].Selected := Cap = FEditorState.LineCap;
         FLineCapButtons[Cap].Enabled := True;
-      end;
-      for Join := Low(TVectArtLineJoin) to High(TVectArtLineJoin) do
-      begin
-        FLineJoinButtons[Join].Selected := Join = FEditorState.LineJoin;
-        FLineJoinButtons[Join].Enabled := True;
       end;
       FStrokeWidthEdit.Enabled := True;
       FStrokeWidthTrackBar.Enabled := True;

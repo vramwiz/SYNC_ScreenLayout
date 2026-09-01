@@ -77,13 +77,15 @@ implementation
 
 uses
   System.Math, Winapi.D2D1, Winapi.Windows, Vcl.Direct2D,
-  ScreenLayoutGeometry, ScreenLayoutShapeOperations;
+  ScreenLayoutGeometry, ScreenLayoutPathOperations,
+  ScreenLayoutShapeOperations;
 
 const
   CANVAS_MARGIN         = 32;
   CANVAS_SHADOW_OFFSET  = 6;
   COLOR_EDITOR_SURROUND = TColor($00121212);
   COLOR_CANVAS_SHADOW   = TColor($00070707);
+  COLOR_ROTATION_MARK   = TColor($00008000);
   COLOR_SELECTION       = clBlack;
   COLOR_TRANSPARENT_A   = TColor($00D8D8D8);
   COLOR_TRANSPARENT_B   = TColor($00FFFFFF);
@@ -141,6 +143,57 @@ begin
     Result[5] := Point(Bounds.Right - 5, Bounds.Bottom - 8);
     Result[6] := Point(Bounds.Right - 5, Bounds.Top + 5);
   end;
+end;
+
+function BuildDiamondPoints(const Bounds: TRect): TArray<TPoint>;
+begin
+  SetLength(Result, 4);
+  Result[0] := Point((Bounds.Left + Bounds.Right) div 2, Bounds.Top);
+  Result[1] := Point(Bounds.Right, (Bounds.Top + Bounds.Bottom) div 2);
+  Result[2] := Point((Bounds.Left + Bounds.Right) div 2, Bounds.Bottom);
+  Result[3] := Point(Bounds.Left, (Bounds.Top + Bounds.Bottom) div 2);
+end;
+
+procedure BuildRotationMarkPoints(const Bounds: TRect;
+  out ArcPoints, ArrowPoints: TArray<TPoint>);
+const
+  ARC_POINT_COUNT = 10;
+var
+  Angle: Single;
+  CenterX: Single;
+  CenterY: Single;
+  I: Integer;
+  PerpendicularX: Single;
+  PerpendicularY: Single;
+  Radius: Single;
+  TangentX: Single;
+  TangentY: Single;
+  Tip: TPoint;
+begin
+  CenterX := (Bounds.Left + Bounds.Right) * 0.5;
+  CenterY := (Bounds.Top + Bounds.Bottom) * 0.5;
+  Radius := Max(Min(Bounds.Width, Bounds.Height) * 0.5 - 4, 2);
+  SetLength(ArcPoints, ARC_POINT_COUNT);
+  for I := 0 to High(ArcPoints) do
+  begin
+    Angle := DegToRad(45 + 270 * I / High(ArcPoints));
+    ArcPoints[I] := Point(Round(CenterX + Cos(Angle) * Radius),
+      Round(CenterY - Sin(Angle) * Radius));
+  end;
+  Tip := ArcPoints[High(ArcPoints)];
+  Angle := DegToRad(315);
+  TangentX := -Sin(Angle);
+  TangentY := -Cos(Angle);
+  PerpendicularX := -TangentY;
+  PerpendicularY := TangentX;
+  SetLength(ArrowPoints, 3);
+  ArrowPoints[0] := Tip;
+  ArrowPoints[1] := Point(Round(Tip.X - TangentX * 4 +
+    PerpendicularX * 2), Round(Tip.Y - TangentY * 4 +
+    PerpendicularY * 2));
+  ArrowPoints[2] := Point(Round(Tip.X - TangentX * 4 -
+    PerpendicularX * 2), Round(Tip.Y - TangentY * 4 -
+    PerpendicularY * 2));
 end;
 
 function BuildStyledPreviewSegments(const StartPoint, EndPoint: TPoint;
@@ -208,13 +261,12 @@ var
   LengthValue: Single;
   P1: TPoint;
   P2: TPoint;
+  Points: array[0..2] of TPoint;
   Radius: Integer;
   Segments: TArray<TPreviewLineSegment>;
 begin
   Segments := BuildStyledPreviewSegments(StartPoint, EndPoint, Width, Style);
   EffectiveCap := LineCap;
-  if VectArtStrokeUsesRoundCaps(Style) then
-    EffectiveCap := vlcRound;
   Target.Pen.Color := Color;
   Target.Pen.Width := Max(Round(Width), 1);
   Target.Pen.Style := psSolid;
@@ -247,6 +299,35 @@ begin
       Target.Ellipse(P2.X - Radius, P2.Y - Radius, P2.X + Radius + 1,
         P2.Y + Radius + 1);
       Target.Brush.Style := bsClear;
+    end
+    else if EffectiveCap = vlcTriangle then
+    begin
+      DX := P2.X - P1.X;
+      DY := P2.Y - P1.Y;
+      LengthValue := Hypot(DX, DY);
+      if LengthValue > 0 then
+      begin
+        Radius := Max(Round(Width * 0.5), 1);
+        DX := DX / LengthValue;
+        DY := DY / LengthValue;
+        Target.Brush.Style := bsSolid;
+        Target.Brush.Color := Color;
+        Points[0] := Point(P1.X - Round(DY * Radius),
+          P1.Y + Round(DX * Radius));
+        Points[1] := Point(P1.X - Round(DX * Radius),
+          P1.Y - Round(DY * Radius));
+        Points[2] := Point(P1.X + Round(DY * Radius),
+          P1.Y - Round(DX * Radius));
+        Target.Polygon(Points);
+        Points[0] := Point(P2.X - Round(DY * Radius),
+          P2.Y + Round(DX * Radius));
+        Points[1] := Point(P2.X + Round(DX * Radius),
+          P2.Y + Round(DY * Radius));
+        Points[2] := Point(P2.X + Round(DY * Radius),
+          P2.Y - Round(DX * Radius));
+        Target.Polygon(Points);
+        Target.Brush.Style := bsClear;
+      end;
     end;
   end;
   Target.Pen.Width := 1;
@@ -263,14 +344,13 @@ var
   LengthValue: Single;
   P1: TPoint;
   P2: TPoint;
+  Points: array[0..2] of TPoint;
   Radius: Integer;
   Segments: TArray<TPreviewLineSegment>;
 begin
   Target.RenderTarget.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
   Segments := BuildStyledPreviewSegments(StartPoint, EndPoint, Width, Style);
   EffectiveCap := LineCap;
-  if VectArtStrokeUsesRoundCaps(Style) then
-    EffectiveCap := vlcRound;
   Target.Pen.Color := Color;
   Target.Pen.Width := Max(Round(Width), 1);
   Target.Pen.Style := psSolid;
@@ -303,6 +383,35 @@ begin
       Target.Ellipse(P2.X - Radius, P2.Y - Radius, P2.X + Radius + 1,
         P2.Y + Radius + 1);
       Target.Brush.Style := bsClear;
+    end
+    else if EffectiveCap = vlcTriangle then
+    begin
+      DX := P2.X - P1.X;
+      DY := P2.Y - P1.Y;
+      LengthValue := Hypot(DX, DY);
+      if LengthValue > 0 then
+      begin
+        Radius := Max(Round(Width * 0.5), 1);
+        DX := DX / LengthValue;
+        DY := DY / LengthValue;
+        Target.Brush.Style := bsSolid;
+        Target.Brush.Color := Color;
+        Points[0] := Point(P1.X - Round(DY * Radius),
+          P1.Y + Round(DX * Radius));
+        Points[1] := Point(P1.X - Round(DX * Radius),
+          P1.Y - Round(DY * Radius));
+        Points[2] := Point(P1.X + Round(DY * Radius),
+          P1.Y - Round(DX * Radius));
+        Target.Polygon(Points);
+        Points[0] := Point(P2.X - Round(DY * Radius),
+          P2.Y + Round(DX * Radius));
+        Points[1] := Point(P2.X + Round(DX * Radius),
+          P2.Y + Round(DY * Radius));
+        Points[2] := Point(P2.X + Round(DY * Radius),
+          P2.Y - Round(DX * Radius));
+        Target.Polygon(Points);
+        Target.Brush.Style := bsClear;
+      end;
     end;
   end;
   Target.Pen.Width := 1;
@@ -520,8 +629,8 @@ begin
       Exit;
     end;
     if (FEditorState <> nil) and
-      (FEditorState.CurrentTool in [vetRectangle, vetLine, vetPath,
-        vetShape]) then
+      (FEditorState.CurrentTool in [vetRectangle, vetRoundedRectangle,
+        vetLine, vetPath, vetShape]) then
     begin
       Cursor := crCross;
       Exit;
@@ -567,8 +676,8 @@ begin
     Exit;
   end;
   if (FEditorState <> nil) and
-    (FEditorState.CurrentTool in [vetRectangle, vetLine, vetPath,
-      vetShape]) then
+    (FEditorState.CurrentTool in [vetRectangle, vetRoundedRectangle,
+      vetLine, vetPath, vetShape]) then
   begin
     Cursor := crCross;
     Exit;
@@ -692,12 +801,16 @@ var
   Column: Integer;
   ColumnEnd: Integer;
   ColumnStart: Integer;
+  CornerHandle: TScreenLayoutRoundedCornerHandle;
+  CornerHandles: TArray<TScreenLayoutRoundedCornerHandle>;
   Direct2DCanvas: TDirect2DCanvas;
   DocumentBitmap: ID2D1Bitmap;
   ReferenceBitmap: ID2D1Bitmap;
   ReferenceRect: TD2D1RectF;
   Handle: TVectArtSelectionHandle;
   RotationHandleIndex: Integer;
+  RotationArcPoints: TArray<TPoint>;
+  RotationArrowPoints: TArray<TPoint>;
   I: Integer;
   ImageLayer: TVectArtImageLayer;
   Layer: TVectArtLayer;
@@ -706,16 +819,20 @@ var
   LineStart: TPoint;
   PathPreview: TArray<TPoint>;
   PathVertexRects: TArray<TRect>;
+  PreviewRadius: Integer;
   SelectedShapeVertexRect: TRect;
   ShapeKindButtons: TArray<TScreenLayoutVertexKindButton>;
   ShapeKindIconPoints: TArray<TPoint>;
   ShapeVertexRects: TArray<TRect>;
   LogicalQuad: TVectArtQuad;
   PathLayer: TVectArtPathLayer;
+  PathVertices: TArray<TScreenLayoutVertex>;
   RectangleLayer: TVectArtRectangleLayer;
   ShapeLayer: TScreenLayoutShapeLayer;
   RotatedBounds: TRectF;
   RangeRect: TRect;
+  RadiusHandlePoints: TArray<TPoint>;
+  RadiusHandleRect: TRect;
   Row: Integer;
   RowEnd: Integer;
   RowStart: Integer;
@@ -824,7 +941,8 @@ begin
           else if Layer is TVectArtPathLayer then
           begin
             PathLayer := TVectArtPathLayer(Layer);
-            RotatedBounds := PointsBounds(PathLayer.Points);
+            RotatedBounds := ScreenLayoutPathVerticesBounds(
+              PathLayer.Vertices);
             if not PathLayer.Closed then
               SelectionFrameOffsetPixels := Max(SelectionFrameOffsetPixels,
                 SelectionFrameOffset(PathLayer.StrokeWidth, FZoom));
@@ -883,12 +1001,14 @@ begin
         begin
           PathLayer := TVectArtPathLayer(
             FDocument[FDocument.SelectedIndex]);
-          if not PathLayer.Closed and (Length(PathLayer.Points) = 2) then
+          PathVertices := PathLayer.Vertices;
+          if not PathLayer.Closed and
+            ScreenLayoutPathIsStraightLine(PathVertices) then
             SelectionGeometry := BuildLineSelectionGeometry(
-              Point(ToScreenX(PathLayer.Points[0].X),
-                ToScreenY(PathLayer.Points[0].Y)),
-              Point(ToScreenX(PathLayer.Points[1].X),
-                ToScreenY(PathLayer.Points[1].Y)))
+              Point(ToScreenX(PathVertices[0].Position.X),
+                ToScreenY(PathVertices[0].Position.Y)),
+              Point(ToScreenX(PathVertices[1].Position.X),
+                ToScreenY(PathVertices[1].Position.Y)))
           else
             SelectionGeometry := BuildPathSelectionGeometry(
               SelectionLayerRect, SelectionFrameOffsetPixels);
@@ -946,17 +1066,50 @@ begin
             end;
           if (FDocument.SelectionCount = 1) and
             ((FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
-             (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer)) and
+             (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) or
+             (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) or
+             (FDocument[FDocument.SelectedIndex] is
+               TScreenLayoutShapeLayer)) and
             not FInteraction.AxisAlignedSelection then
-            for RotationHandleIndex := 0 to 3 do
-            begin
-              Direct2DCanvas.Brush.Color := TColor($00F0C060);
-              Direct2DCanvas.FillRect(
-                SelectionGeometry.RotationHandles[RotationHandleIndex]);
-              Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-              Direct2DCanvas.FrameRect(
-                SelectionGeometry.RotationHandles[RotationHandleIndex]);
-            end;
+          begin
+            Direct2DCanvas.Pen.Color := COLOR_SELECTION;
+            Direct2DCanvas.MoveTo(SelectionGeometry.RotationStem[0].X,
+              SelectionGeometry.RotationStem[0].Y);
+            Direct2DCanvas.LineTo(SelectionGeometry.RotationStem[1].X,
+              SelectionGeometry.RotationStem[1].Y);
+            Direct2DCanvas.Brush.Color := clWhite;
+            Direct2DCanvas.Pen.Color := COLOR_ROTATION_MARK;
+            Direct2DCanvas.Ellipse(
+              SelectionGeometry.PrimaryRotationHandle.Left,
+              SelectionGeometry.PrimaryRotationHandle.Top,
+              SelectionGeometry.PrimaryRotationHandle.Right,
+              SelectionGeometry.PrimaryRotationHandle.Bottom);
+            BuildRotationMarkPoints(
+              SelectionGeometry.PrimaryRotationHandle,
+              RotationArcPoints, RotationArrowPoints);
+            Direct2DCanvas.Polyline(RotationArcPoints);
+            Direct2DCanvas.Brush.Color := COLOR_ROTATION_MARK;
+            Direct2DCanvas.Polygon(RotationArrowPoints);
+          end;
+          CornerHandles := FInteraction.RoundedRectangleCornerHandles;
+          for CornerHandle in CornerHandles do
+          begin
+            if CornerHandle.Selected then
+              Direct2DCanvas.Brush.Color := TColor($0048A8F8)
+            else
+              Direct2DCanvas.Brush.Color := clWhite;
+            Direct2DCanvas.Pen.Color := COLOR_SELECTION;
+            Direct2DCanvas.Ellipse(CornerHandle.Bounds.Left,
+              CornerHandle.Bounds.Top, CornerHandle.Bounds.Right,
+              CornerHandle.Bounds.Bottom);
+          end;
+          if FInteraction.RoundedRectangleRadiusHandle(RadiusHandleRect) then
+          begin
+            RadiusHandlePoints := BuildDiamondPoints(RadiusHandleRect);
+            Direct2DCanvas.Brush.Color := TColor($0048A8F8);
+            Direct2DCanvas.Pen.Color := COLOR_SELECTION;
+            Direct2DCanvas.Polygon(RadiusHandlePoints);
+          end;
         end;
       end;
       PathVertexRects := FInteraction.SelectedPathVertexRects;
@@ -1022,9 +1175,23 @@ begin
       CreationRect := FShapeCreation.PreviewRect;
       if not CreationRect.IsEmpty then
       begin
-        Direct2DCanvas.Brush.Style := bsSolid;
-        Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-        Direct2DCanvas.FrameRect(CreationRect);
+        if (FEditorState <> nil) and
+          (FEditorState.CurrentTool = vetRoundedRectangle) then
+        begin
+          PreviewRadius := Round(Min(CreationRect.Width,
+            CreationRect.Height) * 0.2);
+          Direct2DCanvas.Brush.Style := bsClear;
+          Direct2DCanvas.Pen.Color := COLOR_SELECTION;
+          Direct2DCanvas.RoundRect(CreationRect.Left, CreationRect.Top,
+            CreationRect.Right, CreationRect.Bottom, PreviewRadius * 2,
+            PreviewRadius * 2);
+        end
+        else
+        begin
+          Direct2DCanvas.Brush.Style := bsSolid;
+          Direct2DCanvas.Brush.Color := COLOR_SELECTION;
+          Direct2DCanvas.FrameRect(CreationRect);
+        end;
       end;
       if FShapeCreation.PreviewLine(LineStart, LineEnd) then
         DrawStyledPreviewLine(Direct2DCanvas, LineStart, LineEnd,
@@ -1053,8 +1220,12 @@ var
   Column: Integer;
   ColumnEnd: Integer;
   ColumnStart: Integer;
+  CornerHandle: TScreenLayoutRoundedCornerHandle;
+  CornerHandles: TArray<TScreenLayoutRoundedCornerHandle>;
   Handle: TVectArtSelectionHandle;
   RotationHandleIndex: Integer;
+  RotationArcPoints: TArray<TPoint>;
+  RotationArrowPoints: TArray<TPoint>;
   I: Integer;
   ImageLayer: TVectArtImageLayer;
   Layer: TVectArtLayer;
@@ -1063,16 +1234,20 @@ var
   LineStart: TPoint;
   PathPreview: TArray<TPoint>;
   PathVertexRects: TArray<TRect>;
+  PreviewRadius: Integer;
   SelectedShapeVertexRect: TRect;
   ShapeKindButtons: TArray<TScreenLayoutVertexKindButton>;
   ShapeKindIconPoints: TArray<TPoint>;
   ShapeVertexRects: TArray<TRect>;
   LogicalQuad: TVectArtQuad;
   PathLayer: TVectArtPathLayer;
+  PathVertices: TArray<TScreenLayoutVertex>;
   RectangleLayer: TVectArtRectangleLayer;
   ShapeLayer: TScreenLayoutShapeLayer;
   RotatedBounds: TRectF;
   RangeRect: TRect;
+  RadiusHandlePoints: TArray<TPoint>;
+  RadiusHandleRect: TRect;
   Row: Integer;
   RowEnd: Integer;
   RowStart: Integer;
@@ -1160,7 +1335,7 @@ begin
       else if Layer is TVectArtPathLayer then
       begin
         PathLayer := TVectArtPathLayer(Layer);
-        RotatedBounds := PointsBounds(PathLayer.Points);
+        RotatedBounds := ScreenLayoutPathVerticesBounds(PathLayer.Vertices);
         if not PathLayer.Closed then
           SelectionFrameOffsetPixels := Max(SelectionFrameOffsetPixels,
             SelectionFrameOffset(PathLayer.StrokeWidth, FZoom));
@@ -1217,12 +1392,14 @@ begin
       (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) then
     begin
       PathLayer := TVectArtPathLayer(FDocument[FDocument.SelectedIndex]);
-      if not PathLayer.Closed and (Length(PathLayer.Points) = 2) then
+      PathVertices := PathLayer.Vertices;
+      if not PathLayer.Closed and
+        ScreenLayoutPathIsStraightLine(PathVertices) then
         SelectionGeometry := BuildLineSelectionGeometry(
-          Point(ToScreenX(PathLayer.Points[0].X),
-            ToScreenY(PathLayer.Points[0].Y)),
-          Point(ToScreenX(PathLayer.Points[1].X),
-            ToScreenY(PathLayer.Points[1].Y)))
+          Point(ToScreenX(PathVertices[0].Position.X),
+            ToScreenY(PathVertices[0].Position.Y)),
+          Point(ToScreenX(PathVertices[1].Position.X),
+            ToScreenY(PathVertices[1].Position.Y)))
       else
         SelectionGeometry := BuildPathSelectionGeometry(SelectionLayerRect,
           SelectionFrameOffsetPixels);
@@ -1278,17 +1455,43 @@ begin
         end;
       if (FDocument.SelectionCount = 1) and
         ((FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
-         (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer)) and
+         (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) or
+         (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) or
+         (FDocument[FDocument.SelectedIndex] is
+           TScreenLayoutShapeLayer)) and
         not FInteraction.AxisAlignedSelection then
-        for RotationHandleIndex := 0 to 3 do
-        begin
-          Canvas.Brush.Color := TColor($00F0C060);
-          Canvas.FillRect(SelectionGeometry.RotationHandles[
-            RotationHandleIndex]);
-          Canvas.Brush.Color := COLOR_SELECTION;
-          Canvas.FrameRect(SelectionGeometry.RotationHandles[
-            RotationHandleIndex]);
-        end;
+      begin
+        Canvas.Pen.Color := COLOR_SELECTION;
+        Canvas.MoveTo(SelectionGeometry.RotationStem[0].X,
+          SelectionGeometry.RotationStem[0].Y);
+        Canvas.LineTo(SelectionGeometry.RotationStem[1].X,
+          SelectionGeometry.RotationStem[1].Y);
+        Canvas.Brush.Color := clWhite;
+        Canvas.Pen.Color := COLOR_ROTATION_MARK;
+        Canvas.Ellipse(SelectionGeometry.PrimaryRotationHandle);
+        BuildRotationMarkPoints(SelectionGeometry.PrimaryRotationHandle,
+          RotationArcPoints, RotationArrowPoints);
+        Canvas.Polyline(RotationArcPoints);
+        Canvas.Brush.Color := COLOR_ROTATION_MARK;
+        Canvas.Polygon(RotationArrowPoints);
+      end;
+      CornerHandles := FInteraction.RoundedRectangleCornerHandles;
+      for CornerHandle in CornerHandles do
+      begin
+        if CornerHandle.Selected then
+          Canvas.Brush.Color := TColor($0048A8F8)
+        else
+          Canvas.Brush.Color := clWhite;
+        Canvas.Pen.Color := COLOR_SELECTION;
+        Canvas.Ellipse(CornerHandle.Bounds);
+      end;
+      if FInteraction.RoundedRectangleRadiusHandle(RadiusHandleRect) then
+      begin
+        RadiusHandlePoints := BuildDiamondPoints(RadiusHandleRect);
+        Canvas.Brush.Color := TColor($0048A8F8);
+        Canvas.Pen.Color := COLOR_SELECTION;
+        Canvas.Polygon(RadiusHandlePoints);
+      end;
     end;
   end;
   PathVertexRects := FInteraction.SelectedPathVertexRects;
@@ -1354,9 +1557,23 @@ begin
   CreationRect := FShapeCreation.PreviewRect;
   if not CreationRect.IsEmpty then
   begin
-    Canvas.Brush.Style := bsSolid;
-    Canvas.Brush.Color := COLOR_SELECTION;
-    Canvas.FrameRect(CreationRect);
+    if (FEditorState <> nil) and
+      (FEditorState.CurrentTool = vetRoundedRectangle) then
+    begin
+      PreviewRadius := Round(Min(CreationRect.Width,
+        CreationRect.Height) * 0.2);
+      Canvas.Brush.Style := bsClear;
+      Canvas.Pen.Color := COLOR_SELECTION;
+      Canvas.RoundRect(CreationRect.Left, CreationRect.Top,
+        CreationRect.Right, CreationRect.Bottom, PreviewRadius * 2,
+        PreviewRadius * 2);
+    end
+    else
+    begin
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := COLOR_SELECTION;
+      Canvas.FrameRect(CreationRect);
+    end;
   end;
   if FShapeCreation.PreviewLine(LineStart, LineEnd) then
     DrawStyledPreviewLine(Canvas, LineStart, LineEnd,

@@ -1,4 +1,4 @@
-// 選択・図形作成ツールをコード描画アイコンで選択するControlを提供する。
+﻿// 選択・図形作成ツールをコード描画アイコンで選択するControlを提供する。
 unit ScreenLayoutToolPalette;
 
 interface
@@ -81,10 +81,13 @@ begin
     Canvas.LineTo(CenterX - 9, CenterY + 10);
     Canvas.LineTo(CenterX - 8, CenterY - 11);
   end
-  else if Index = 1 then
+  else if Index = Ord(vetRectangle) then
     Canvas.Rectangle(CenterX - 10, CenterY - 8, CenterX + 10,
       CenterY + 8)
-  else if Index = 2 then
+  else if Index = Ord(vetRoundedRectangle) then
+    Canvas.RoundRect(CenterX - 11, CenterY - 9, CenterX + 11,
+      CenterY + 9, 8, 8)
+  else if Index = Ord(vetLine) then
   begin
     Canvas.MoveTo(CenterX - 11, CenterY + 8);
     Canvas.LineTo(CenterX + 11, CenterY - 8);

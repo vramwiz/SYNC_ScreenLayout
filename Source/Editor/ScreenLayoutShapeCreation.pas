@@ -19,19 +19,22 @@ type
     FEditHistory: TVectArtEditHistory;
     FModifiers: TShiftState;
     FPathPoints: TArray<TPoint>;
-    FShapeVertexKinds: TArray<TScreenLayoutVertexKind>; // 確定済みShape頂点の種別。
-    FNextShapeVertexKind: TScreenLayoutVertexKind;      // 次のクリックへ適用する種別。
+    FVertexKinds: TArray<TScreenLayoutVertexKind>; // 確定済みPath／Shape頂点の種別。
+    FNextVertexKind: TScreenLayoutVertexKind;      // 次のクリックへ適用する種別。
     FStartPoint: TPoint;
     FZoom: Single;
     function ClampToCanvas(const Point: TPoint): TPoint;
     procedure CreateLine;
     procedure CreatePath(Closed: Boolean);
     procedure CreateRectangle;
+    procedure CreateRoundedRectangle;
     procedure CreateShape;
     function NextLineName: string;
     function NextPathName: string;
     function NextRectangleName: string;
+    function NextRoundedRectangleName: string;
     function NextShapeName: string;
+    function BuildOpenPathPreview(out Points: TArray<TPoint>): Boolean;
     function BuildShapePreview(out Points: TArray<TPoint>): Boolean;
   public
     // 新規図形入力に必要なDocument、履歴、ツール、表示座標系を設定する。
@@ -56,7 +59,7 @@ type
     function PreviewRect: TRect;
     // ドラッグ作成中の直線プレビュー端点を返す。
     function PreviewLine(out StartPoint, EndPoint: TPoint): Boolean;
-    // V／Bキーを次に確定するShape頂点の種別として受け付ける。
+    // V／Bキーを次に確定するPath／Shape頂点の種別として受け付ける。
     function KeyDown(Key: Word; Shift: TShiftState): Boolean;
     property Active: Boolean read FActive;
   end;
@@ -66,7 +69,7 @@ implementation
 uses
   System.Math, System.SysUtils,
   ScreenLayoutGeometry, ScreenLayoutLayerStructureCommands,
-  ScreenLayoutShapeOperations;
+  ScreenLayoutPathOperations, ScreenLayoutShapeOperations;
 
 const
   MIN_DRAG_SIZE = 3;
@@ -112,8 +115,8 @@ begin
   FActive := False;
   FCreationTool := vetSelect;
   SetLength(FPathPoints, 0);
-  SetLength(FShapeVertexKinds, 0);
-  FNextShapeVertexKind := slvkSharp;
+  SetLength(FVertexKinds, 0);
+  FNextVertexKind := slvkSharp;
 end;
 
 procedure TVectArtShapeCreation.CreateShape;
@@ -135,8 +138,8 @@ begin
         FDocument.CanvasLayer.Width),
       ScreenToLogicalY(FPathPoints[I].Y, FCanvasBounds, FZoom,
         FDocument.CanvasLayer.Height));
-    if I <= High(FShapeVertexKinds) then
-      Data.Contours[0].Vertices[I].Kind := FShapeVertexKinds[I]
+    if I <= High(FVertexKinds) then
+      Data.Contours[0].Vertices[I].Kind := FVertexKinds[I]
     else
       Data.Contours[0].Vertices[I].Kind := slvkSharp;
   end;
@@ -144,11 +147,9 @@ begin
   Data.FillColor := FEditorState.RectangleFillColor;
   Data.FillRule := slfrEvenOdd;
   Data.Locked := False;
-  Data.MifAntiAlias := FEditorState.PathMifAntiAlias;
   Data.Name := NextShapeName;
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.StrokeColor := FEditorState.LineStrokeColor;
-  Data.StrokeJoin := FEditorState.LineJoin;
   Data.StrokeStyle := FEditorState.LineMifStrokeStyle;
   Data.StrokeWidth := FEditorState.LineStrokeWidth;
   Data.Visible := True;
@@ -171,22 +172,24 @@ begin
   if Hypot(FCurrentPoint.X - FStartPoint.X,
     FCurrentPoint.Y - FStartPoint.Y) < MIN_DRAG_SIZE then
     Exit;
-  SetLength(Data.Points, 2);
-  Data.Points[0] := TPointF.Create(
+  SetLength(Data.Vertices, 2);
+  Data.Vertices[0].Position := TPointF.Create(
     ScreenToLogicalX(FStartPoint.X, FCanvasBounds, FZoom,
       FDocument.CanvasLayer.Width),
     ScreenToLogicalY(FStartPoint.Y, FCanvasBounds, FZoom,
       FDocument.CanvasLayer.Height));
-  Data.Points[1] := TPointF.Create(
+  Data.Vertices[1].Position := TPointF.Create(
     ScreenToLogicalX(FCurrentPoint.X, FCanvasBounds, FZoom,
       FDocument.CanvasLayer.Width),
     ScreenToLogicalY(FCurrentPoint.Y, FCanvasBounds, FZoom,
       FDocument.CanvasLayer.Height));
+  Data.Vertices[0].OutgoingSegment := slskLine;
+  Data.Vertices[0].Kind := slvkSharp;
+  Data.Vertices[1].OutgoingSegment := slskLine;
+  Data.Vertices[1].Kind := slvkSharp;
   Data.Closed := False;
-  Data.FillColor := FEditorState.RectangleFillColor;
   Data.Locked := False;
   Data.LineCap := FEditorState.LineCap;
-  Data.LineJoin := FEditorState.LineJoin;
   Data.Name := NextLineName;
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.StrokeColor := FEditorState.LineStrokeColor;
@@ -214,18 +217,22 @@ begin
     Exit;
   if Closed and (Length(FPathPoints) < 3) then
     Closed := False;
-  SetLength(Data.Points, Length(FPathPoints));
+  SetLength(Data.Vertices, Length(FPathPoints));
   for I := 0 to High(FPathPoints) do
-    Data.Points[I] := TPointF.Create(
+  begin
+    Data.Vertices[I].Position := TPointF.Create(
       ScreenToLogicalX(FPathPoints[I].X, FCanvasBounds, FZoom,
         FDocument.CanvasLayer.Width),
       ScreenToLogicalY(FPathPoints[I].Y, FCanvasBounds, FZoom,
         FDocument.CanvasLayer.Height));
+    if I <= High(FVertexKinds) then
+      Data.Vertices[I].Kind := FVertexKinds[I]
+    else
+      Data.Vertices[I].Kind := slvkSharp;
+  end;
+  ConfigureScreenLayoutOpenPath(Data.Vertices);
   Data.Closed := Closed;
-  Data.FillColor := FEditorState.RectangleFillColor;
   Data.LineCap := FEditorState.LineCap;
-  Data.LineJoin := FEditorState.LineJoin;
-  Data.MifAntiAlias := FEditorState.PathMifAntiAlias;
   Data.Locked := False;
   Data.Name := NextPathName;
   Data.Opacity := FEditorState.RectangleOpacity;
@@ -305,6 +312,50 @@ begin
       Index, Data, BeforeSelection, AfterSelection));
 end;
 
+procedure TVectArtShapeCreation.CreateRoundedRectangle;
+var
+  AfterSelection: TArray<Integer>;
+  BeforeSelection: TArray<Integer>;
+  Data: TScreenLayoutRoundedRectangleData;
+  Index: Integer;
+  LogicalBottom: Single;
+  LogicalLeft: Single;
+  LogicalRight: Single;
+  LogicalTop: Single;
+  Radius: Single;
+  ScreenBounds: TRect;
+begin
+  ScreenBounds := PreviewRect;
+  if (ScreenBounds.Width < MIN_DRAG_SIZE) or
+    (ScreenBounds.Height < MIN_DRAG_SIZE) then
+    Exit;
+  LogicalLeft := ScreenToLogicalX(ScreenBounds.Left, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Width);
+  LogicalTop := ScreenToLogicalY(ScreenBounds.Top, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Height);
+  LogicalRight := ScreenToLogicalX(ScreenBounds.Right, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Width);
+  LogicalBottom := ScreenToLogicalY(ScreenBounds.Bottom, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Height);
+  Data.Bounds := TRectF.Create(LogicalLeft, LogicalTop, LogicalRight,
+    LogicalBottom);
+  Radius := Min(Data.Bounds.Width, Data.Bounds.Height) * 0.2;
+  Data.CornerRadii := UniformScreenLayoutCornerRadii(Radius);
+  Data.FillColor := FEditorState.RectangleFillColor;
+  Data.Locked := False;
+  Data.Name := NextRoundedRectangleName;
+  Data.Opacity := FEditorState.RectangleOpacity;
+  Data.RotationDegrees := 0.0;
+  Data.Visible := True;
+  BeforeSelection := FDocument.GetSelectedLayerIndices;
+  Index := FDocument.InsertRoundedRectangle(FDocument.LayerCount, Data);
+  FDocument.SetSelectedLayers([Index]);
+  AfterSelection := FDocument.GetSelectedLayerIndices;
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutInsertRoundedRectangleCommand.Create(
+      FDocument, Index, Data, BeforeSelection, AfterSelection));
+end;
+
 function TVectArtShapeCreation.MouseDown(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer): Boolean;
 var
@@ -312,13 +363,15 @@ var
 begin
   Result := (Button = mbLeft) and (FDocument <> nil) and
     (FEditorState <> nil) and
-    (FEditorState.CurrentTool in [vetRectangle, vetLine, vetPath,
-      vetShape]) and
+    (FEditorState.CurrentTool in [vetRectangle, vetRoundedRectangle, vetLine,
+      vetPath, vetShape]) and
     (FZoom > 0) and
     PtInRect(FCanvasBounds, Point(X, Y));
   if not Result then
     Exit;
   PointValue := ClampToCanvas(Point(X, Y));
+  if not FActive then
+    FDocument.SetSelectedLayers([]);
   if FEditorState.CurrentTool in [vetPath, vetShape] then
   begin
     if (ssDouble in Shift) and
@@ -335,12 +388,9 @@ begin
       FActive := True;
       FCreationTool := FEditorState.CurrentTool;
       FPathPoints := [PointValue];
-      if FCreationTool = vetShape then
-        FShapeVertexKinds := [FNextShapeVertexKind]
-      else
-        SetLength(FShapeVertexKinds, 0);
+      FVertexKinds := [FNextVertexKind];
     end
-    else if (Length(FPathPoints) >= 3) and
+    else if (FCreationTool = vetShape) and (Length(FPathPoints) >= 3) and
       (Hypot(PointValue.X - FPathPoints[0].X,
         PointValue.Y - FPathPoints[0].Y) <= PATH_CLOSE_DISTANCE) then
       FinishPath(True)
@@ -348,11 +398,8 @@ begin
     begin
       SetLength(FPathPoints, Length(FPathPoints) + 1);
       FPathPoints[High(FPathPoints)] := PointValue;
-      if FCreationTool = vetShape then
-      begin
-        SetLength(FShapeVertexKinds, Length(FPathPoints));
-        FShapeVertexKinds[High(FShapeVertexKinds)] := FNextShapeVertexKind;
-      end;
+      SetLength(FVertexKinds, Length(FPathPoints));
+      FVertexKinds[High(FVertexKinds)] := FNextVertexKind;
     end;
     FCurrentPoint := PointValue;
     Exit;
@@ -367,13 +414,14 @@ function TVectArtShapeCreation.KeyDown(Key: Word;
   Shift: TShiftState): Boolean;
 begin
   Result := False;
-  if (FEditorState = nil) or (FEditorState.CurrentTool <> vetShape) or
+  if (FEditorState = nil) or
+    not (FEditorState.CurrentTool in [vetPath, vetShape]) or
     ((Shift * [ssCtrl, ssAlt]) <> []) then
     Exit;
   if Key = Ord('V') then
-    FNextShapeVertexKind := slvkSharp
+    FNextVertexKind := slvkSharp
   else if Key = Ord('B') then
-    FNextShapeVertexKind := slvkBezier
+    FNextVertexKind := slvkBezier
   else
     Exit;
   Result := True;
@@ -413,6 +461,8 @@ begin
   FModifiers := Shift;
   if FEditorState.CurrentTool = vetLine then
     CreateLine
+  else if FEditorState.CurrentTool = vetRoundedRectangle then
+    CreateRoundedRectangle
   else
     CreateRectangle;
   FActive := False;
@@ -515,9 +565,74 @@ begin
   end;
   if FEditorState.CurrentTool = vetShape then
     Exit(BuildShapePreview(Points));
-  Points := Copy(FPathPoints);
-  SetLength(Points, Length(Points) + 1);
-  Points[High(Points)] := FCurrentPoint;
+  Result := BuildOpenPathPreview(Points);
+end;
+
+function TVectArtShapeCreation.BuildOpenPathPreview(
+  out Points: TArray<TPoint>): Boolean;
+var
+  Control1: TPointF;
+  Control2: TPointF;
+  EndPoint: TPointF;
+  I: Integer;
+  OutputIndex: Integer;
+  Parameter: Single;
+  PreviewPoint: TPointF;
+  StartPoint: TPointF;
+  Step: Integer;
+  Vertices: TArray<TScreenLayoutVertex>;
+begin
+  Result := FActive and (Length(FPathPoints) > 0);
+  if not Result then
+  begin
+    Points := nil;
+    Exit;
+  end;
+  SetLength(Vertices, Length(FPathPoints) + 1);
+  for I := 0 to High(FPathPoints) do
+  begin
+    Vertices[I].Position := TPointF.Create(FPathPoints[I].X,
+      FPathPoints[I].Y);
+    if I <= High(FVertexKinds) then
+      Vertices[I].Kind := FVertexKinds[I]
+    else
+      Vertices[I].Kind := slvkSharp;
+  end;
+  Vertices[High(Vertices)].Position := TPointF.Create(FCurrentPoint.X,
+    FCurrentPoint.Y);
+  Vertices[High(Vertices)].Kind := FNextVertexKind;
+  ConfigureScreenLayoutOpenPath(Vertices);
+  SetLength(Points, 1 + High(Vertices) * SHAPE_PREVIEW_CURVE_STEPS);
+  OutputIndex := 0;
+  Points[OutputIndex] := Point(Round(Vertices[0].Position.X),
+    Round(Vertices[0].Position.Y));
+  for I := 0 to High(Vertices) - 1 do
+  begin
+    StartPoint := Vertices[I].Position;
+    EndPoint := Vertices[I + 1].Position;
+    if Vertices[I].OutgoingSegment = slskLine then
+    begin
+      Inc(OutputIndex);
+      Points[OutputIndex] := Point(Round(EndPoint.X), Round(EndPoint.Y));
+      Continue;
+    end;
+    Control1 := TPointF.Create(StartPoint.X +
+      Vertices[I].OutgoingControl.X, StartPoint.Y +
+      Vertices[I].OutgoingControl.Y);
+    Control2 := TPointF.Create(EndPoint.X +
+      Vertices[I + 1].IncomingControl.X, EndPoint.Y +
+      Vertices[I + 1].IncomingControl.Y);
+    for Step := 1 to SHAPE_PREVIEW_CURVE_STEPS do
+    begin
+      Parameter := Step / SHAPE_PREVIEW_CURVE_STEPS;
+      PreviewPoint := ShapeCubicPoint(StartPoint, Control1, Control2,
+        EndPoint, Parameter);
+      Inc(OutputIndex);
+      Points[OutputIndex] := Point(Round(PreviewPoint.X),
+        Round(PreviewPoint.Y));
+    end;
+  end;
+  SetLength(Points, OutputIndex + 1);
 end;
 
 function TVectArtShapeCreation.BuildShapePreview(
@@ -546,14 +661,14 @@ begin
   begin
     Contour.Vertices[I].Position := TPointF.Create(FPathPoints[I].X,
       FPathPoints[I].Y);
-    if I <= High(FShapeVertexKinds) then
-      Contour.Vertices[I].Kind := FShapeVertexKinds[I]
+    if I <= High(FVertexKinds) then
+      Contour.Vertices[I].Kind := FVertexKinds[I]
     else
       Contour.Vertices[I].Kind := slvkSharp;
   end;
   Contour.Vertices[High(Contour.Vertices)].Position :=
     TPointF.Create(FCurrentPoint.X, FCurrentPoint.Y);
-  Contour.Vertices[High(Contour.Vertices)].Kind := FNextShapeVertexKind;
+  Contour.Vertices[High(Contour.Vertices)].Kind := FNextVertexKind;
   ConfigureShapeContourSegments(Contour);
   SetLength(Points, 1 + High(Contour.Vertices) *
     SHAPE_PREVIEW_CURVE_STEPS);
@@ -623,6 +738,28 @@ begin
   Result := Candidate;
 end;
 
+function TVectArtShapeCreation.NextRoundedRectangleName: string;
+var
+  Candidate: string;
+  Found: Boolean;
+  I: Integer;
+  Number: Integer;
+begin
+  Number := 1;
+  repeat
+    Candidate := 'Rounded Rectangle ' + Number.ToString;
+    Found := False;
+    for I := 1 to FDocument.LayerCount - 1 do
+      if SameText(FDocument[I].Name, Candidate) then
+      begin
+        Found := True;
+        Break;
+      end;
+    Inc(Number);
+  until not Found;
+  Result := Candidate;
+end;
+
 function TVectArtShapeCreation.PreviewRect: TRect;
 var
   DeltaX: Integer;
@@ -636,7 +773,8 @@ var
   TargetY: Integer;
 begin
   if not FActive or (FEditorState = nil) or
-    (FEditorState.CurrentTool <> vetRectangle) then
+    not (FEditorState.CurrentTool in [vetRectangle,
+      vetRoundedRectangle]) then
     Exit(TRect.Empty);
   DeltaX := FCurrentPoint.X - FStartPoint.X;
   DeltaY := FCurrentPoint.Y - FStartPoint.Y;

@@ -67,6 +67,7 @@
         <DCCReference Include="Source\Shell\ScreenLayoutCanvasSettingsDialog.pas"/>
         <DCCReference Include="Source\Core\ScreenLayoutDocument.pas"/>
         <DCCReference Include="Source\Core\ScreenLayoutGeometry.pas"/>
+        <DCCReference Include="Source\Core\ScreenLayoutPathOperations.pas"/>
         <DCCReference Include="Source\Core\ScreenLayoutShapeOperations.pas"/>
         <DCCReference Include="Source\Core\ScreenLayoutShapeBooleanGeometry.pas"/>
         <DCCReference Include="Source\Core\ScreenLayoutShapeBooleanOperations.pas"/>
@@ -83,6 +84,7 @@
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJson.pas"/>
         <DCCReference Include="Source\Editor\ScreenLayoutCanvas.pas"/>
         <DCCReference Include="Source\Editor\ScreenLayoutCanvasInteraction.pas"/>
+        <DCCReference Include="Source\Editor\ScreenLayoutPathInteraction.pas"/>
         <DCCReference Include="Source\Editor\ScreenLayoutShapeInteraction.pas"/>
         <DCCReference Include="Source\Editor\ScreenLayoutShapeCreation.pas"/>
         <DCCReference Include="Source\Editor\ScreenLayoutKeyboardMovement.pas"/>

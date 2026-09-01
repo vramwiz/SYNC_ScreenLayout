@@ -70,15 +70,15 @@ type
     procedure Undo; override;
   end;
 
-  TVectArtPathPointsCommand = class(TVectArtEditCommand)
+  TScreenLayoutRoundedRectangleRadiiCommand = class(TVectArtEditCommand)
   private
     FDocument: TVectArtDocument;
     FLayerIndex: Integer;
-    FNewPoints: TArray<TPointF>;
-    FOldPoints: TArray<TPointF>;
+    FNewValue: TScreenLayoutCornerRadii;
+    FOldValue: TScreenLayoutCornerRadii;
   public
     constructor Create(ADocument: TVectArtDocument; LayerIndex: Integer;
-      const OldPoints, NewPoints: TArray<TPointF>);
+      const OldValue, NewValue: TScreenLayoutCornerRadii);
     procedure Execute; override;
     procedure Undo; override;
   end;
@@ -125,32 +125,6 @@ type
   public
     constructor Create(ADocument: TVectArtDocument; LayerIndex: Integer;
       OldValue, NewValue: TVectArtLineCap);
-    procedure Execute; override;
-    procedure Undo; override;
-  end;
-
-  TVectArtPathLineJoinCommand = class(TVectArtEditCommand)
-  private
-    FDocument: TVectArtDocument;
-    FLayerIndex: Integer;
-    FNewValue: TVectArtLineJoin;
-    FOldValue: TVectArtLineJoin;
-  public
-    constructor Create(ADocument: TVectArtDocument; LayerIndex: Integer;
-      OldValue, NewValue: TVectArtLineJoin);
-    procedure Execute; override;
-    procedure Undo; override;
-  end;
-
-  TVectArtPathMifAntiAliasCommand = class(TVectArtEditCommand)
-  private
-    FDocument: TVectArtDocument;
-    FLayerIndex: Integer;
-    FNewValue: Boolean;
-    FOldValue: Boolean;
-  public
-    constructor Create(ADocument: TVectArtDocument; LayerIndex: Integer;
-      OldValue, NewValue: Boolean);
     procedure Execute; override;
     procedure Undo; override;
   end;
@@ -267,21 +241,13 @@ end;
 
 procedure TVectArtFillColorCommand.Execute;
 begin
-  if FDocument = nil then
-    Exit;
-  if FDocument[FLayerIndex] is TVectArtPathLayer then
-    FDocument.SetPathFill(FLayerIndex, FNewColor)
-  else
+  if FDocument <> nil then
     FDocument.SetRectangleFillColor(FLayerIndex, FNewColor);
 end;
 
 procedure TVectArtFillColorCommand.Undo;
 begin
-  if FDocument = nil then
-    Exit;
-  if FDocument[FLayerIndex] is TVectArtPathLayer then
-    FDocument.SetPathFill(FLayerIndex, FOldColor)
-  else
+  if FDocument <> nil then
     FDocument.SetRectangleFillColor(FLayerIndex, FOldColor);
 end;
 
@@ -307,26 +273,27 @@ begin
     FDocument.SetRectangleRotation(FLayerIndex, FOldValue);
 end;
 
-constructor TVectArtPathPointsCommand.Create(ADocument: TVectArtDocument;
-  LayerIndex: Integer; const OldPoints, NewPoints: TArray<TPointF>);
+constructor TScreenLayoutRoundedRectangleRadiiCommand.Create(
+  ADocument: TVectArtDocument; LayerIndex: Integer;
+  const OldValue, NewValue: TScreenLayoutCornerRadii);
 begin
   inherited Create;
   FDocument := ADocument;
   FLayerIndex := LayerIndex;
-  FOldPoints := Copy(OldPoints);
-  FNewPoints := Copy(NewPoints);
+  FOldValue := OldValue;
+  FNewValue := NewValue;
 end;
 
-procedure TVectArtPathPointsCommand.Execute;
+procedure TScreenLayoutRoundedRectangleRadiiCommand.Execute;
 begin
   if FDocument <> nil then
-    FDocument.SetPathPoints(FLayerIndex, FNewPoints);
+    FDocument.SetRoundedRectangleCornerRadii(FLayerIndex, FNewValue);
 end;
 
-procedure TVectArtPathPointsCommand.Undo;
+procedure TScreenLayoutRoundedRectangleRadiiCommand.Undo;
 begin
   if FDocument <> nil then
-    FDocument.SetPathPoints(FLayerIndex, FOldPoints);
+    FDocument.SetRoundedRectangleCornerRadii(FLayerIndex, FOldValue);
 end;
 
 constructor TVectArtImagePointsCommand.Create(ADocument: TVectArtDocument;
@@ -406,51 +373,6 @@ procedure TVectArtPathLineCapCommand.Undo;
 begin
   if FDocument <> nil then
     FDocument.SetPathLineCap(FLayerIndex, FOldValue);
-end;
-
-constructor TVectArtPathLineJoinCommand.Create(ADocument: TVectArtDocument;
-  LayerIndex: Integer; OldValue, NewValue: TVectArtLineJoin);
-begin
-  inherited Create;
-  FDocument := ADocument;
-  FLayerIndex := LayerIndex;
-  FOldValue := OldValue;
-  FNewValue := NewValue;
-end;
-
-procedure TVectArtPathLineJoinCommand.Execute;
-begin
-  if FDocument <> nil then
-    FDocument.SetPathLineJoin(FLayerIndex, FNewValue);
-end;
-
-procedure TVectArtPathLineJoinCommand.Undo;
-begin
-  if FDocument <> nil then
-    FDocument.SetPathLineJoin(FLayerIndex, FOldValue);
-end;
-
-constructor TVectArtPathMifAntiAliasCommand.Create(
-  ADocument: TVectArtDocument; LayerIndex: Integer; OldValue,
-  NewValue: Boolean);
-begin
-  inherited Create;
-  FDocument := ADocument;
-  FLayerIndex := LayerIndex;
-  FOldValue := OldValue;
-  FNewValue := NewValue;
-end;
-
-procedure TVectArtPathMifAntiAliasCommand.Execute;
-begin
-  if FDocument <> nil then
-    FDocument.SetPathMifAntiAlias(FLayerIndex, FNewValue);
-end;
-
-procedure TVectArtPathMifAntiAliasCommand.Undo;
-begin
-  if FDocument <> nil then
-    FDocument.SetPathMifAntiAlias(FLayerIndex, FOldValue);
 end;
 
 procedure TVectArtLayerBooleanCommand.ApplyValue(Value: Boolean);

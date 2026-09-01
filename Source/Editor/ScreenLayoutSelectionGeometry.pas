@@ -1,4 +1,4 @@
-// 選択枠、8個のリサイズマーカー、四隅外側の回転マーカーを計算する。
+﻿// 選択枠、リサイズマーカー、上辺中央の回転マーカーを計算する。
 unit ScreenLayoutSelectionGeometry;
 
 interface
@@ -14,30 +14,40 @@ type
     vshBottomLeft, vshLeft);
 
   TVectArtSelectionGeometry = record
-    DrawFrame: Boolean;
-    FrameRect: TRect;
-    FramePoints: array[0..4] of TPoint;
-    Handles: array[vshTopLeft..vshLeft] of TRect;
-    RotationHandles: array[0..3] of TRect;
+    DrawFrame: Boolean;                          // 選択枠本体を描画する場合にTrue。
+    FrameRect: TRect;                            // 回転しない選択枠の画面範囲。
+    FramePoints: array[0..4] of TPoint;           // 閉じた回転選択枠の5点。
+    Handles: array[vshTopLeft..vshLeft] of TRect; // 8方向のリサイズ当たり判定範囲。
+    PrimaryRotationHandle: TRect;                // 上辺中央の回転マーク範囲。
+    RotationStem: array[0..1] of TPoint;          // 選択枠から回転マークへ結ぶ線分。
   end;
 
+// 線幅とズームを考慮し、選択枠を図形から離す画面上の距離を返す。
 function SelectionFrameOffset(StrokeWidth, Zoom: Single): Integer;
+// 回転しない矩形について、選択枠、8方向ハンドル、回転マークを構築する。
 function BuildSelectionGeometry(const LayerRect: TRect;
   FrameOffset: Integer = 8): TVectArtSelectionGeometry;
+// 任意の四辺形について、辺方向に沿う選択枠、8方向ハンドル、回転マークを構築する。
 function BuildRotatedSelectionGeometry(
   const Quad: TVectArtScreenQuad;
   FrameOffset: Integer = 8): TVectArtSelectionGeometry;
+// 2点の単線について、両端を操作する選択ハンドルを構築する。
 function BuildLineSelectionGeometry(const StartPoint,
   EndPoint: TPoint): TVectArtSelectionGeometry;
+// Pathの外接矩形について、共通変形用の選択枠を構築する。
 function BuildPathSelectionGeometry(const LayerRect: TRect;
   FrameOffset: Integer = 8): TVectArtSelectionGeometry;
+// 単線の端点から選択ハンドルを離す固定距離を返す。
 function LineSelectionHandleDistance: Integer;
+// 指定位置にあるリサイズハンドルを返し、該当しない場合はvshNoneを返す。
 function HitTestSelectionHandle(const Point: TPoint;
   const Geometry: TVectArtSelectionGeometry): TVectArtSelectionHandle;
+// 指定位置が上辺中央の回転マーク内ならTrueを返す。
 function HitTestRotationHandle(const Point: TPoint;
   const Geometry: TVectArtSelectionGeometry): Boolean;
 // 回転操作を表す円弧矢印カーソルを返す。画像リソースは使用しない。
 function RotationHandleCursor: TCursor;
+// リサイズ方向に対応する標準カーソルを返す。
 function SelectionHandleCursor(Handle: TVectArtSelectionHandle): TCursor;
 
 implementation
@@ -48,7 +58,8 @@ uses
 const
   SELECTION_FRAME_OFFSET = 8;
   SELECTION_HANDLE_SIZE = 8;
-  ROTATION_HANDLE_OFFSET = 18;
+  PRIMARY_ROTATION_HANDLE_SIZE = 18;
+  PRIMARY_ROTATION_HANDLE_OFFSET = 30;
   LINE_HANDLE_GAP = 6;
   CR_VECTART_ROTATE = 101;
 
@@ -151,6 +162,16 @@ var
       Y - HalfHandle + SELECTION_HANDLE_SIZE);
   end;
 
+  function PrimaryRotationHandleRect(X, Y: Integer): TRect;
+  var
+    HalfPrimaryHandle: Integer;
+  begin
+    HalfPrimaryHandle := PRIMARY_ROTATION_HANDLE_SIZE div 2;
+    Result := Rect(X - HalfPrimaryHandle, Y - HalfPrimaryHandle,
+      X - HalfPrimaryHandle + PRIMARY_ROTATION_HANDLE_SIZE,
+      Y - HalfPrimaryHandle + PRIMARY_ROTATION_HANDLE_SIZE);
+  end;
+
 begin
   Result.FrameRect := LayerRect;
   Result.DrawFrame := True;
@@ -178,14 +199,12 @@ begin
   Result.Handles[vshBottomLeft] := HandleRect(Result.FrameRect.Left,
     Result.FrameRect.Bottom);
   Result.Handles[vshLeft] := HandleRect(Result.FrameRect.Left, CenterY);
-  Result.RotationHandles[0] := HandleRect(Result.FrameRect.Left -
-    ROTATION_HANDLE_OFFSET, Result.FrameRect.Top - ROTATION_HANDLE_OFFSET);
-  Result.RotationHandles[1] := HandleRect(Result.FrameRect.Right +
-    ROTATION_HANDLE_OFFSET, Result.FrameRect.Top - ROTATION_HANDLE_OFFSET);
-  Result.RotationHandles[2] := HandleRect(Result.FrameRect.Right +
-    ROTATION_HANDLE_OFFSET, Result.FrameRect.Bottom + ROTATION_HANDLE_OFFSET);
-  Result.RotationHandles[3] := HandleRect(Result.FrameRect.Left -
-    ROTATION_HANDLE_OFFSET, Result.FrameRect.Bottom + ROTATION_HANDLE_OFFSET);
+  Result.PrimaryRotationHandle := PrimaryRotationHandleRect(CenterX,
+    Result.FrameRect.Top - PRIMARY_ROTATION_HANDLE_OFFSET);
+  Result.RotationStem[0] := Point(CenterX,
+    Result.FrameRect.Top - HalfHandle);
+  Result.RotationStem[1] := Point(CenterX,
+    Result.PrimaryRotationHandle.Bottom);
 end;
 
 function BuildRotatedSelectionGeometry(
@@ -210,6 +229,16 @@ var
     Result := Rect(X - HalfHandle, Y - HalfHandle,
       X - HalfHandle + SELECTION_HANDLE_SIZE,
       Y - HalfHandle + SELECTION_HANDLE_SIZE);
+  end;
+
+  function PrimaryRotationHandleRect(X, Y: Integer): TRect;
+  var
+    HalfPrimaryHandle: Integer;
+  begin
+    HalfPrimaryHandle := PRIMARY_ROTATION_HANDLE_SIZE div 2;
+    Result := Rect(X - HalfPrimaryHandle, Y - HalfPrimaryHandle,
+      X - HalfPrimaryHandle + PRIMARY_ROTATION_HANDLE_SIZE,
+      Y - HalfPrimaryHandle + PRIMARY_ROTATION_HANDLE_SIZE);
   end;
 
 begin
@@ -246,20 +275,6 @@ begin
     Result.FramePoints[I] := Point(
       Round(Quad[I].X + OutwardX[I] * FrameOffset),
       Round(Quad[I].Y + OutwardY[I] * FrameOffset));
-    Distance := Hypot(OutwardX[I], OutwardY[I]);
-    if Distance > 0 then
-    begin
-      UnitX := OutwardX[I] / Distance;
-      UnitY := OutwardY[I] / Distance;
-    end
-    else
-    begin
-      UnitX := 0;
-      UnitY := 0;
-    end;
-    Result.RotationHandles[I] := HandleRect(
-      Round(Result.FramePoints[I].X + UnitX * ROTATION_HANDLE_OFFSET),
-      Round(Result.FramePoints[I].Y + UnitY * ROTATION_HANDLE_OFFSET));
     if I = 0 then
       Result.FrameRect := Rect(Result.FramePoints[I].X,
         Result.FramePoints[I].Y, Result.FramePoints[I].X,
@@ -297,6 +312,23 @@ begin
   Midpoint := Point((Result.FramePoints[3].X + Result.FramePoints[0].X) div 2,
     (Result.FramePoints[3].Y + Result.FramePoints[0].Y) div 2);
   Result.Handles[vshLeft] := HandleRect(Midpoint.X, Midpoint.Y);
+  Midpoint := Point((Result.FramePoints[0].X + Result.FramePoints[1].X) div 2,
+    (Result.FramePoints[0].Y + Result.FramePoints[1].Y) div 2);
+  UnitX := -AxisVX;
+  UnitY := -AxisVY;
+  Result.PrimaryRotationHandle := PrimaryRotationHandleRect(
+    Round(Midpoint.X + UnitX * PRIMARY_ROTATION_HANDLE_OFFSET),
+    Round(Midpoint.Y + UnitY * PRIMARY_ROTATION_HANDLE_OFFSET));
+  Result.RotationStem[0] := Point(
+    Round(Midpoint.X + UnitX * HalfHandle),
+    Round(Midpoint.Y + UnitY * HalfHandle));
+  Result.RotationStem[1] := Point(
+    Round(Midpoint.X + UnitX *
+      (PRIMARY_ROTATION_HANDLE_OFFSET -
+       PRIMARY_ROTATION_HANDLE_SIZE * 0.5)),
+    Round(Midpoint.Y + UnitY *
+      (PRIMARY_ROTATION_HANDLE_OFFSET -
+       PRIMARY_ROTATION_HANDLE_SIZE * 0.5)));
 end;
 
 function BuildLineSelectionGeometry(const StartPoint,
@@ -314,6 +346,16 @@ var
     Result := Rect(PointValue.X - HalfHandle, PointValue.Y - HalfHandle,
       PointValue.X - HalfHandle + SELECTION_HANDLE_SIZE,
       PointValue.Y - HalfHandle + SELECTION_HANDLE_SIZE);
+  end;
+
+  function PrimaryRotationHandleRect(X, Y: Integer): TRect;
+  var
+    HalfPrimaryHandle: Integer;
+  begin
+    HalfPrimaryHandle := PRIMARY_ROTATION_HANDLE_SIZE div 2;
+    Result := Rect(X - HalfPrimaryHandle, Y - HalfPrimaryHandle,
+      X - HalfPrimaryHandle + PRIMARY_ROTATION_HANDLE_SIZE,
+      Y - HalfPrimaryHandle + PRIMARY_ROTATION_HANDLE_SIZE);
   end;
 
 begin
@@ -347,6 +389,15 @@ begin
   Result.FramePoints[4] := StartPoint;
   Result.Handles[vshTopLeft] := HandleRect(StartHandlePoint);
   Result.Handles[vshBottomRight] := HandleRect(EndHandlePoint);
+  Result.PrimaryRotationHandle := PrimaryRotationHandleRect(
+    (Result.FrameRect.Left + Result.FrameRect.Right) div 2,
+    Result.FrameRect.Top - PRIMARY_ROTATION_HANDLE_OFFSET);
+  Result.RotationStem[0] := Point(
+    (Result.FrameRect.Left + Result.FrameRect.Right) div 2,
+    Result.FrameRect.Top - HalfHandle);
+  Result.RotationStem[1] := Point(
+    (Result.FrameRect.Left + Result.FrameRect.Right) div 2,
+    Result.PrimaryRotationHandle.Bottom);
 end;
 
 function BuildPathSelectionGeometry(const LayerRect: TRect;
@@ -354,7 +405,6 @@ function BuildPathSelectionGeometry(const LayerRect: TRect;
 begin
   Result := BuildSelectionGeometry(LayerRect, FrameOffset);
   FillChar(Result.Handles, SizeOf(Result.Handles), 0);
-  FillChar(Result.RotationHandles, SizeOf(Result.RotationHandles), 0);
 end;
 
 function HitTestSelectionHandle(const Point: TPoint;
@@ -370,13 +420,8 @@ end;
 
 function HitTestRotationHandle(const Point: TPoint;
   const Geometry: TVectArtSelectionGeometry): Boolean;
-var
-  I: Integer;
 begin
-  for I := 0 to High(Geometry.RotationHandles) do
-    if PtInRect(Geometry.RotationHandles[I], Point) then
-      Exit(True);
-  Result := False;
+  Result := PtInRect(Geometry.PrimaryRotationHandle, Point);
 end;
 
 function RotationHandleCursor: TCursor;

@@ -22,8 +22,6 @@ type
     FStrokeColorEdit: TEdit;
     FMifStrokeStyleCombo: TVectArtMifStrokeStyleCombo;
     FPathLineCapButtons: array[TVectArtLineCap] of TVectArtLineCapButton;
-    FPathLineJoinButtons: array[TVectArtLineJoin] of TVectArtLineJoinButton;
-    FPathMifAntiAliasButton: TVectArtMifAntiAliasButton;
     FStrokeWidthEdit: TEdit;
     FUpdating: Boolean;
     FWidthEdit: TEdit;
@@ -35,8 +33,6 @@ type
     procedure ApplyStrokeColor;
     procedure ApplyMifStrokeStyle(Sender: TObject);
     procedure ApplyPathLineCap(Sender: TObject);
-    procedure ApplyPathLineJoin(Sender: TObject);
-    procedure ApplyPathMifAntiAlias(Sender: TObject);
     procedure ApplyStrokeWidth;
     procedure ClearEditValue(Edit: TEdit);
     procedure EditExit(Sender: TObject);
@@ -70,7 +66,8 @@ implementation
 
 uses
   System.Generics.Collections, System.Math, System.SysUtils, Winapi.Windows,
-  Vcl.Graphics, ScreenLayoutGeometry;
+  Vcl.Graphics, ScreenLayoutGeometry, ScreenLayoutShapeEditCommands,
+  ScreenLayoutPathOperations;
 
 const
   COLOR_BACKGROUND = TColor($00212121);
@@ -83,7 +80,6 @@ const
 constructor TVectArtObjectPropertiesControl.Create(AOwner: TComponent);
 var
   LineCap: TVectArtLineCap;
-  LineJoin: TVectArtLineJoin;
 begin
   inherited Create(AOwner);
   Color := COLOR_BACKGROUND;
@@ -105,41 +101,8 @@ begin
     FPathLineCapButtons[LineCap].LineCap := LineCap;
     FPathLineCapButtons[LineCap].OnClick := ApplyPathLineCap;
   end;
-  for LineJoin := Low(TVectArtLineJoin) to High(TVectArtLineJoin) do
-  begin
-    FPathLineJoinButtons[LineJoin] := TVectArtLineJoinButton.Create(Self);
-    FPathLineJoinButtons[LineJoin].Parent := Self;
-    FPathLineJoinButtons[LineJoin].LineJoin := LineJoin;
-    FPathLineJoinButtons[LineJoin].OnClick := ApplyPathLineJoin;
-  end;
-  FPathMifAntiAliasButton := TVectArtMifAntiAliasButton.Create(Self);
-  FPathMifAntiAliasButton.Parent := Self;
-  FPathMifAntiAliasButton.Caption := 'AA';
-  FPathMifAntiAliasButton.OnClick := ApplyPathMifAntiAlias;
   SetEditorsEnabled(False);
   SetPathStyleControlsVisible(False);
-end;
-
-procedure TVectArtObjectPropertiesControl.ApplyPathMifAntiAlias(
-  Sender: TObject);
-var
-  NewValue: Boolean;
-  OldValue: Boolean;
-  PathLayer: TVectArtPathLayer;
-begin
-  if FUpdating or (FDocument = nil) or
-    (FDocument.SelectionCount <> 1) or SelectedLayersHaveLock or
-    not (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) then
-    Exit;
-  PathLayer := TVectArtPathLayer(FDocument[FDocument.SelectedIndex]);
-  OldValue := PathLayer.MifAntiAlias;
-  NewValue := not OldValue;
-  FDocument.SetPathMifAntiAlias(FDocument.SelectedIndex, NewValue);
-  if FEditHistory <> nil then
-    FEditHistory.AddApplied(TVectArtPathMifAntiAliasCommand.Create(FDocument,
-      FDocument.SelectedIndex, OldValue, NewValue));
-  if FEditorState <> nil then
-    FEditorState.PathMifAntiAlias := NewValue;
 end;
 
 procedure TVectArtObjectPropertiesControl.ApplyPathLineCap(Sender: TObject);
@@ -164,30 +127,6 @@ begin
       FDocument.SelectedIndex, OldValue, NewValue));
   if FEditorState <> nil then
     FEditorState.LineCap := NewValue;
-end;
-
-procedure TVectArtObjectPropertiesControl.ApplyPathLineJoin(Sender: TObject);
-var
-  NewValue: TVectArtLineJoin;
-  OldValue: TVectArtLineJoin;
-  PathLayer: TVectArtPathLayer;
-begin
-  if FUpdating or (FDocument = nil) or
-    (FDocument.SelectionCount <> 1) or SelectedLayersHaveLock or
-    not (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) or
-    not (Sender is TVectArtLineJoinButton) then
-    Exit;
-  PathLayer := TVectArtPathLayer(FDocument[FDocument.SelectedIndex]);
-  OldValue := PathLayer.LineJoin;
-  NewValue := TVectArtLineJoinButton(Sender).LineJoin;
-  if OldValue = NewValue then
-    Exit;
-  FDocument.SetPathLineJoin(FDocument.SelectedIndex, NewValue);
-  if FEditHistory <> nil then
-    FEditHistory.AddApplied(TVectArtPathLineJoinCommand.Create(FDocument,
-      FDocument.SelectedIndex, OldValue, NewValue));
-  if FEditorState <> nil then
-    FEditorState.LineJoin := NewValue;
 end;
 
 procedure TVectArtObjectPropertiesControl.ApplyStrokeColor;
@@ -344,7 +283,6 @@ var
   Red: Integer;
   NewColor: TColor;
   OldColor: TColor;
-  PathLayer: TVectArtPathLayer;
   Value: Integer;
 begin
   if FUpdating or (FDocument = nil) or
@@ -367,17 +305,8 @@ begin
   for I := 0 to High(LayerIndices) do
   begin
     LayerIndex := LayerIndices[I];
-    if FDocument[LayerIndex] is TVectArtPathLayer then
-    begin
-      PathLayer := TVectArtPathLayer(FDocument[LayerIndex]);
-      OldColor := PathLayer.FillColor;
-      FDocument.SetPathFill(LayerIndex, NewColor);
-    end
-    else
-    begin
-      OldColor := TVectArtRectangleLayer(FDocument[LayerIndex]).FillColor;
-      FDocument.SetRectangleFillColor(LayerIndex, NewColor);
-    end;
+    OldColor := TVectArtRectangleLayer(FDocument[LayerIndex]).FillColor;
+    FDocument.SetRectangleFillColor(LayerIndex, NewColor);
     if (Command <> nil) and (OldColor <> NewColor) then
       Command.Add(TVectArtFillColorCommand.Create(FDocument, LayerIndex,
         OldColor, NewColor));
@@ -401,19 +330,18 @@ var
   NewEndPoint: TPointF;
   NewImagePoints: TVectArtImagePoints;
   NewLeft: Single;
+  NewPathVertices: TArray<TScreenLayoutVertex>;
   NewSelectionBounds: TRectF;
   NewStartPoint: TPointF;
   NewTop: Single;
   OldBounds: TArray<TRectF>;
-  OldPoints: TArray<TPointF>;
   OldImagePoints: TVectArtImagePoints;
   OldEndPoint: TPointF;
   OldSelectionBounds: TRectF;
   OldStartPoint: TPointF;
+  OldPathVertices: TArray<TScreenLayoutVertex>;
   PathLayer: TVectArtPathLayer;
   ImageLayer: TVectArtImageLayer;
-  PathPoints: TArray<TPointF>;
-  PointIndex: Integer;
   ScaleX: Single;
   ScaleY: Single;
   WidthValue: Double;
@@ -436,13 +364,13 @@ begin
   if (FDocument.SelectionCount = 1) and
     (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) and
     not TVectArtPathLayer(FDocument[FDocument.SelectedIndex]).Closed and
-    (Length(TVectArtPathLayer(
-      FDocument[FDocument.SelectedIndex]).Points) = 2) then
+    ScreenLayoutPathIsStraightLine(TVectArtPathLayer(
+      FDocument[FDocument.SelectedIndex]).Vertices) then
   begin
     PathLayer := TVectArtPathLayer(FDocument[FDocument.SelectedIndex]);
-    OldPoints := Copy(PathLayer.Points);
-    OldStartPoint := OldPoints[0];
-    OldEndPoint := OldPoints[1];
+    OldPathVertices := PathLayer.Vertices;
+    OldStartPoint := OldPathVertices[0].Position;
+    OldEndPoint := OldPathVertices[1].Position;
     WidthValue := Max(WidthValue, MIN_OBJECT_SIZE);
     AngleRadians := DegToRad(HeightValue);
     NewStartPoint := TPointF.Create(
@@ -456,13 +384,14 @@ begin
       SameValue(OldEndPoint.X, NewEndPoint.X) and
       SameValue(OldEndPoint.Y, NewEndPoint.Y) then
       Exit;
-    SetLength(PathPoints, 2);
-    PathPoints[0] := NewStartPoint;
-    PathPoints[1] := NewEndPoint;
-    FDocument.SetPathPoints(FDocument.SelectedIndex, PathPoints);
+    NewPathVertices := CloneScreenLayoutPathVertices(OldPathVertices);
+    NewPathVertices[0].Position := NewStartPoint;
+    NewPathVertices[1].Position := NewEndPoint;
+    FDocument.SetPathVertices(FDocument.SelectedIndex, NewPathVertices);
     if FEditHistory <> nil then
-      FEditHistory.AddApplied(TVectArtPathPointsCommand.Create(FDocument,
-        FDocument.SelectedIndex, OldPoints, PathPoints));
+      FEditHistory.AddApplied(TScreenLayoutPathVerticesCommand.Create(
+        FDocument, FDocument.SelectedIndex, OldPathVertices,
+        NewPathVertices));
     Exit;
   end;
   WidthValue := Max(WidthValue, MIN_OBJECT_SIZE);
@@ -511,27 +440,25 @@ begin
     (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) then
   begin
     PathLayer := TVectArtPathLayer(FDocument[FDocument.SelectedIndex]);
-    OldPoints := Copy(PathLayer.Points);
-    OldSelectionBounds := PointsBounds(OldPoints);
+    OldPathVertices := PathLayer.Vertices;
+    OldSelectionBounds := ScreenLayoutPathVerticesBounds(OldPathVertices);
     if SameValue(OldSelectionBounds.Width, 0.0) or
       SameValue(OldSelectionBounds.Height, 0.0) then
     begin
       RefreshFromDocument;
       Exit;
     end;
-    ScaleX := WidthValue / OldSelectionBounds.Width;
-    ScaleY := HeightValue / OldSelectionBounds.Height;
     NewLeft := XValue - WidthValue * 0.5;
     NewTop := YValue - HeightValue * 0.5;
-    SetLength(PathPoints, Length(OldPoints));
-    for PointIndex := 0 to High(OldPoints) do
-      PathPoints[PointIndex] := TPointF.Create(
-        NewLeft + (OldPoints[PointIndex].X - OldSelectionBounds.Left) * ScaleX,
-        NewTop + (OldPoints[PointIndex].Y - OldSelectionBounds.Top) * ScaleY);
-    FDocument.SetPathPoints(FDocument.SelectedIndex, PathPoints);
+    NewSelectionBounds := TRectF.Create(NewLeft, NewTop,
+      NewLeft + WidthValue, NewTop + HeightValue);
+    NewPathVertices := ScaleScreenLayoutPathVertices(OldPathVertices,
+      OldSelectionBounds, NewSelectionBounds);
+    FDocument.SetPathVertices(FDocument.SelectedIndex, NewPathVertices);
     if FEditHistory <> nil then
-      FEditHistory.AddApplied(TVectArtPathPointsCommand.Create(FDocument,
-        FDocument.SelectedIndex, OldPoints, PathPoints));
+      FEditHistory.AddApplied(TScreenLayoutPathVerticesCommand.Create(
+        FDocument, FDocument.SelectedIndex, OldPathVertices,
+        NewPathVertices));
     Exit;
   end;
   if not SelectedBounds(OldSelectionBounds) then
@@ -579,9 +506,7 @@ begin
     if FDocument <> nil then
       for I := 1 to FDocument.LayerCount - 1 do
         if FDocument.IsLayerSelected(I) and
-          ((FDocument[I] is TVectArtRectangleLayer) or
-           ((FDocument[I] is TVectArtPathLayer) and
-            TVectArtPathLayer(FDocument[I]).Closed)) then
+          (FDocument[I] is TVectArtRectangleLayer) then
           Indices.Add(I);
     Result := Indices.ToArray;
   finally
@@ -741,8 +666,7 @@ begin
     if FDocument <> nil then
       for I := 1 to FDocument.LayerCount - 1 do
         if FDocument.IsLayerSelected(I) and
-          (FDocument[I] is TVectArtPathLayer) and
-          not TVectArtPathLayer(FDocument[I]).Closed then
+          (FDocument[I] is TVectArtPathLayer) then
           Indices.Add(I);
     Result := Indices.ToArray;
   finally
@@ -790,8 +714,8 @@ begin
     (FDocument.SelectionCount = 1) and
     (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) and
     not TVectArtPathLayer(FDocument[FDocument.SelectedIndex]).Closed and
-    (Length(TVectArtPathLayer(
-      FDocument[FDocument.SelectedIndex]).Points) = 2);
+    ScreenLayoutPathIsStraightLine(TVectArtPathLayer(
+      FDocument[FDocument.SelectedIndex]).Vertices);
   if IsLineSelection then
   begin
     Canvas.TextOut(12, 91, 'Length');
@@ -802,7 +726,8 @@ begin
     Canvas.TextOut(12, 91, 'Width');
     Canvas.TextOut((ClientWidth div 2) + 4, 91, 'Height');
   end;
-  Canvas.TextOut(12, 139, 'Fill color');
+  if FColorEdit.Visible then
+    Canvas.TextOut(12, 139, 'Fill color');
   if FStrokeColorEdit.Visible then
   begin
     Canvas.TextOut(12, 190, 'Stroke color');
@@ -810,21 +735,21 @@ begin
     Canvas.TextOut((ClientWidth div 2) + 4, 239, 'Stroke style');
   end;
   Canvas.TextOut(12, 288, 'Opacity (%)');
-  if FPathLineCapButtons[vlcButt].Visible then
-  begin
+  if FPathLineCapButtons[vlcSquare].Visible then
     Canvas.TextOut(12, 337, 'Line cap');
-    Canvas.TextOut(12, 385, 'Line join');
+  if FColorEdit.Visible then
+  begin
+    SwatchRect := Rect(ClientWidth - 42, 158, ClientWidth - 12, 183);
+    ColorValue := COLOR_EDIT;
+    if TryStrToInt('$' + StringReplace(Trim(FColorEdit.Text), '#', '', []),
+      HexValue) and (HexValue >= 0) and (HexValue <= $FFFFFF) then
+      ColorValue := RGB((HexValue shr 16) and $FF,
+        (HexValue shr 8) and $FF, HexValue and $FF);
+    Canvas.Brush.Color := ColorValue;
+    Canvas.FillRect(SwatchRect);
+    Canvas.Brush.Color := COLOR_LABEL;
+    Canvas.FrameRect(SwatchRect);
   end;
-  SwatchRect := Rect(ClientWidth - 42, 158, ClientWidth - 12, 183);
-  ColorValue := COLOR_EDIT;
-  if TryStrToInt('$' + StringReplace(Trim(FColorEdit.Text), '#', '', []),
-    HexValue) and (HexValue >= 0) and (HexValue <= $FFFFFF) then
-    ColorValue := RGB((HexValue shr 16) and $FF,
-      (HexValue shr 8) and $FF, HexValue and $FF);
-  Canvas.Brush.Color := ColorValue;
-  Canvas.FillRect(SwatchRect);
-  Canvas.Brush.Color := COLOR_LABEL;
-  Canvas.FrameRect(SwatchRect);
   if FStrokeColorEdit.Visible then
   begin
     SwatchRect := Rect(ClientWidth - 42, 207, ClientWidth - 12, 232);
@@ -851,6 +776,7 @@ var
   LayerIndices: TArray<Integer>;
   OpacityValue: Single;
   PathLayer: TVectArtPathLayer;
+  PathVertices: TArray<TScreenLayoutVertex>;
   RectangleLayer: TVectArtRectangleLayer;
   StrokeColorValue: TColor;
 begin
@@ -858,11 +784,13 @@ begin
   try
     SetPathStyleControlsVisible(False);
     SetStrokeControlsVisible(False);
+    FColorEdit.Visible := False;
     if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
       (FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) then
     begin
       RectangleLayer := TVectArtRectangleLayer(
         FDocument[FDocument.SelectedIndex]);
+      FColorEdit.Visible := True;
       Bounds := RectangleLayer.Bounds;
       FXEdit.Text := FormatFloat('0.##', (Bounds.Left + Bounds.Right) * 0.5);
       FYEdit.Text := FormatFloat('0.##', (Bounds.Top + Bounds.Bottom) * 0.5);
@@ -928,22 +856,26 @@ begin
       (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) then
     begin
       PathLayer := TVectArtPathLayer(FDocument[FDocument.SelectedIndex]);
-      if not PathLayer.Closed and (Length(PathLayer.Points) = 2) then
+      PathVertices := PathLayer.Vertices;
+      if not PathLayer.Closed and
+        ScreenLayoutPathIsStraightLine(PathVertices) then
       begin
         FXEdit.Text := FormatFloat('0.##',
-          (PathLayer.Points[0].X + PathLayer.Points[1].X) * 0.5);
+          (PathVertices[0].Position.X +
+            PathVertices[1].Position.X) * 0.5);
         FYEdit.Text := FormatFloat('0.##',
-          (PathLayer.Points[0].Y + PathLayer.Points[1].Y) * 0.5);
+          (PathVertices[0].Position.Y +
+            PathVertices[1].Position.Y) * 0.5);
         FWidthEdit.Text := FormatFloat('0.##', Hypot(
-          PathLayer.Points[1].X - PathLayer.Points[0].X,
-          PathLayer.Points[1].Y - PathLayer.Points[0].Y));
+          PathVertices[1].Position.X - PathVertices[0].Position.X,
+          PathVertices[1].Position.Y - PathVertices[0].Position.Y));
         FHeightEdit.Text := FormatFloat('0.##', RadToDeg(ArcTan2(
-          PathLayer.Points[1].Y - PathLayer.Points[0].Y,
-          PathLayer.Points[1].X - PathLayer.Points[0].X)));
+          PathVertices[1].Position.Y - PathVertices[0].Position.Y,
+          PathVertices[1].Position.X - PathVertices[0].Position.X)));
       end
       else
       begin
-        Bounds := PointsBounds(PathLayer.Points);
+        Bounds := ScreenLayoutPathVerticesBounds(PathVertices);
         FXEdit.Text := FormatFloat('0.##',
           (Bounds.Left + Bounds.Right) * 0.5);
         FYEdit.Text := FormatFloat('0.##',
@@ -952,40 +884,21 @@ begin
         FHeightEdit.Text := FormatFloat('0.##', Bounds.Height);
       end;
       FOpacityEdit.Text := FormatFloat('0.##', PathLayer.Opacity * 100);
-      if PathLayer.Closed then
-      begin
-        ColorValue := ColorToRGB(PathLayer.FillColor);
-        FColorEdit.Text := Format('#%.2x%.2x%.2x', [GetRValue(ColorValue),
-          GetGValue(ColorValue), GetBValue(ColorValue)]);
-        ClearEditValue(FStrokeColorEdit);
-        ClearEditValue(FStrokeWidthEdit);
-        FMifStrokeStyleCombo.SetPendingItemIndex(-1);
-      end
-      else
-      begin
-        SetStrokeControlsVisible(True);
-        ClearEditValue(FColorEdit);
-        StrokeColorValue := ColorToRGB(PathLayer.StrokeColor);
-        FStrokeColorEdit.Text := Format('#%.2x%.2x%.2x',
-          [GetRValue(StrokeColorValue), GetGValue(StrokeColorValue),
-           GetBValue(StrokeColorValue)]);
-        FStrokeWidthEdit.Text := FormatFloat('0.##', PathLayer.StrokeWidth);
-        FMifStrokeStyleCombo.SetPendingItemIndex(
-          Ord(PathLayer.MifStrokeStyle));
-        SetPathStyleControlsVisible(True);
-      end;
-      FPathLineCapButtons[vlcButt].Selected := PathLayer.LineCap = vlcButt;
+      SetStrokeControlsVisible(True);
+      ClearEditValue(FColorEdit);
+      StrokeColorValue := ColorToRGB(PathLayer.StrokeColor);
+      FStrokeColorEdit.Text := Format('#%.2x%.2x%.2x',
+        [GetRValue(StrokeColorValue), GetGValue(StrokeColorValue),
+         GetBValue(StrokeColorValue)]);
+      FStrokeWidthEdit.Text := FormatFloat('0.##', PathLayer.StrokeWidth);
+      FMifStrokeStyleCombo.SetPendingItemIndex(Ord(PathLayer.MifStrokeStyle));
+      SetPathStyleControlsVisible(not PathLayer.Closed);
       FPathLineCapButtons[vlcSquare].Selected := PathLayer.LineCap = vlcSquare;
       FPathLineCapButtons[vlcRound].Selected := PathLayer.LineCap = vlcRound;
-      FPathLineJoinButtons[vljMiter].Selected := PathLayer.LineJoin = vljMiter;
-      FPathLineJoinButtons[vljBevel].Selected := PathLayer.LineJoin = vljBevel;
-      FPathLineJoinButtons[vljRound].Selected := PathLayer.LineJoin = vljRound;
-      FPathMifAntiAliasButton.Selected := PathLayer.MifAntiAlias;
+      FPathLineCapButtons[vlcTriangle].Selected :=
+        PathLayer.LineCap = vlcTriangle;
       SetEditorsEnabled(True);
-      FColorEdit.Enabled := PathLayer.Closed;
-      FStrokeColorEdit.Enabled := not PathLayer.Closed;
-      FStrokeWidthEdit.Enabled := not PathLayer.Closed;
-      FMifStrokeStyleCombo.Enabled := not PathLayer.Closed;
+      FColorEdit.Enabled := False;
       if PathLayer.Locked then
       begin
         FXEdit.Enabled := False;
@@ -996,18 +909,15 @@ begin
         FStrokeColorEdit.Enabled := False;
         FStrokeWidthEdit.Enabled := False;
         FMifStrokeStyleCombo.Enabled := False;
-        FPathLineCapButtons[vlcButt].Enabled := False;
         FPathLineCapButtons[vlcSquare].Enabled := False;
         FPathLineCapButtons[vlcRound].Enabled := False;
-        FPathLineJoinButtons[vljMiter].Enabled := False;
-        FPathLineJoinButtons[vljBevel].Enabled := False;
-        FPathLineJoinButtons[vljRound].Enabled := False;
-        FPathMifAntiAliasButton.Enabled := False;
+        FPathLineCapButtons[vlcTriangle].Enabled := False;
       end;
     end
     else if (FDocument <> nil) and (FDocument.SelectionCount > 1) and
       SelectedBounds(Bounds) then
     begin
+      FColorEdit.Visible := True;
       FXEdit.Text := FormatFloat('0.##', (Bounds.Left + Bounds.Right) * 0.5);
       FYEdit.Text := FormatFloat('0.##', (Bounds.Top + Bounds.Bottom) * 0.5);
       FWidthEdit.Text := FormatFloat('0.##', Bounds.Width);
@@ -1125,17 +1035,11 @@ begin
     EDIT_HEIGHT);
   FOpacityEdit.SetBounds(12, 305, Max(ClientWidth - 24, 48), EDIT_HEIGHT);
   ButtonWidth := Max((ClientWidth - 40) div 3, 32);
-  FPathLineCapButtons[vlcButt].SetBounds(12, 354, ButtonWidth, 30);
-  FPathLineCapButtons[vlcSquare].SetBounds(16 + ButtonWidth, 354,
+  FPathLineCapButtons[vlcSquare].SetBounds(12, 354, ButtonWidth, 30);
+  FPathLineCapButtons[vlcRound].SetBounds(16 + ButtonWidth, 354,
     ButtonWidth, 30);
-  FPathLineCapButtons[vlcRound].SetBounds(20 + ButtonWidth * 2, 354,
+  FPathLineCapButtons[vlcTriangle].SetBounds(20 + ButtonWidth * 2, 354,
     ButtonWidth, 30);
-  FPathLineJoinButtons[vljMiter].SetBounds(12, 402, ButtonWidth, 30);
-  FPathLineJoinButtons[vljBevel].SetBounds(16 + ButtonWidth, 402,
-    ButtonWidth, 30);
-  FPathLineJoinButtons[vljRound].SetBounds(20 + ButtonWidth * 2, 402,
-    ButtonWidth, 30);
-  FPathMifAntiAliasButton.SetBounds(12, 442, 48, 28);
 end;
 
 procedure TVectArtObjectPropertiesControl.SetDocument(
@@ -1164,20 +1068,12 @@ procedure TVectArtObjectPropertiesControl.SetPathStyleControlsVisible(
   Value: Boolean);
 var
   LineCap: TVectArtLineCap;
-  LineJoin: TVectArtLineJoin;
 begin
   for LineCap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
   begin
     FPathLineCapButtons[LineCap].Visible := Value;
     FPathLineCapButtons[LineCap].Enabled := Value;
   end;
-  for LineJoin := Low(TVectArtLineJoin) to High(TVectArtLineJoin) do
-  begin
-    FPathLineJoinButtons[LineJoin].Visible := Value;
-    FPathLineJoinButtons[LineJoin].Enabled := Value;
-  end;
-  FPathMifAntiAliasButton.Visible := Value;
-  FPathMifAntiAliasButton.Enabled := Value;
 end;
 
 procedure TVectArtObjectPropertiesControl.SetStrokeControlsVisible(

@@ -24,7 +24,7 @@ uses
   Vcl.Graphics;
 
 const
-  DOCUMENT_FORMAT_VERSION = 4;
+  DOCUMENT_FORMAT_VERSION = 7;
 
 type
   TRequiredJSONValueClass = class of TJSONValue;
@@ -76,11 +76,14 @@ var
   LayersJson: TJSONArray;
   Path: TVectArtPathLayer;
   PathJson: TJSONObject;
+  PathVertices: TArray<TScreenLayoutVertex>;
   PointIndex: Integer;
   PointJson: TJSONObject;
   PointsJson: TJSONArray;
   Rectangle: TVectArtRectangleLayer;
   RectangleJson: TJSONObject;
+  RoundedRectangle: TScreenLayoutRoundedRectangleLayer;
+  RoundedRectangleJson: TJSONObject;
   Root: TJSONObject;
   SerializedSelectedIndex: Integer;
   Shape: TScreenLayoutShapeLayer;
@@ -153,32 +156,43 @@ begin
         PathJson.AddPair('name', Path.Name);
         PathJson.AddPair('closed', TJSONBool.Create(Path.Closed));
         PathJson.AddPair('opacity', TJSONNumber.Create(Path.Opacity));
-        if Path.Closed then
-          PathJson.AddPair('fillColor',
-            TJSONNumber.Create(Integer(Path.FillColor)))
-        else
-        begin
-          PathJson.AddPair('strokeColor',
-            TJSONNumber.Create(Integer(Path.StrokeColor)));
-          PathJson.AddPair('strokeWidth',
-            TJSONNumber.Create(Path.StrokeWidth));
-          PathJson.AddPair('strokeStyle',
-            TJSONNumber.Create(Ord(Path.MifStrokeStyle)));
-          PathJson.AddPair('lineCap', TJSONNumber.Create(Ord(Path.LineCap)));
-          PathJson.AddPair('lineJoin', TJSONNumber.Create(Ord(Path.LineJoin)));
-          PathJson.AddPair('antiAlias', TJSONBool.Create(Path.MifAntiAlias));
-        end;
+        PathJson.AddPair('strokeColor',
+          TJSONNumber.Create(Integer(Path.StrokeColor)));
+        PathJson.AddPair('strokeWidth', TJSONNumber.Create(Path.StrokeWidth));
+        PathJson.AddPair('strokeStyle',
+          TJSONNumber.Create(Ord(Path.MifStrokeStyle)));
+        PathJson.AddPair('lineCap', TJSONNumber.Create(Ord(Path.LineCap)));
         PathJson.AddPair('visible', TJSONBool.Create(Path.Visible));
         PathJson.AddPair('locked', TJSONBool.Create(Path.Locked));
-        PointsJson := TJSONArray.Create;
-        for PointIndex := 0 to High(Path.Points) do
+        VerticesJson := TJSONArray.Create;
+        PathVertices := Path.Vertices;
+        for VertexIndex := 0 to High(PathVertices) do
         begin
-          PointJson := TJSONObject.Create;
-          PointJson.AddPair('x', TJSONNumber.Create(Path.Points[PointIndex].X));
-          PointJson.AddPair('y', TJSONNumber.Create(Path.Points[PointIndex].Y));
-          PointsJson.AddElement(PointJson);
+          VertexJson := TJSONObject.Create;
+          with PathVertices[VertexIndex] do
+          begin
+            VertexJson.AddPair('x', TJSONNumber.Create(Position.X));
+            VertexJson.AddPair('y', TJSONNumber.Create(Position.Y));
+            VertexJson.AddPair('incomingX',
+              TJSONNumber.Create(IncomingControl.X));
+            VertexJson.AddPair('incomingY',
+              TJSONNumber.Create(IncomingControl.Y));
+            VertexJson.AddPair('outgoingX',
+              TJSONNumber.Create(OutgoingControl.X));
+            VertexJson.AddPair('outgoingY',
+              TJSONNumber.Create(OutgoingControl.Y));
+            if Kind = slvkBezier then
+              VertexJson.AddPair('kind', 'bezier')
+            else
+              VertexJson.AddPair('kind', 'sharp');
+            if OutgoingSegment = slskCubicBezier then
+              VertexJson.AddPair('outgoingSegment', 'cubicBezier')
+            else
+              VertexJson.AddPair('outgoingSegment', 'line');
+          end;
+          VerticesJson.AddElement(VertexJson);
         end;
-        PathJson.AddPair('points', PointsJson);
+        PathJson.AddPair('vertices', VerticesJson);
         LayersJson.AddElement(PathJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;
@@ -201,9 +215,6 @@ begin
           TJSONNumber.Create(Shape.StrokeWidth));
         ShapeJson.AddPair('strokeStyle',
           TJSONNumber.Create(Ord(Shape.StrokeStyle)));
-        ShapeJson.AddPair('lineJoin',
-          TJSONNumber.Create(Ord(Shape.StrokeJoin)));
-        ShapeJson.AddPair('antiAlias', TJSONBool.Create(Shape.MifAntiAlias));
         ShapeJson.AddPair('visible', TJSONBool.Create(Shape.Visible));
         ShapeJson.AddPair('locked', TJSONBool.Create(Shape.Locked));
         ContoursJson := TJSONArray.Create;
@@ -244,6 +255,43 @@ begin
         end;
         ShapeJson.AddPair('contours', ContoursJson);
         LayersJson.AddElement(ShapeJson);
+        if I = Document.SelectedIndex then
+          SerializedSelectedIndex := LayersJson.Count;
+        Continue;
+      end;
+      if Layer is TScreenLayoutRoundedRectangleLayer then
+      begin
+        RoundedRectangle := TScreenLayoutRoundedRectangleLayer(Layer);
+        RoundedRectangleJson := TJSONObject.Create;
+        RoundedRectangleJson.AddPair('type', 'roundedRectangle');
+        RoundedRectangleJson.AddPair('name', RoundedRectangle.Name);
+        RoundedRectangleJson.AddPair('left',
+          TJSONNumber.Create(RoundedRectangle.Bounds.Left));
+        RoundedRectangleJson.AddPair('top',
+          TJSONNumber.Create(RoundedRectangle.Bounds.Top));
+        RoundedRectangleJson.AddPair('right',
+          TJSONNumber.Create(RoundedRectangle.Bounds.Right));
+        RoundedRectangleJson.AddPair('bottom',
+          TJSONNumber.Create(RoundedRectangle.Bounds.Bottom));
+        RoundedRectangleJson.AddPair('topLeftRadius',
+          TJSONNumber.Create(RoundedRectangle.CornerRadii.TopLeft));
+        RoundedRectangleJson.AddPair('topRightRadius',
+          TJSONNumber.Create(RoundedRectangle.CornerRadii.TopRight));
+        RoundedRectangleJson.AddPair('bottomRightRadius',
+          TJSONNumber.Create(RoundedRectangle.CornerRadii.BottomRight));
+        RoundedRectangleJson.AddPair('bottomLeftRadius',
+          TJSONNumber.Create(RoundedRectangle.CornerRadii.BottomLeft));
+        RoundedRectangleJson.AddPair('fillColor',
+          TJSONNumber.Create(Integer(RoundedRectangle.FillColor)));
+        RoundedRectangleJson.AddPair('opacity',
+          TJSONNumber.Create(RoundedRectangle.Opacity));
+        RoundedRectangleJson.AddPair('rotation',
+          TJSONNumber.Create(RoundedRectangle.RotationDegrees));
+        RoundedRectangleJson.AddPair('visible',
+          TJSONBool.Create(RoundedRectangle.Visible));
+        RoundedRectangleJson.AddPair('locked',
+          TJSONBool.Create(RoundedRectangle.Locked));
+        LayersJson.AddElement(RoundedRectangleJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;
         Continue;
@@ -296,6 +344,7 @@ var
   ContoursJson: TJSONArray;
   Data: TVectArtRectangleData;
   Discarded: TVectArtRectangleData;
+  DiscardedRoundedRectangle: TScreenLayoutRoundedRectangleData;
   DiscardedPath: TVectArtPathData;
   DiscardedImage: TVectArtImageData;
   DiscardedShape: TScreenLayoutShapeData;
@@ -309,6 +358,8 @@ var
   LayerTypes: TArray<string>;
   LayersJson: TJSONArray;
   RectangleData: TArray<TVectArtRectangleData>;
+  RoundedRectangleData: TArray<TScreenLayoutRoundedRectangleData>;
+  RoundedRectangleValue: TScreenLayoutRoundedRectangleData;
   PathData: TArray<TVectArtPathData>;
   PathValue: TVectArtPathData;
   PointIndex: Integer;
@@ -326,7 +377,6 @@ var
   VertexKind: string;
   VerticesJson: TJSONArray;
   LineCapValue: Integer;
-  LineJoinValue: Integer;
   MifStrokeStyleValue: Integer;
   Version: Integer;
 begin
@@ -359,6 +409,7 @@ begin
         raise EConvertError.Create('Canvas size must be positive');
       LayersJson := TJSONArray(RequireValue(Root, 'layers', TJSONArray));
       SetLength(RectangleData, LayersJson.Count);
+      SetLength(RoundedRectangleData, LayersJson.Count);
       SetLength(PathData, LayersJson.Count);
       SetLength(ImageData, LayersJson.Count);
       SetLength(ShapeData, LayersJson.Count);
@@ -420,57 +471,70 @@ begin
           PathValue.Name := ReadString(LayerJson, 'name');
           PathValue.Closed := ReadBoolean(LayerJson, 'closed');
           PathValue.Opacity := ReadSingle(LayerJson, 'opacity');
-          PathValue.FillColor := clWhite;
           PathValue.StrokeColor := clBlack;
           PathValue.StrokeWidth := 1.0;
           PathValue.MifStrokeStyle := vssSolid;
-          PathValue.LineCap := vlcButt;
-          PathValue.LineJoin := vljMiter;
-          PathValue.MifAntiAlias := True;
-          if PathValue.Closed then
-            PathValue.FillColor := TColor(ReadInteger(LayerJson, 'fillColor'))
-          else
-          begin
-            PathValue.StrokeColor := TColor(ReadInteger(LayerJson,
-              'strokeColor'));
-            PathValue.StrokeWidth := Max(ReadSingle(LayerJson,
-              'strokeWidth'), 0.1);
-            MifStrokeStyleValue := ReadInteger(LayerJson, 'strokeStyle');
-            if InRange(MifStrokeStyleValue,
-              Ord(Low(TVectArtMifStrokeStyle)),
-              Ord(High(TVectArtMifStrokeStyle))) then
-              PathValue.MifStrokeStyle :=
-                TVectArtMifStrokeStyle(MifStrokeStyleValue);
-            LineCapValue := ReadInteger(LayerJson, 'lineCap');
-            if InRange(LineCapValue, Ord(Low(TVectArtLineCap)),
-              Ord(High(TVectArtLineCap))) then
-              PathValue.LineCap := TVectArtLineCap(LineCapValue);
-            LineJoinValue := ReadInteger(LayerJson, 'lineJoin');
-            if InRange(LineJoinValue, Ord(Low(TVectArtLineJoin)),
-              Ord(High(TVectArtLineJoin))) then
-              PathValue.LineJoin := TVectArtLineJoin(LineJoinValue);
-            PathValue.MifAntiAlias := TJSONBool(
-              RequireValue(LayerJson, 'antiAlias', TJSONBool)).AsBoolean;
-          end;
+          PathValue.LineCap := vlcSquare;
+          PathValue.StrokeColor := TColor(ReadInteger(LayerJson,
+            'strokeColor'));
+          PathValue.StrokeWidth := Max(ReadSingle(LayerJson,
+            'strokeWidth'), 0.1);
+          MifStrokeStyleValue := ReadInteger(LayerJson, 'strokeStyle');
+          if InRange(MifStrokeStyleValue,
+            Ord(Low(TVectArtMifStrokeStyle)),
+            Ord(High(TVectArtMifStrokeStyle))) then
+            PathValue.MifStrokeStyle :=
+              TVectArtMifStrokeStyle(MifStrokeStyleValue);
+          LineCapValue := ReadInteger(LayerJson, 'lineCap');
+          if InRange(LineCapValue, Ord(Low(TVectArtLineCap)),
+            Ord(High(TVectArtLineCap))) then
+            PathValue.LineCap := TVectArtLineCap(LineCapValue);
           PathValue.Visible := ReadBoolean(LayerJson, 'visible');
           PathValue.Locked := ReadBoolean(LayerJson, 'locked');
-          PointsJson := TJSONArray(RequireValue(LayerJson, 'points',
+          VerticesJson := TJSONArray(RequireValue(LayerJson, 'vertices',
             TJSONArray));
-          if PointsJson.Count < 2 then
+          if VerticesJson.Count < 2 then
             raise EConvertError.CreateFmt('Path layer %d has too few points',
               [I]);
-          if PathValue.Closed and (PointsJson.Count < 3) then
+          if PathValue.Closed and (VerticesJson.Count < 3) then
             raise EConvertError.CreateFmt(
               'Closed path layer %d must contain at least three points', [I]);
-          SetLength(PathValue.Points, PointsJson.Count);
-          for PointIndex := 0 to PointsJson.Count - 1 do
+          SetLength(PathValue.Vertices, VerticesJson.Count);
+          for VertexIndex := 0 to VerticesJson.Count - 1 do
           begin
-            if not (PointsJson.Items[PointIndex] is TJSONObject) then
+            if not (VerticesJson.Items[VertexIndex] is TJSONObject) then
               raise EConvertError.CreateFmt(
-                'Path layer %d point %d is invalid', [I, PointIndex]);
-            PointJson := TJSONObject(PointsJson.Items[PointIndex]);
-            PathValue.Points[PointIndex] := TPointF.Create(
-              ReadSingle(PointJson, 'x'), ReadSingle(PointJson, 'y'));
+                'Path layer %d vertex %d is invalid', [I, VertexIndex]);
+            VertexJson := TJSONObject(VerticesJson.Items[VertexIndex]);
+            with PathValue.Vertices[VertexIndex] do
+            begin
+              Position := TPointF.Create(ReadSingle(VertexJson, 'x'),
+                ReadSingle(VertexJson, 'y'));
+              IncomingControl := TPointF.Create(
+                ReadSingle(VertexJson, 'incomingX'),
+                ReadSingle(VertexJson, 'incomingY'));
+              OutgoingControl := TPointF.Create(
+                ReadSingle(VertexJson, 'outgoingX'),
+                ReadSingle(VertexJson, 'outgoingY'));
+              VertexKind := ReadString(VertexJson, 'kind');
+              if VertexKind = 'sharp' then
+                Kind := slvkSharp
+              else if VertexKind = 'bezier' then
+                Kind := slvkBezier
+              else
+                raise EConvertError.CreateFmt(
+                  'Path layer %d vertex %d has an invalid kind',
+                  [I, VertexIndex]);
+              SegmentKind := ReadString(VertexJson, 'outgoingSegment');
+              if SegmentKind = 'line' then
+                OutgoingSegment := slskLine
+              else if SegmentKind = 'cubicBezier' then
+                OutgoingSegment := slskCubicBezier
+              else
+                raise EConvertError.CreateFmt(
+                  'Path layer %d vertex %d has an invalid outgoing segment',
+                  [I, VertexIndex]);
+            end;
           end;
           PathData[I] := PathValue;
           Continue;
@@ -499,13 +563,6 @@ begin
               'Shape layer %d has an invalid stroke style', [I]);
           ShapeValue.StrokeStyle :=
             TVectArtMifStrokeStyle(MifStrokeStyleValue);
-          LineJoinValue := ReadInteger(LayerJson, 'lineJoin');
-          if not InRange(LineJoinValue, Ord(Low(TVectArtLineJoin)),
-            Ord(High(TVectArtLineJoin))) then
-            raise EConvertError.CreateFmt(
-              'Shape layer %d has an invalid line join', [I]);
-          ShapeValue.StrokeJoin := TVectArtLineJoin(LineJoinValue);
-          ShapeValue.MifAntiAlias := ReadBoolean(LayerJson, 'antiAlias');
           ShapeValue.Visible := ReadBoolean(LayerJson, 'visible');
           ShapeValue.Locked := ReadBoolean(LayerJson, 'locked');
           ContoursJson := TJSONArray(RequireValue(LayerJson, 'contours',
@@ -570,6 +627,33 @@ begin
           ShapeData[I] := ShapeValue;
           Continue;
         end;
+        if LayerTypes[I] = 'roundedRectangle' then
+        begin
+          RoundedRectangleValue.Name := ReadString(LayerJson, 'name');
+          RoundedRectangleValue.Bounds := TRectF.Create(
+            ReadSingle(LayerJson, 'left'), ReadSingle(LayerJson, 'top'),
+            ReadSingle(LayerJson, 'right'), ReadSingle(LayerJson, 'bottom'));
+          RoundedRectangleValue.CornerRadii.TopLeft :=
+            ReadSingle(LayerJson, 'topLeftRadius');
+          RoundedRectangleValue.CornerRadii.TopRight :=
+            ReadSingle(LayerJson, 'topRightRadius');
+          RoundedRectangleValue.CornerRadii.BottomRight :=
+            ReadSingle(LayerJson, 'bottomRightRadius');
+          RoundedRectangleValue.CornerRadii.BottomLeft :=
+            ReadSingle(LayerJson, 'bottomLeftRadius');
+          RoundedRectangleValue.CornerRadii := ClampScreenLayoutCornerRadii(
+            RoundedRectangleValue.Bounds,
+            RoundedRectangleValue.CornerRadii);
+          RoundedRectangleValue.FillColor := TColor(
+            ReadInteger(LayerJson, 'fillColor'));
+          RoundedRectangleValue.Opacity := ReadSingle(LayerJson, 'opacity');
+          RoundedRectangleValue.RotationDegrees :=
+            ReadSingle(LayerJson, 'rotation');
+          RoundedRectangleValue.Visible := ReadBoolean(LayerJson, 'visible');
+          RoundedRectangleValue.Locked := ReadBoolean(LayerJson, 'locked');
+          RoundedRectangleData[I] := RoundedRectangleValue;
+          Continue;
+        end;
         if LayerTypes[I] <> 'rectangle' then
           raise EConvertError.CreateFmt('Layer %d has an unsupported type',
             [I]);
@@ -593,7 +677,11 @@ begin
       if Canvas = nil then
         raise EInvalidOp.Create('Document canvas is missing');
       while Document.LayerCount > 1 do
-        if Document[Document.LayerCount - 1] is TVectArtRectangleLayer then
+        if Document[Document.LayerCount - 1] is
+          TScreenLayoutRoundedRectangleLayer then
+          Document.RemoveRoundedRectangle(Document.LayerCount - 1,
+            DiscardedRoundedRectangle)
+        else if Document[Document.LayerCount - 1] is TVectArtRectangleLayer then
           Document.RemoveRectangle(Document.LayerCount - 1, Discarded)
         else if Document[Document.LayerCount - 1] is TVectArtPathLayer then
           Document.RemovePath(Document.LayerCount - 1, DiscardedPath)
@@ -613,6 +701,9 @@ begin
       begin
         if LayerTypes[I] = 'rectangle' then
           Document.InsertRectangle(Document.LayerCount, RectangleData[I])
+        else if LayerTypes[I] = 'roundedRectangle' then
+          Document.InsertRoundedRectangle(Document.LayerCount,
+            RoundedRectangleData[I])
         else if LayerTypes[I] = 'image' then
           Document.InsertImage(Document.LayerCount, ImageData[I])
         else if LayerTypes[I] = 'path' then

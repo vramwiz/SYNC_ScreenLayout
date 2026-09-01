@@ -1,5 +1,5 @@
 ﻿// Documentの表示オブジェクトを、各ホストで共有できる透明RGBA8画像へ描画する。
-// 線種、線端、接合形式をSkiaのストロークへ反映する。
+// 線種と四角・丸・三角の線端をSkia描画へ反映する。
 unit ScreenLayoutRenderer;
 
 interface
@@ -66,6 +66,115 @@ begin
     Cardinal(GetBValue(RGBColor)));
 end;
 
+procedure DrawTriangleLineCap(const Canvas: ISkCanvas; const Position: TPointF;
+  OutwardDirection: TPointF; HalfWidth: Single; const Paint: ISkPaint);
+var
+  DirectionLength: Single;
+  Normal: TPointF;
+  PathBuilder: ISkPathBuilder;
+  Tip: TPointF;
+begin
+  DirectionLength := Hypot(OutwardDirection.X, OutwardDirection.Y);
+  if DirectionLength <= 0.0001 then
+    Exit;
+  OutwardDirection := TPointF.Create(OutwardDirection.X / DirectionLength,
+    OutwardDirection.Y / DirectionLength);
+  Normal := TPointF.Create(-OutwardDirection.Y * HalfWidth,
+    OutwardDirection.X * HalfWidth);
+  Tip := TPointF.Create(Position.X + OutwardDirection.X * HalfWidth,
+    Position.Y + OutwardDirection.Y * HalfWidth);
+  PathBuilder := TSkPathBuilder.Create;
+  PathBuilder.MoveTo(TPointF.Create(Position.X + Normal.X,
+    Position.Y + Normal.Y));
+  PathBuilder.LineTo(Tip);
+  PathBuilder.LineTo(TPointF.Create(Position.X - Normal.X,
+    Position.Y - Normal.Y));
+  PathBuilder.Close;
+  Canvas.DrawPath(PathBuilder.Detach, Paint);
+end;
+
+procedure DrawPathTriangleCaps(const Canvas: ISkCanvas;
+  const Vertices: TArray<TScreenLayoutVertex>; StrokeWidth: Single;
+  const Paint: ISkPaint);
+var
+  Direction: TPointF;
+  LastIndex: Integer;
+begin
+  if Length(Vertices) < 2 then
+    Exit;
+  LastIndex := High(Vertices);
+  if (Vertices[0].OutgoingSegment = slskCubicBezier) and
+    not IsZero(Hypot(Vertices[0].OutgoingControl.X,
+      Vertices[0].OutgoingControl.Y)) then
+    Direction := Vertices[0].OutgoingControl
+  else
+    Direction := TPointF.Create(Vertices[1].Position.X -
+      Vertices[0].Position.X, Vertices[1].Position.Y -
+      Vertices[0].Position.Y);
+  DrawTriangleLineCap(Canvas, Vertices[0].Position,
+    TPointF.Create(-Direction.X, -Direction.Y), StrokeWidth * 0.5, Paint);
+
+  if (Vertices[LastIndex - 1].OutgoingSegment = slskCubicBezier) and
+    not IsZero(Hypot(Vertices[LastIndex].IncomingControl.X,
+      Vertices[LastIndex].IncomingControl.Y)) then
+    Direction := TPointF.Create(-Vertices[LastIndex].IncomingControl.X,
+      -Vertices[LastIndex].IncomingControl.Y)
+  else
+    Direction := TPointF.Create(Vertices[LastIndex].Position.X -
+      Vertices[LastIndex - 1].Position.X,
+      Vertices[LastIndex].Position.Y -
+      Vertices[LastIndex - 1].Position.Y);
+  DrawTriangleLineCap(Canvas, Vertices[LastIndex].Position, Direction,
+    StrokeWidth * 0.5, Paint);
+end;
+
+function BuildRoundedRectanglePath(const Bounds: TRectF;
+  const SourceRadii: TScreenLayoutCornerRadii): ISkPath;
+const
+  KAPPA = 0.5522847498;
+var
+  Builder: ISkPathBuilder;
+  Radii: TScreenLayoutCornerRadii;
+begin
+  Radii := ClampScreenLayoutCornerRadii(Bounds, SourceRadii);
+  Builder := TSkPathBuilder.Create;
+  Builder.MoveTo(Bounds.Left + Radii.TopLeft, Bounds.Top);
+  Builder.LineTo(Bounds.Right - Radii.TopRight, Bounds.Top);
+  if Radii.TopRight > 0 then
+    Builder.CubicTo(
+      TPointF.Create(Bounds.Right - Radii.TopRight * (1 - KAPPA),
+        Bounds.Top),
+      TPointF.Create(Bounds.Right,
+        Bounds.Top + Radii.TopRight * (1 - KAPPA)),
+      TPointF.Create(Bounds.Right, Bounds.Top + Radii.TopRight));
+  Builder.LineTo(Bounds.Right, Bounds.Bottom - Radii.BottomRight);
+  if Radii.BottomRight > 0 then
+    Builder.CubicTo(
+      TPointF.Create(Bounds.Right,
+        Bounds.Bottom - Radii.BottomRight * (1 - KAPPA)),
+      TPointF.Create(Bounds.Right - Radii.BottomRight * (1 - KAPPA),
+        Bounds.Bottom),
+      TPointF.Create(Bounds.Right - Radii.BottomRight, Bounds.Bottom));
+  Builder.LineTo(Bounds.Left + Radii.BottomLeft, Bounds.Bottom);
+  if Radii.BottomLeft > 0 then
+    Builder.CubicTo(
+      TPointF.Create(Bounds.Left + Radii.BottomLeft * (1 - KAPPA),
+        Bounds.Bottom),
+      TPointF.Create(Bounds.Left,
+        Bounds.Bottom - Radii.BottomLeft * (1 - KAPPA)),
+      TPointF.Create(Bounds.Left, Bounds.Bottom - Radii.BottomLeft));
+  Builder.LineTo(Bounds.Left, Bounds.Top + Radii.TopLeft);
+  if Radii.TopLeft > 0 then
+    Builder.CubicTo(
+      TPointF.Create(Bounds.Left,
+        Bounds.Top + Radii.TopLeft * (1 - KAPPA)),
+      TPointF.Create(Bounds.Left + Radii.TopLeft * (1 - KAPPA),
+        Bounds.Top),
+      TPointF.Create(Bounds.Left + Radii.TopLeft, Bounds.Top));
+  Builder.Close;
+  Result := Builder.Detach;
+end;
+
 { TVectArtRenderBuffer }
 
 procedure TVectArtRenderBuffer.Clear;
@@ -128,7 +237,10 @@ var
   Path: ISkPath;
   PathBuilder: ISkPathBuilder;
   PathLayer: TVectArtPathLayer;
+  PathSegmentCount: Integer;
+  PathVertices: TArray<TScreenLayoutVertex>;
   RectangleLayer: TVectArtRectangleLayer;
+  RoundedRectangleLayer: TScreenLayoutRoundedRectangleLayer;
   ScaleX: Single;
   ScaleY: Single;
   StrokeWidth: Single;
@@ -215,14 +327,14 @@ begin
     begin
       ShapeLayer := TScreenLayoutShapeLayer(Layer);
       Path := BuildScreenLayoutShapePath(ShapeLayer);
-      Paint.AntiAlias := ShapeLayer.MifAntiAlias;
+      Paint.AntiAlias := True;
       Paint.Color := VclColorToAlphaColor(ShapeLayer.FillColor,
         ShapeLayer.Opacity);
       Canvas.DrawPath(Path, Paint);
       if ShapeLayer.StrokeWidth > 0 then
       begin
         StrokeWidth := Max(ShapeLayer.StrokeWidth, MinimumStrokeWidth);
-        StrokePaint.AntiAlias := ShapeLayer.MifAntiAlias;
+        StrokePaint.AntiAlias := True;
         StrokePaint.Color := VclColorToAlphaColor(ShapeLayer.StrokeColor,
           ShapeLayer.Opacity);
         StrokePaint.StrokeWidth := StrokeWidth;
@@ -232,12 +344,6 @@ begin
           StrokePaint.PathEffect := TSkPathEffect.MakeDash(DashIntervals, 0)
         else
           StrokePaint.PathEffect := nil;
-        case ShapeLayer.StrokeJoin of
-          vljBevel: StrokePaint.StrokeJoin := TSkStrokeJoin.Bevel;
-          vljRound: StrokePaint.StrokeJoin := TSkStrokeJoin.Round;
-        else
-          StrokePaint.StrokeJoin := TSkStrokeJoin.Miter;
-        end;
         Canvas.DrawPath(Path, StrokePaint);
       end;
       Continue;
@@ -245,51 +351,78 @@ begin
     if Layer is TVectArtPathLayer then
     begin
       PathLayer := TVectArtPathLayer(Layer);
-      Paint.AntiAlias := PathLayer.MifAntiAlias;
-      StrokePaint.AntiAlias := PathLayer.MifAntiAlias;
-      if Length(PathLayer.Points) < 2 then
+      Paint.AntiAlias := True;
+      StrokePaint.AntiAlias := True;
+      PathVertices := PathLayer.Vertices;
+      if Length(PathVertices) < 2 then
         Continue;
       PathBuilder := TSkPathBuilder.Create;
-      PathBuilder.MoveTo(PathLayer.Points[0]);
-      for J := 1 to High(PathLayer.Points) do
-        PathBuilder.LineTo(PathLayer.Points[J]);
+      PathBuilder.MoveTo(PathVertices[0].Position);
+      if PathLayer.Closed then
+        PathSegmentCount := Length(PathVertices)
+      else
+        PathSegmentCount := Length(PathVertices) - 1;
+      for J := 0 to PathSegmentCount - 1 do
+        if PathVertices[J].OutgoingSegment = slskCubicBezier then
+          PathBuilder.CubicTo(TPointF.Create(
+            PathVertices[J].Position.X +
+              PathVertices[J].OutgoingControl.X,
+            PathVertices[J].Position.Y +
+              PathVertices[J].OutgoingControl.Y),
+            TPointF.Create(
+              PathVertices[(J + 1) mod Length(PathVertices)].Position.X +
+                PathVertices[(J + 1) mod Length(PathVertices)].IncomingControl.X,
+              PathVertices[(J + 1) mod Length(PathVertices)].Position.Y +
+                PathVertices[(J + 1) mod Length(PathVertices)].IncomingControl.Y),
+            PathVertices[(J + 1) mod Length(PathVertices)].Position)
+        else
+          PathBuilder.LineTo(
+            PathVertices[(J + 1) mod Length(PathVertices)].Position);
       if PathLayer.Closed then
         PathBuilder.Close;
       Path := PathBuilder.Detach;
-      if PathLayer.Closed then
-      begin
-        Paint.Color := VclColorToAlphaColor(PathLayer.FillColor,
-          PathLayer.Opacity);
-        Canvas.DrawPath(Path, Paint);
+      StrokeWidth := Max(PathLayer.StrokeWidth, MinimumStrokeWidth);
+      StrokePaint.Color := VclColorToAlphaColor(PathLayer.StrokeColor,
+        PathLayer.Opacity);
+      StrokePaint.StrokeWidth := StrokeWidth;
+      DashIntervals := VectArtStrokeDashIntervals(PathLayer.MifStrokeStyle,
+        StrokeWidth);
+      if Length(DashIntervals) > 0 then
+        StrokePaint.PathEffect := TSkPathEffect.MakeDash(DashIntervals, 0)
+      else
+        StrokePaint.PathEffect := nil;
+      case PathLayer.LineCap of
+        vlcRound: StrokePaint.StrokeCap := TSkStrokeCap.Round;
+        vlcTriangle: StrokePaint.StrokeCap := TSkStrokeCap.Butt;
+      else
+        StrokePaint.StrokeCap := TSkStrokeCap.Square;
       end;
-      if not PathLayer.Closed then
+      Canvas.DrawPath(Path, StrokePaint);
+      if not PathLayer.Closed and (PathLayer.LineCap = vlcTriangle) then
       begin
-        StrokeWidth := Max(PathLayer.StrokeWidth, MinimumStrokeWidth);
-        StrokePaint.Color := VclColorToAlphaColor(PathLayer.StrokeColor,
-          PathLayer.Opacity);
-        StrokePaint.StrokeWidth := StrokeWidth;
-        DashIntervals := VectArtStrokeDashIntervals(PathLayer.MifStrokeStyle,
-          StrokeWidth);
-        if Length(DashIntervals) > 0 then
-          StrokePaint.PathEffect := TSkPathEffect.MakeDash(DashIntervals, 0)
-        else
-          StrokePaint.PathEffect := nil;
-        if VectArtStrokeUsesRoundCaps(PathLayer.MifStrokeStyle) then
-          StrokePaint.StrokeCap := TSkStrokeCap.Round
-        else
-          case PathLayer.LineCap of
-            vlcSquare: StrokePaint.StrokeCap := TSkStrokeCap.Square;
-            vlcRound: StrokePaint.StrokeCap := TSkStrokeCap.Round;
-          else
-            StrokePaint.StrokeCap := TSkStrokeCap.Butt;
-          end;
-        case PathLayer.LineJoin of
-          vljBevel: StrokePaint.StrokeJoin := TSkStrokeJoin.Bevel;
-          vljRound: StrokePaint.StrokeJoin := TSkStrokeJoin.Round;
-        else
-          StrokePaint.StrokeJoin := TSkStrokeJoin.Miter;
-        end;
-        Canvas.DrawPath(Path, StrokePaint);
+        Paint.Color := StrokePaint.Color;
+        Paint.Style := TSkPaintStyle.Fill;
+        DrawPathTriangleCaps(Canvas, PathVertices, StrokeWidth, Paint);
+      end;
+      Continue;
+    end;
+    if Layer is TScreenLayoutRoundedRectangleLayer then
+    begin
+      RoundedRectangleLayer := TScreenLayoutRoundedRectangleLayer(Layer);
+      Paint.AntiAlias := True;
+      Paint.Color := VclColorToAlphaColor(RoundedRectangleLayer.FillColor,
+        RoundedRectangleLayer.Opacity);
+      Canvas.Save;
+      try
+        Canvas.Rotate(RoundedRectangleLayer.RotationDegrees,
+          (RoundedRectangleLayer.Bounds.Left +
+            RoundedRectangleLayer.Bounds.Right) * 0.5,
+          (RoundedRectangleLayer.Bounds.Top +
+            RoundedRectangleLayer.Bounds.Bottom) * 0.5);
+        Canvas.DrawPath(BuildRoundedRectanglePath(RoundedRectangleLayer.Bounds,
+          RoundedRectangleLayer.CornerRadii), Paint);
+      finally
+        Canvas.Restore;
       end;
       Continue;
     end;

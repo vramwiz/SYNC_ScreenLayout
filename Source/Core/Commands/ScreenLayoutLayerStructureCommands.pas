@@ -1,4 +1,4 @@
-// 図形レイヤーの挿入、削除、積層順変更をUndo／Redo可能にする。
+﻿// 図形レイヤーの挿入、削除、積層順変更をUndo／Redo可能にする。
 unit ScreenLayoutLayerStructureCommands;
 
 interface
@@ -17,6 +17,21 @@ type
   public
     constructor Create(ADocument: TVectArtDocument; Index: Integer;
       const Data: TVectArtRectangleData; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutInsertRoundedRectangleCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutRoundedRectangleData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutRoundedRectangleData; const BeforeSelection,
       AfterSelection: TArray<Integer>);
     procedure Execute; override;
     procedure Undo; override;
@@ -63,6 +78,21 @@ type
   public
     constructor Create(ADocument: TVectArtDocument; Index: Integer;
       const Data: TVectArtRectangleData; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutDeleteRoundedRectangleCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutRoundedRectangleData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutRoundedRectangleData; const BeforeSelection,
       AfterSelection: TArray<Integer>);
     procedure Execute; override;
     procedure Undo; override;
@@ -218,7 +248,7 @@ begin
   FDocument := ADocument;
   FIndex := Index;
   FData := Data;
-  FData.Points := Copy(Data.Points);
+  FData.Vertices := Copy(Data.Vertices);
   FBeforeSelection := Copy(BeforeSelection);
   FAfterSelection := Copy(AfterSelection);
 end;
@@ -274,6 +304,39 @@ begin
   FDocument.SetSelectedLayers(FBeforeSelection);
 end;
 
+{ TScreenLayoutInsertRoundedRectangleCommand }
+
+constructor TScreenLayoutInsertRoundedRectangleCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  const Data: TScreenLayoutRoundedRectangleData; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutInsertRoundedRectangleCommand.Execute;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertRoundedRectangle(FIndex, FData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutInsertRoundedRectangleCommand.Undo;
+var
+  RemovedData: TScreenLayoutRoundedRectangleData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveRoundedRectangle(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
 { TVectArtDeleteRectangleCommand }
 
 constructor TVectArtDeletePathCommand.Create(ADocument: TVectArtDocument;
@@ -284,7 +347,7 @@ begin
   FDocument := ADocument;
   FIndex := Index;
   FData := Data;
-  FData.Points := Copy(Data.Points);
+  FData.Vertices := Copy(Data.Vertices);
   FBeforeSelection := Copy(BeforeSelection);
   FAfterSelection := Copy(AfterSelection);
 end;
@@ -368,6 +431,39 @@ begin
   if FDocument = nil then
     Exit;
   FIndex := FDocument.InsertRectangle(FIndex, FData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
+{ TScreenLayoutDeleteRoundedRectangleCommand }
+
+constructor TScreenLayoutDeleteRoundedRectangleCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  const Data: TScreenLayoutRoundedRectangleData; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutDeleteRoundedRectangleCommand.Execute;
+var
+  RemovedData: TScreenLayoutRoundedRectangleData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveRoundedRectangle(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutDeleteRoundedRectangleCommand.Undo;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertRoundedRectangle(FIndex, FData);
   FDocument.SetSelectedLayers(FBeforeSelection);
 end;
 

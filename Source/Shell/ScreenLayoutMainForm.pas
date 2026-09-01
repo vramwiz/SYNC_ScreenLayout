@@ -346,11 +346,15 @@ begin
     (FEditorState.CurrentTool = vetRectangle) then
     lblStatus.Caption := 'Ready   Tool: Rectangle   Canvas: ' + CanvasSize
   else if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetRoundedRectangle) then
+    lblStatus.Caption := 'Ready   Tool: Rounded Rectangle   Canvas: ' +
+      CanvasSize
+  else if (FEditorState <> nil) and
     (FEditorState.CurrentTool = vetLine) then
     lblStatus.Caption := 'Ready   Tool: Line   Canvas: ' + CanvasSize
   else if (FEditorState <> nil) and
     (FEditorState.CurrentTool = vetPath) then
-    lblStatus.Caption := 'Path: click vertices, click first point to close, ' +
+    lblStatus.Caption := 'Path: V sharp / B bezier, click vertices, ' +
       'double-click/right-click to finish   Canvas: ' + CanvasSize
   else if (FEditorState <> nil) and
     (FEditorState.CurrentTool = vetShape) then

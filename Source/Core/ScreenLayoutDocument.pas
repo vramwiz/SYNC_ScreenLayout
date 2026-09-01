@@ -9,18 +9,16 @@ uses
   Vcl.Graphics;
 
 type
-  TVectArtLayerKind = (vlkCanvas, vlkRectangle, vlkPath, vlkImage,
-    vlkShape);
+  TVectArtLayerKind = (vlkCanvas, vlkRectangle, vlkRoundedRectangle,
+    vlkPath, vlkImage, vlkShape);
   TVectArtImageSourceKind = (visImage, visLogo);
   TVectArtImagePoints = array[0..3] of TPointF;
   // WebArt Designerの線種コンボとMIF vector stroke style 0..8を同順で保持する。
   TVectArtMifStrokeStyle = (vssSolid, vssDotted, vssShortDash, vssDashDot,
     vssDashDotDot, vssSparseDotted, vssMediumDash, vssLongDashDot,
     vssLongDash);
-  // MIFのvector stroke cap 0..2と同じ順序で保持する。
-  TVectArtLineCap = (vlcButt, vlcSquare, vlcRound);
-  // MIFのvector stroke join 0..2と同じ順序で保持する。
-  TVectArtLineJoin = (vljMiter, vljBevel, vljRound);
+  // 線端を四角、丸、先端角90度の三角から選ぶ。
+  TVectArtLineCap = (vlcSquare, vlcRound, vlcTriangle);
   // 各頂点から次頂点へ向かう閉輪郭区間の表現形式。
   TScreenLayoutSegmentKind = (slskLine, slskCubicBezier);
   // Shape編集時にユーザーが選ぶ頂点の接続形式。
@@ -78,6 +76,9 @@ type
     FBounds: TRectF;
     FFillColor: TColor;
     FRotationDegrees: Single;
+  protected
+    constructor CreateWithKind(AKind: TVectArtLayerKind;
+      const AName: string; const ABounds: TRectF; AFillColor: TColor);
   public
     constructor Create(const AName: string; const ABounds: TRectF;
       AFillColor: TColor);
@@ -97,45 +98,67 @@ type
     Visible: Boolean;                       // 描画対象に含める状態。
   end;
 
+  TScreenLayoutCornerRadii = record
+    TopLeft: Single;     // 左上隅の円弧半径。
+    TopRight: Single;    // 右上隅の円弧半径。
+    BottomRight: Single; // 右下隅の円弧半径。
+    BottomLeft: Single;  // 左下隅の円弧半径。
+  end;
+
+  TScreenLayoutRoundedRectangleLayer = class(TVectArtRectangleLayer)
+  private
+    FCornerRadii: TScreenLayoutCornerRadii;
+  public
+    constructor Create(const AName: string; const ABounds: TRectF;
+      AFillColor: TColor; const ACornerRadii: TScreenLayoutCornerRadii);
+    property CornerRadii: TScreenLayoutCornerRadii read FCornerRadii
+      write FCornerRadii;
+  end;
+
+  TScreenLayoutRoundedRectangleData = record
+    Bounds: TRectF;                         // 回転前の基本矩形。
+    CornerRadii: TScreenLayoutCornerRadii; // 左上から時計回りの角丸半径。
+    FillColor: TColor;                      // 内部の塗り色。
+    Locked: Boolean;                        // 編集を禁止する状態。
+    Name: string;                           // レイヤー一覧の表示名。
+    Opacity: Single;                        // 0.0..1.0のレイヤー不透明度。
+    RotationDegrees: Single;                // 中心回りの時計回り角度。
+    Visible: Boolean;                       // 描画対象に含める状態。
+  end;
+
   TVectArtPathLayer = class(TVectArtLayer)
   private
     FClosed: Boolean;
-    FFillColor: TColor;
     FLineCap: TVectArtLineCap;
-    FLineJoin: TVectArtLineJoin;
-    FMifAntiAlias: Boolean;
-    FPoints: TArray<TPointF>;
     FStrokeColor: TColor;
     FMifStrokeStyle: TVectArtMifStrokeStyle;
     FStrokeWidth: Single;
+    FVertices: TArray<TScreenLayoutVertex>;
+    function GetVertices: TArray<TScreenLayoutVertex>;
+    procedure SetVertices(const Value: TArray<TScreenLayoutVertex>);
   public
-    constructor Create(const AName: string; const APoints: TArray<TPointF>;
-      AClosed: Boolean);
+    constructor Create(const AName: string;
+      const AVertices: TArray<TScreenLayoutVertex>; AClosed: Boolean);
     property Closed: Boolean read FClosed write FClosed;
-    property FillColor: TColor read FFillColor write FFillColor;
     property LineCap: TVectArtLineCap read FLineCap write FLineCap;
-    property LineJoin: TVectArtLineJoin read FLineJoin write FLineJoin;
-    property MifAntiAlias: Boolean read FMifAntiAlias write FMifAntiAlias;
-    property Points: TArray<TPointF> read FPoints write FPoints;
     property StrokeColor: TColor read FStrokeColor write FStrokeColor;
     property MifStrokeStyle: TVectArtMifStrokeStyle read FMifStrokeStyle
       write FMifStrokeStyle;
     property StrokeWidth: Single read FStrokeWidth write FStrokeWidth;
+    property Vertices: TArray<TScreenLayoutVertex> read GetVertices
+      write SetVertices;
   end;
 
   TVectArtPathData = record
     Closed: Boolean;                        // 終点と始点を閉じる状態。
-    FillColor: TColor;                      // 閉領域の塗り色。
     LineCap: TVectArtLineCap;               // 開いたPathの線端形状。
-    LineJoin: TVectArtLineJoin;             // 頂点間の線結合形状。
-    MifAntiAlias: Boolean;                  // MIF vector qualityに対応する品質値。
     Locked: Boolean;                        // 編集を禁止する状態。
     Name: string;                           // レイヤー一覧の表示名。
     Opacity: Single;                        // 0.0..1.0のレイヤー不透明度。
-    Points: TArray<TPointF>;                // 描画順に並ぶ頂点列。
     StrokeColor: TColor;                    // 開いたPathの線色。
     MifStrokeStyle: TVectArtMifStrokeStyle; // 開いたPathの線パターン。
     StrokeWidth: Single;                    // 開いたPathの線幅。
+    Vertices: TArray<TScreenLayoutVertex>;  // 開いたPathを構成するアンカーと区間情報。
     Visible: Boolean;                       // 描画対象に含める状態。
   end;
 
@@ -144,9 +167,7 @@ type
     FContours: TArray<TScreenLayoutContour>;
     FFillColor: TColor;
     FFillRule: TScreenLayoutFillRule;
-    FMifAntiAlias: Boolean;
     FStrokeColor: TColor;
-    FStrokeJoin: TVectArtLineJoin;
     FStrokeStyle: TVectArtMifStrokeStyle;
     FStrokeWidth: Single;
     function GetContourCount: Integer;
@@ -160,9 +181,7 @@ type
     property ContourCount: Integer read GetContourCount;
     property FillColor: TColor read FFillColor write FFillColor;
     property FillRule: TScreenLayoutFillRule read FFillRule write FFillRule;
-    property MifAntiAlias: Boolean read FMifAntiAlias write FMifAntiAlias;
     property StrokeColor: TColor read FStrokeColor write FStrokeColor;
-    property StrokeJoin: TVectArtLineJoin read FStrokeJoin write FStrokeJoin;
     property StrokeStyle: TVectArtMifStrokeStyle read FStrokeStyle
       write FStrokeStyle;
     property StrokeWidth: Single read FStrokeWidth write FStrokeWidth;
@@ -173,11 +192,9 @@ type
     FillColor: TColor;                      // Even-Odd等の規則で塗る色。
     FillRule: TScreenLayoutFillRule;        // 複数輪郭の内外判定規則。
     Locked: Boolean;                        // 編集を禁止する状態。
-    MifAntiAlias: Boolean;                  // 輪郭描画の品質値。
     Name: string;                           // レイヤー一覧の表示名。
     Opacity: Single;                        // 0.0..1.0のレイヤー不透明度。
     StrokeColor: TColor;                    // 全輪郭へ適用する縁取り色。
-    StrokeJoin: TVectArtLineJoin;           // 閉輪郭の頂点結合形式。
     StrokeStyle: TVectArtMifStrokeStyle;    // 全輪郭へ適用する線パターン。
     StrokeWidth: Single;                    // 0の場合は縁取りなし。
     Visible: Boolean;                       // 描画対象に含める状態。
@@ -241,6 +258,9 @@ type
     function GetSelectedLayerIndices: TArray<Integer>;
     function InsertRectangle(Index: Integer;
       const Data: TVectArtRectangleData): Integer;
+    // 角丸半径と回転を含む角丸四角を指定位置へ挿入し、実際のレイヤー番号を返す。
+    function InsertRoundedRectangle(Index: Integer;
+      const Data: TScreenLayoutRoundedRectangleData): Integer;
     function InsertPath(Index: Integer; const Data: TVectArtPathData): Integer;
     // 複数の閉輪郭を持つShapeを指定位置へ挿入し、実際のレイヤー番号を返す。
     function InsertShape(Index: Integer;
@@ -251,24 +271,29 @@ type
     procedure SetRectangleBounds(Index: Integer; const Value: TRectF);
     procedure SetRectangleFillColor(Index: Integer; Value: TColor);
     procedure SetRectangleRotation(Index: Integer; Value: Single);
+    // 角丸四角の各隅半径を辺内へ収まる値に制限して更新する。
+    procedure SetRoundedRectangleCornerRadii(Index: Integer;
+      const Value: TScreenLayoutCornerRadii);
     procedure SetImagePoints(Index: Integer;
       const Points: TVectArtImagePoints);
-    procedure SetPathFill(Index: Integer; Color: TColor);
     procedure SetPathLineCap(Index: Integer; Value: TVectArtLineCap);
-    procedure SetPathLineJoin(Index: Integer; Value: TVectArtLineJoin);
-    procedure SetPathMifAntiAlias(Index: Integer; Value: Boolean);
     procedure SetLayerLocked(Index: Integer; Value: Boolean);
     procedure SetLayerOpacity(Index: Integer; Value: Single);
     procedure SetLayerVisible(Index: Integer; Value: Boolean);
     procedure MoveLayer(FromIndex, ToIndex: Integer);
     function RemoveRectangle(Index: Integer;
       out Data: TVectArtRectangleData): Boolean;
+    // 角丸四角を削除し、Undoで型と全属性を復元できるデータを返す。
+    function RemoveRoundedRectangle(Index: Integer;
+      out Data: TScreenLayoutRoundedRectangleData): Boolean;
     function RemovePath(Index: Integer; out Data: TVectArtPathData): Boolean;
     // Shapeを削除し、Undo用の独立したデータをDataへ返す。
     function RemoveShape(Index: Integer;
       out Data: TScreenLayoutShapeData): Boolean;
     function RemoveImage(Index: Integer; out Data: TVectArtImageData): Boolean;
-    procedure SetPathPoints(Index: Integer; const Points: TArray<TPointF>);
+    // Pathのアンカー、制御点、区間種別を深いコピーで置換する。
+    procedure SetPathVertices(Index: Integer;
+      const Vertices: TArray<TScreenLayoutVertex>);
     procedure SetPathStroke(Index: Integer; Color: TColor; Width: Single;
       Style: TVectArtMifStrokeStyle);
     // Shapeの輪郭群を深いコピーで置換し、Document変更を通知する。
@@ -279,7 +304,7 @@ type
       FillRule: TScreenLayoutFillRule);
     // Shapeの全輪郭へ共通適用する縁取り設定を更新する。
     procedure SetShapeStroke(Index: Integer; Color: TColor; Width: Single;
-      Style: TVectArtMifStrokeStyle; Join: TVectArtLineJoin);
+      Style: TVectArtMifStrokeStyle);
     procedure SelectLayerRange(AnchorIndex, TargetIndex: Integer;
       Additive: Boolean);
     procedure SetSelectedLayers(const Indices: array of Integer);
@@ -303,11 +328,62 @@ const
 function VectArtStrokeDashIntervals(Style: TVectArtMifStrokeStyle;
   Width: Single): TArray<Single>;
 function VectArtStrokeUsesRoundCaps(Style: TVectArtMifStrokeStyle): Boolean;
+// 4隅へ同じ半径を設定した角丸値を返す。
+function UniformScreenLayoutCornerRadii(Radius: Single): TScreenLayoutCornerRadii;
+// 各辺で隣接半径が重ならない比率へ角丸値を縮小する。
+function ClampScreenLayoutCornerRadii(const Bounds: TRectF;
+  const Value: TScreenLayoutCornerRadii): TScreenLayoutCornerRadii;
 
 implementation
 
 uses
   System.Math, ScreenLayoutGeometry;
+
+function UniformScreenLayoutCornerRadii(
+  Radius: Single): TScreenLayoutCornerRadii;
+begin
+  Radius := Max(Radius, 0.0);
+  Result.TopLeft := Radius;
+  Result.TopRight := Radius;
+  Result.BottomRight := Radius;
+  Result.BottomLeft := Radius;
+end;
+
+function ClampScreenLayoutCornerRadii(const Bounds: TRectF;
+  const Value: TScreenLayoutCornerRadii): TScreenLayoutCornerRadii;
+var
+  Height: Single;
+  Scale: Single;
+  Sum: Single;
+  Width: Single;
+begin
+  Result.TopLeft := Max(Value.TopLeft, 0.0);
+  Result.TopRight := Max(Value.TopRight, 0.0);
+  Result.BottomRight := Max(Value.BottomRight, 0.0);
+  Result.BottomLeft := Max(Value.BottomLeft, 0.0);
+  Width := Max(Bounds.Width, 0.0);
+  Height := Max(Bounds.Height, 0.0);
+  Scale := 1.0;
+  Sum := Result.TopLeft + Result.TopRight;
+  if Sum > 0 then
+    Scale := Min(Scale, Width / Sum);
+  Sum := Result.BottomLeft + Result.BottomRight;
+  if Sum > 0 then
+    Scale := Min(Scale, Width / Sum);
+  Sum := Result.TopLeft + Result.BottomLeft;
+  if Sum > 0 then
+    Scale := Min(Scale, Height / Sum);
+  Sum := Result.TopRight + Result.BottomRight;
+  if Sum > 0 then
+    Scale := Min(Scale, Height / Sum);
+  if Scale < 1.0 then
+  begin
+    Result.TopLeft := Result.TopLeft * Scale;
+    Result.TopRight := Result.TopRight * Scale;
+    Result.BottomRight := Result.BottomRight * Scale;
+    Result.BottomLeft := Result.BottomLeft * Scale;
+  end;
+end;
 
 function CopyShapeContours(
   const Source: TArray<TScreenLayoutContour>): TArray<TScreenLayoutContour>;
@@ -445,21 +521,48 @@ begin
   FRotationDegrees := 0.0;
 end;
 
+constructor TVectArtRectangleLayer.CreateWithKind(AKind: TVectArtLayerKind;
+  const AName: string; const ABounds: TRectF; AFillColor: TColor);
+begin
+  inherited Create(AKind, AName);
+  FBounds := ABounds;
+  FFillColor := AFillColor;
+  FRotationDegrees := 0.0;
+end;
+
+{ TScreenLayoutRoundedRectangleLayer }
+
+constructor TScreenLayoutRoundedRectangleLayer.Create(const AName: string;
+  const ABounds: TRectF; AFillColor: TColor;
+  const ACornerRadii: TScreenLayoutCornerRadii);
+begin
+  inherited CreateWithKind(vlkRoundedRectangle, AName, ABounds, AFillColor);
+  FCornerRadii := ClampScreenLayoutCornerRadii(ABounds, ACornerRadii);
+end;
+
 { TVectArtPathLayer }
 
 constructor TVectArtPathLayer.Create(const AName: string;
-  const APoints: TArray<TPointF>; AClosed: Boolean);
+  const AVertices: TArray<TScreenLayoutVertex>; AClosed: Boolean);
 begin
   inherited Create(vlkPath, AName);
-  FPoints := Copy(APoints);
+  SetVertices(AVertices);
   FClosed := AClosed;
-  FFillColor := clWhite;
-  FLineCap := vlcButt;
-  FLineJoin := vljMiter;
-  FMifAntiAlias := True;
+  FLineCap := vlcSquare;
   FStrokeColor := clBlack;
   FMifStrokeStyle := vssSolid;
   FStrokeWidth := 1.0;
+end;
+
+function TVectArtPathLayer.GetVertices: TArray<TScreenLayoutVertex>;
+begin
+  Result := Copy(FVertices);
+end;
+
+procedure TVectArtPathLayer.SetVertices(
+  const Value: TArray<TScreenLayoutVertex>);
+begin
+  FVertices := Copy(Value);
 end;
 
 { TScreenLayoutShapeLayer }
@@ -471,9 +574,7 @@ begin
   SetContours(AContours);
   FFillColor := clWhite;
   FFillRule := slfrEvenOdd;
-  FMifAntiAlias := True;
   FStrokeColor := clBlack;
-  FStrokeJoin := vljMiter;
   FStrokeStyle := vssSolid;
   FStrokeWidth := 0.0;
 end;
@@ -615,6 +716,29 @@ begin
   Changed;
 end;
 
+function TVectArtDocument.InsertRoundedRectangle(Index: Integer;
+  const Data: TScreenLayoutRoundedRectangleData): Integer;
+var
+  I: Integer;
+  RoundedLayer: TScreenLayoutRoundedRectangleLayer;
+begin
+  Result := EnsureRange(Index, 1, FLayers.Count);
+  RoundedLayer := TScreenLayoutRoundedRectangleLayer.Create(Data.Name,
+    Data.Bounds, Data.FillColor, Data.CornerRadii);
+  RoundedLayer.Locked := Data.Locked;
+  RoundedLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  RoundedLayer.RotationDegrees := NormalizeAngleDegrees(
+    Data.RotationDegrees);
+  RoundedLayer.Visible := Data.Visible;
+  FLayers.Insert(Result, RoundedLayer);
+  for I := 0 to FSelectedLayers.Count - 1 do
+    if FSelectedLayers[I] >= Result then
+      FSelectedLayers[I] := FSelectedLayers[I] + 1;
+  if FSelectedIndex >= Result then
+    Inc(FSelectedIndex);
+  Changed;
+end;
+
 function TVectArtDocument.InsertPath(Index: Integer;
   const Data: TVectArtPathData): Integer;
 var
@@ -622,11 +746,8 @@ var
   PathLayer: TVectArtPathLayer;
 begin
   Result := EnsureRange(Index, 1, FLayers.Count);
-  PathLayer := TVectArtPathLayer.Create(Data.Name, Data.Points, Data.Closed);
-  PathLayer.FillColor := Data.FillColor;
+  PathLayer := TVectArtPathLayer.Create(Data.Name, Data.Vertices, Data.Closed);
   PathLayer.LineCap := Data.LineCap;
-  PathLayer.LineJoin := Data.LineJoin;
-  PathLayer.MifAntiAlias := Data.MifAntiAlias;
   PathLayer.Locked := Data.Locked;
   PathLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
   PathLayer.StrokeColor := Data.StrokeColor;
@@ -653,10 +774,8 @@ begin
   ShapeLayer.FillColor := Data.FillColor;
   ShapeLayer.FillRule := Data.FillRule;
   ShapeLayer.Locked := Data.Locked;
-  ShapeLayer.MifAntiAlias := Data.MifAntiAlias;
   ShapeLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
   ShapeLayer.StrokeColor := Data.StrokeColor;
-  ShapeLayer.StrokeJoin := Data.StrokeJoin;
   ShapeLayer.StrokeStyle := Data.StrokeStyle;
   ShapeLayer.StrokeWidth := Max(Data.StrokeWidth, 0.0);
   ShapeLayer.Visible := Data.Visible;
@@ -725,7 +844,7 @@ var
   Selection: TList<Integer>;
 begin
   Result := (Index > 0) and (Index < FLayers.Count) and
-    (FLayers[Index] is TVectArtRectangleLayer);
+    (FLayers[Index].ClassType = TVectArtRectangleLayer);
   if not Result then
     Exit;
   RectangleLayer := TVectArtRectangleLayer(FLayers[Index]);
@@ -736,6 +855,43 @@ begin
   Data.Opacity := RectangleLayer.Opacity;
   Data.RotationDegrees := RectangleLayer.RotationDegrees;
   Data.Visible := RectangleLayer.Visible;
+  FLayers.Delete(Index);
+  Selection := TList<Integer>.Create;
+  try
+    for I := 0 to FSelectedLayers.Count - 1 do
+      if FSelectedLayers[I] < Index then
+        Selection.Add(FSelectedLayers[I])
+      else if FSelectedLayers[I] > Index then
+        Selection.Add(FSelectedLayers[I] - 1);
+    if (Selection.Count = 0) and (FLayers.Count > 1) then
+      Selection.Add(Min(Index, FLayers.Count - 1));
+    SetSelectedLayersCore(Selection.ToArray, False);
+  finally
+    Selection.Free;
+  end;
+  Changed;
+end;
+
+function TVectArtDocument.RemoveRoundedRectangle(Index: Integer;
+  out Data: TScreenLayoutRoundedRectangleData): Boolean;
+var
+  I: Integer;
+  RoundedLayer: TScreenLayoutRoundedRectangleLayer;
+  Selection: TList<Integer>;
+begin
+  Result := (Index > 0) and (Index < FLayers.Count) and
+    (FLayers[Index] is TScreenLayoutRoundedRectangleLayer);
+  if not Result then
+    Exit;
+  RoundedLayer := TScreenLayoutRoundedRectangleLayer(FLayers[Index]);
+  Data.Bounds := RoundedLayer.Bounds;
+  Data.CornerRadii := RoundedLayer.CornerRadii;
+  Data.FillColor := RoundedLayer.FillColor;
+  Data.Locked := RoundedLayer.Locked;
+  Data.Name := RoundedLayer.Name;
+  Data.Opacity := RoundedLayer.Opacity;
+  Data.RotationDegrees := RoundedLayer.RotationDegrees;
+  Data.Visible := RoundedLayer.Visible;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -766,14 +922,11 @@ begin
     Exit;
   PathLayer := TVectArtPathLayer(FLayers[Index]);
   Data.Closed := PathLayer.Closed;
-  Data.FillColor := PathLayer.FillColor;
   Data.LineCap := PathLayer.LineCap;
-  Data.LineJoin := PathLayer.LineJoin;
-  Data.MifAntiAlias := PathLayer.MifAntiAlias;
   Data.Locked := PathLayer.Locked;
   Data.Name := PathLayer.Name;
   Data.Opacity := PathLayer.Opacity;
-  Data.Points := Copy(PathLayer.Points);
+  Data.Vertices := PathLayer.Vertices;
   Data.StrokeColor := PathLayer.StrokeColor;
   Data.MifStrokeStyle := PathLayer.MifStrokeStyle;
   Data.StrokeWidth := PathLayer.StrokeWidth;
@@ -848,11 +1001,9 @@ begin
   Data.FillColor := ShapeLayer.FillColor;
   Data.FillRule := ShapeLayer.FillRule;
   Data.Locked := ShapeLayer.Locked;
-  Data.MifAntiAlias := ShapeLayer.MifAntiAlias;
   Data.Name := ShapeLayer.Name;
   Data.Opacity := ShapeLayer.Opacity;
   Data.StrokeColor := ShapeLayer.StrokeColor;
-  Data.StrokeJoin := ShapeLayer.StrokeJoin;
   Data.StrokeStyle := ShapeLayer.StrokeStyle;
   Data.StrokeWidth := ShapeLayer.StrokeWidth;
   Data.Visible := ShapeLayer.Visible;
@@ -1053,6 +1204,30 @@ begin
     SameValue(CurrentBounds.Bottom, Value.Bottom) then
     Exit;
   RectangleLayer.Bounds := Value;
+  if RectangleLayer is TScreenLayoutRoundedRectangleLayer then
+    TScreenLayoutRoundedRectangleLayer(RectangleLayer).CornerRadii :=
+      ClampScreenLayoutCornerRadii(Value,
+        TScreenLayoutRoundedRectangleLayer(RectangleLayer).CornerRadii);
+  Changed;
+end;
+
+procedure TVectArtDocument.SetRoundedRectangleCornerRadii(Index: Integer;
+  const Value: TScreenLayoutCornerRadii);
+var
+  NewValue: TScreenLayoutCornerRadii;
+  RoundedLayer: TScreenLayoutRoundedRectangleLayer;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutRoundedRectangleLayer) then
+    Exit;
+  RoundedLayer := TScreenLayoutRoundedRectangleLayer(FLayers[Index]);
+  NewValue := ClampScreenLayoutCornerRadii(RoundedLayer.Bounds, Value);
+  if SameValue(RoundedLayer.CornerRadii.TopLeft, NewValue.TopLeft) and
+    SameValue(RoundedLayer.CornerRadii.TopRight, NewValue.TopRight) and
+    SameValue(RoundedLayer.CornerRadii.BottomRight, NewValue.BottomRight) and
+    SameValue(RoundedLayer.CornerRadii.BottomLeft, NewValue.BottomLeft) then
+    Exit;
+  RoundedLayer.CornerRadii := NewValue;
   Changed;
 end;
 
@@ -1101,42 +1276,40 @@ begin
   Changed;
 end;
 
-procedure TVectArtDocument.SetPathPoints(Index: Integer;
-  const Points: TArray<TPointF>);
+procedure TVectArtDocument.SetPathVertices(Index: Integer;
+  const Vertices: TArray<TScreenLayoutVertex>);
 var
   I: Integer;
+  OldVertices: TArray<TScreenLayoutVertex>;
   PathLayer: TVectArtPathLayer;
 begin
   if (Index <= 0) or (Index >= FLayers.Count) or
     not (FLayers[Index] is TVectArtPathLayer) then
     Exit;
   PathLayer := TVectArtPathLayer(FLayers[Index]);
-  if Length(PathLayer.Points) = Length(Points) then
+  OldVertices := PathLayer.Vertices;
+  if Length(OldVertices) = Length(Vertices) then
   begin
-    if Length(Points) = 0 then
+    if Length(Vertices) = 0 then
       Exit;
-    for I := 0 to High(Points) do
-      if not SameValue(PathLayer.Points[I].X, Points[I].X) or
-        not SameValue(PathLayer.Points[I].Y, Points[I].Y) then
+    for I := 0 to High(Vertices) do
+      if not SameValue(OldVertices[I].Position.X, Vertices[I].Position.X) or
+        not SameValue(OldVertices[I].Position.Y, Vertices[I].Position.Y) or
+        not SameValue(OldVertices[I].IncomingControl.X,
+          Vertices[I].IncomingControl.X) or
+        not SameValue(OldVertices[I].IncomingControl.Y,
+          Vertices[I].IncomingControl.Y) or
+        not SameValue(OldVertices[I].OutgoingControl.X,
+          Vertices[I].OutgoingControl.X) or
+        not SameValue(OldVertices[I].OutgoingControl.Y,
+          Vertices[I].OutgoingControl.Y) or
+        (OldVertices[I].OutgoingSegment <> Vertices[I].OutgoingSegment) or
+        (OldVertices[I].Kind <> Vertices[I].Kind) then
         Break;
-    if I > High(Points) then
+    if I > High(Vertices) then
       Exit;
   end;
-  PathLayer.Points := Copy(Points);
-  Changed;
-end;
-
-procedure TVectArtDocument.SetPathFill(Index: Integer; Color: TColor);
-var
-  PathLayer: TVectArtPathLayer;
-begin
-  if (Index <= 0) or (Index >= FLayers.Count) or
-    not (FLayers[Index] is TVectArtPathLayer) then
-    Exit;
-  PathLayer := TVectArtPathLayer(FLayers[Index]);
-  if not PathLayer.Closed or (PathLayer.FillColor = Color) then
-    Exit;
-  PathLayer.FillColor := Color;
+  PathLayer.Vertices := Vertices;
   Changed;
 end;
 
@@ -1154,40 +1327,6 @@ begin
   if PathLayer.LineCap = Value then
     Exit;
   PathLayer.LineCap := Value;
-  Changed;
-end;
-
-procedure TVectArtDocument.SetPathLineJoin(Index: Integer;
-  Value: TVectArtLineJoin);
-var
-  PathLayer: TVectArtPathLayer;
-begin
-  if (Index <= 0) or (Index >= FLayers.Count) or
-    not (FLayers[Index] is TVectArtPathLayer) then
-    Exit;
-  PathLayer := TVectArtPathLayer(FLayers[Index]);
-  if PathLayer.Closed then
-    Exit;
-  if PathLayer.LineJoin = Value then
-    Exit;
-  PathLayer.LineJoin := Value;
-  Changed;
-end;
-
-procedure TVectArtDocument.SetPathMifAntiAlias(Index: Integer;
-  Value: Boolean);
-var
-  PathLayer: TVectArtPathLayer;
-begin
-  if (Index <= 0) or (Index >= FLayers.Count) or
-    not (FLayers[Index] is TVectArtPathLayer) then
-    Exit;
-  PathLayer := TVectArtPathLayer(FLayers[Index]);
-  if PathLayer.Closed then
-    Exit;
-  if PathLayer.MifAntiAlias = Value then
-    Exit;
-  PathLayer.MifAntiAlias := Value;
   Changed;
 end;
 
@@ -1247,7 +1386,7 @@ begin
 end;
 
 procedure TVectArtDocument.SetShapeStroke(Index: Integer; Color: TColor;
-  Width: Single; Style: TVectArtMifStrokeStyle; Join: TVectArtLineJoin);
+  Width: Single; Style: TVectArtMifStrokeStyle);
 var
   NewWidth: Single;
   ShapeLayer: TScreenLayoutShapeLayer;
@@ -1259,13 +1398,11 @@ begin
   NewWidth := Max(Width, 0.0);
   if (ShapeLayer.StrokeColor = Color) and
     SameValue(ShapeLayer.StrokeWidth, NewWidth) and
-    (ShapeLayer.StrokeStyle = Style) and
-    (ShapeLayer.StrokeJoin = Join) then
+    (ShapeLayer.StrokeStyle = Style) then
     Exit;
   ShapeLayer.StrokeColor := Color;
   ShapeLayer.StrokeWidth := NewWidth;
   ShapeLayer.StrokeStyle := Style;
-  ShapeLayer.StrokeJoin := Join;
   Changed;
 end;
 

@@ -1,4 +1,4 @@
-// レイヤー操作バーから実行する追加・複製・複数削除・複数積層移動を提供する。
+﻿// レイヤー操作バーから実行する追加・複製・複数削除・複数積層移動を提供する。
 unit ScreenLayoutLayerOperations;
 
 interface
@@ -120,6 +120,7 @@ var
   BeforeSelection: TArray<Integer>;
   Command: TVectArtCompoundCommand;
   Data: TVectArtRectangleData;
+  RoundedRectangleData: TScreenLayoutRoundedRectangleData;
   ImageData: TVectArtImageData;
   PathData: TVectArtPathData;
   ShapeData: TScreenLayoutShapeData;
@@ -139,7 +140,18 @@ begin
     if (I > 0) and (I < FDocument.LayerCount) then
     begin
       BeforeSelection := FDocument.GetSelectedLayerIndices;
-      if FDocument[I] is TVectArtRectangleLayer then
+      if FDocument[I] is TScreenLayoutRoundedRectangleLayer then
+      begin
+        if FDocument.RemoveRoundedRectangle(I, RoundedRectangleData) then
+        begin
+          AfterSelection := FDocument.GetSelectedLayerIndices;
+          if Command <> nil then
+            Command.Add(TScreenLayoutDeleteRoundedRectangleCommand.Create(
+              FDocument, I, RoundedRectangleData, BeforeSelection,
+              AfterSelection));
+        end;
+      end
+      else if FDocument[I] is TVectArtRectangleLayer then
       begin
         if FDocument.RemoveRectangle(I, Data) then
         begin

@@ -1,4 +1,4 @@
-// 同種レイヤーの一括挿入を1回のUndo／Redoとして管理する。
+﻿// 同種レイヤーの一括挿入を1回のUndo／Redoとして管理する。
 unit ScreenLayoutLayerBatchCommands;
 
 interface
@@ -67,7 +67,7 @@ begin
   FStartIndex := StartIndex;
   FData := Copy(Data);
   for I := 0 to High(FData) do
-    FData[I].Points := Copy(Data[I].Points);
+    FData[I].Vertices := Copy(Data[I].Vertices);
   FBeforeSelection := Copy(BeforeSelection);
   FAfterSelection := Copy(AfterSelection);
 end;

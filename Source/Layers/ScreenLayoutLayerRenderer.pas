@@ -1,4 +1,4 @@
-// レイヤー一覧の行配置、サムネイル、状態アイコンをGDI／Direct2Dで描画する。
+﻿// レイヤー一覧の行配置、サムネイル、状態アイコンをGDI／Direct2Dで描画する。
 unit ScreenLayoutLayerRenderer;
 
 interface
@@ -20,7 +20,9 @@ type
     FDocument: TVectArtDocument;
     FImageThumbnails: TObjectDictionary<TVectArtImageLayer,
       TVectArtImageThumbnailCacheEntry>;
+    FScrollOffset: Integer;
     FThumbnailRevision: Int64;
+    procedure EnsureSelectionVisible(const Bounds: TRect);
     function ImageDataSignature(const Data: TBytes): UInt64;
     function ImageThumbnail(ImageLayer: TVectArtImageLayer): TPngImage;
     procedure SetDocument(const Value: TVectArtDocument);
@@ -58,7 +60,8 @@ function VectArtPathThumbnailPoints(const SourcePoints: TArray<TPointF>;
 implementation
 
 uses
-  System.Classes, System.Math, Winapi.D2D1, Winapi.Windows;
+  System.Classes, System.Math, Winapi.D2D1, Winapi.Windows,
+  ScreenLayoutPathOperations, ScreenLayoutShapeOperations;
 
 const
   COLOR_LIST_BACKGROUND   = TColor($001A1A1A);
@@ -82,6 +85,9 @@ const
   LINE_THUMBNAIL_MAX_STROKE = 10;
   LINE_THUMBNAIL_MIN_MARGIN = 8;
 
+type
+  TScreenLayoutThumbnailContours = TArray<TArray<TPoint>>;
+
 constructor TVectArtLayerRenderer.Create;
 begin
   inherited Create;
@@ -94,6 +100,39 @@ destructor TVectArtLayerRenderer.Destroy;
 begin
   FImageThumbnails.Free;
   inherited Destroy;
+end;
+
+procedure TVectArtLayerRenderer.EnsureSelectionVisible(
+  const Bounds: TRect);
+var
+  ContentBottom: Integer;
+  ContentTop: Integer;
+  ItemRect: TRect;
+  LastItemTop: Integer;
+  MaximumOffset: Integer;
+  SelectedIndex: Integer;
+begin
+  if (FDocument = nil) or (FDocument.LayerCount <= 1) then
+  begin
+    FScrollOffset := 0;
+    Exit;
+  end;
+  ContentTop := Bounds.Top + LAYER_LIST_PADDING;
+  ContentBottom := Bounds.Bottom - LAYER_LIST_PADDING;
+  LastItemTop := Bounds.Bottom - LAYER_LIST_PADDING -
+    (FDocument.LayerCount - 2) * (LAYER_ROW_HEIGHT + LAYER_GAP) -
+    LAYER_ROW_HEIGHT;
+  MaximumOffset := Max(ContentTop - LastItemTop, 0);
+  FScrollOffset := EnsureRange(FScrollOffset, 0, MaximumOffset);
+  SelectedIndex := FDocument.SelectedIndex;
+  if SelectedIndex <= 0 then
+    Exit;
+  ItemRect := LayerItemRect(Bounds, SelectedIndex);
+  if ItemRect.Top < ContentTop then
+    Inc(FScrollOffset, ContentTop - ItemRect.Top)
+  else if ItemRect.Bottom > ContentBottom then
+    Dec(FScrollOffset, ItemRect.Bottom - ContentBottom);
+  FScrollOffset := EnsureRange(FScrollOffset, 0, MaximumOffset);
 end;
 
 destructor TVectArtImageThumbnailCacheEntry.Destroy;
@@ -257,6 +296,95 @@ begin
       Round(OffsetY + (SourcePoints[I].Y - MinimumY) * Scale));
 end;
 
+function VectArtShapeThumbnailContours(
+  const SourceContours: TArray<TScreenLayoutContour>;
+  const ThumbnailRect: TRect;
+  PreviewStrokeWidth: Integer): TScreenLayoutThumbnailContours;
+var
+  AvailableHeight: Integer;
+  AvailableWidth: Integer;
+  ContourIndex: Integer;
+  FoundPoint: Boolean;
+  I: Integer;
+  InnerLeft: Single;
+  InnerTop: Single;
+  Margin: Integer;
+  MaximumX: Single;
+  MaximumY: Single;
+  MinimumX: Single;
+  MinimumY: Single;
+  OffsetX: Single;
+  OffsetY: Single;
+  Scale: Single;
+  SourceHeight: Single;
+  SourcePoints: TArray<TArray<TPointF>>;
+  SourceWidth: Single;
+begin
+  SetLength(Result, Length(SourceContours));
+  SetLength(SourcePoints, Length(SourceContours));
+  FoundPoint := False;
+  MinimumX := 0;
+  MaximumX := 0;
+  MinimumY := 0;
+  MaximumY := 0;
+  for ContourIndex := 0 to High(SourceContours) do
+  begin
+    SourcePoints[ContourIndex] := FlattenScreenLayoutShapeContour(
+      SourceContours[ContourIndex], 16);
+    for I := 0 to High(SourcePoints[ContourIndex]) do
+      if not FoundPoint then
+      begin
+        MinimumX := SourcePoints[ContourIndex][I].X;
+        MaximumX := MinimumX;
+        MinimumY := SourcePoints[ContourIndex][I].Y;
+        MaximumY := MinimumY;
+        FoundPoint := True;
+      end
+      else
+      begin
+        MinimumX := Min(MinimumX, SourcePoints[ContourIndex][I].X);
+        MaximumX := Max(MaximumX, SourcePoints[ContourIndex][I].X);
+        MinimumY := Min(MinimumY, SourcePoints[ContourIndex][I].Y);
+        MaximumY := Max(MaximumY, SourcePoints[ContourIndex][I].Y);
+      end;
+  end;
+  if not FoundPoint then
+    Exit;
+  PreviewStrokeWidth := EnsureRange(PreviewStrokeWidth, 1,
+    LINE_THUMBNAIL_MAX_STROKE);
+  Margin := Max(LINE_THUMBNAIL_MIN_MARGIN,
+    ((PreviewStrokeWidth + 1) div 2) + 3);
+  Margin := Min(Margin, Max(Min(ThumbnailRect.Width,
+    ThumbnailRect.Height) div 2, 0));
+  AvailableWidth := Max(ThumbnailRect.Width - 2 * Margin, 0);
+  AvailableHeight := Max(ThumbnailRect.Height - 2 * Margin, 0);
+  SourceWidth := MaximumX - MinimumX;
+  SourceHeight := MaximumY - MinimumY;
+  if (SourceWidth > 0) and (SourceHeight > 0) then
+    Scale := Min(AvailableWidth / SourceWidth,
+      AvailableHeight / SourceHeight)
+  else if SourceWidth > 0 then
+    Scale := AvailableWidth / SourceWidth
+  else if SourceHeight > 0 then
+    Scale := AvailableHeight / SourceHeight
+  else
+    Scale := 0;
+  InnerLeft := ThumbnailRect.Left + Margin;
+  InnerTop := ThumbnailRect.Top + Margin;
+  OffsetX := InnerLeft + (AvailableWidth - SourceWidth * Scale) * 0.5;
+  OffsetY := InnerTop + (AvailableHeight - SourceHeight * Scale) * 0.5;
+  for ContourIndex := 0 to High(SourcePoints) do
+  begin
+    SetLength(Result[ContourIndex], Length(SourcePoints[ContourIndex]));
+    for I := 0 to High(SourcePoints[ContourIndex]) do
+      Result[ContourIndex][I] := Point(
+        Round(OffsetX + (SourcePoints[ContourIndex][I].X - MinimumX) *
+          Scale),
+        Round(OffsetY + (SourcePoints[ContourIndex][I].Y - MinimumY) *
+          Scale));
+  end;
+end;
+
 procedure TVectArtLayerRenderer.DrawImageThumbnail(ACanvas: TCustomCanvas;
   const ThumbnailRect: TRect; ImageLayer: TVectArtImageLayer);
 var
@@ -280,6 +408,7 @@ var
   CanvasLayer: TVectArtCanvasLayer;
   CellRect: TRect;
   Column: Integer;
+  ContourIndex: Integer;
   DetailText: string;
   LockRect: TRect;
   LineStrokeWidth: Integer;
@@ -288,8 +417,12 @@ var
   PathPoints: TArray<TPoint>;
   RectangleLayer: TVectArtRectangleLayer;
   RectangleRect: TRect;
+  RoundedRectangleLayer: TScreenLayoutRoundedRectangleLayer;
+  RoundedRadius: Integer;
   Row: Integer;
   SavedDC: Integer;
+  ShapeContours: TScreenLayoutThumbnailContours;
+  ShapeLayer: TScreenLayoutShapeLayer;
   TextX: Integer;
   ThumbnailArea: TRect;
   ThumbnailRect: TRect;
@@ -372,34 +505,41 @@ begin
     else
       ACanvas.Brush.Color := BlendThumbnailColor(RectangleLayer.FillColor,
         RectangleLayer.Opacity * 0.35);
-    ACanvas.FillRect(RectangleRect);
+    if Layer is TScreenLayoutRoundedRectangleLayer then
+    begin
+      RoundedRectangleLayer := TScreenLayoutRoundedRectangleLayer(Layer);
+      RoundedRadius := Max(Round(RoundedRectangleLayer.CornerRadii.TopLeft *
+        Min(RectangleRect.Width / Max(RectangleLayer.Bounds.Width, 1.0),
+          RectangleRect.Height / Max(RectangleLayer.Bounds.Height, 1.0))), 0);
+      ACanvas.RoundRect(RectangleRect.Left, RectangleRect.Top,
+        RectangleRect.Right, RectangleRect.Bottom, RoundedRadius * 2,
+        RoundedRadius * 2);
+    end
+    else
+      ACanvas.FillRect(RectangleRect);
   end;
   if Layer is TVectArtPathLayer then
   begin
     PathLayer := TVectArtPathLayer(Layer);
     LineStrokeWidth := VectArtLineThumbnailStrokeWidth(
       PathLayer.StrokeWidth);
-    PathPoints := VectArtPathThumbnailPoints(PathLayer.Points,
+    PathPoints := VectArtPathThumbnailPoints(
+      FlattenScreenLayoutPathVertices(PathLayer.Vertices, 16),
       ThumbnailRect, LineStrokeWidth);
     SavedDC := SaveDC(ACanvas.Handle);
     try
       IntersectClipRect(ACanvas.Handle, ThumbnailRect.Left,
         ThumbnailRect.Top, ThumbnailRect.Right, ThumbnailRect.Bottom);
-      if PathLayer.Closed and (Length(PathPoints) >= 3) then
+      if Length(PathPoints) >= 2 then
       begin
-        ACanvas.Pen.Style := psClear;
-        ACanvas.Brush.Style := bsSolid;
-        if Layer.Visible then
-          ACanvas.Brush.Color := BlendThumbnailColor(PathLayer.FillColor,
-            PathLayer.Opacity)
+        if PathLayer.Closed then
+        begin
+          PathDrawPoints := Copy(PathPoints);
+          SetLength(PathDrawPoints, Length(PathPoints) + 1);
+          PathDrawPoints[High(PathDrawPoints)] := PathPoints[0];
+        end
         else
-          ACanvas.Brush.Color := BlendThumbnailColor(PathLayer.FillColor,
-            PathLayer.Opacity * 0.35);
-        ACanvas.Polygon(PathPoints);
-      end;
-      if not PathLayer.Closed and (Length(PathPoints) >= 2) then
-      begin
-        PathDrawPoints := Copy(PathPoints);
+          PathDrawPoints := Copy(PathPoints);
         ACanvas.Brush.Style := bsClear;
         if Layer.Visible then
           ACanvas.Pen.Color := BlendThumbnailColor(PathLayer.StrokeColor,
@@ -418,6 +558,39 @@ begin
       RestoreDC(ACanvas.Handle, SavedDC);
     end;
     ACanvas.Brush.Style := bsSolid;
+    ACanvas.Pen.Style := psSolid;
+    ACanvas.Pen.Width := 1;
+  end;
+  if Layer is TScreenLayoutShapeLayer then
+  begin
+    ShapeLayer := TScreenLayoutShapeLayer(Layer);
+    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(
+      ShapeLayer.StrokeWidth);
+    ShapeContours := VectArtShapeThumbnailContours(ShapeLayer.Contours,
+      ThumbnailRect, LineStrokeWidth);
+    ACanvas.Brush.Style := bsSolid;
+    if Layer.Visible then
+    begin
+      ACanvas.Brush.Color := BlendThumbnailColor(ShapeLayer.FillColor,
+        ShapeLayer.Opacity);
+      ACanvas.Pen.Color := BlendThumbnailColor(ShapeLayer.StrokeColor,
+        ShapeLayer.Opacity);
+    end
+    else
+    begin
+      ACanvas.Brush.Color := BlendThumbnailColor(ShapeLayer.FillColor,
+        ShapeLayer.Opacity * 0.35);
+      ACanvas.Pen.Color := BlendThumbnailColor(ShapeLayer.StrokeColor,
+        ShapeLayer.Opacity * 0.35);
+    end;
+    ACanvas.Pen.Width := LineStrokeWidth;
+    if ShapeLayer.StrokeStyle <> vssSolid then
+      ACanvas.Pen.Style := psDash
+    else
+      ACanvas.Pen.Style := psSolid;
+    for ContourIndex := 0 to High(ShapeContours) do
+      if Length(ShapeContours[ContourIndex]) >= 3 then
+        ACanvas.Polygon(ShapeContours[ContourIndex]);
     ACanvas.Pen.Style := psSolid;
     ACanvas.Pen.Width := 1;
   end;
@@ -449,7 +622,8 @@ begin
   else if Layer is TVectArtPathLayer then
   begin
     PathLayer := TVectArtPathLayer(Layer);
-    if not PathLayer.Closed and (Length(PathLayer.Points) = 2) then
+    if not PathLayer.Closed and
+      ScreenLayoutPathIsStraightLine(PathLayer.Vertices) then
       DetailText := Format('Line  %spx  %d%%',
         [FormatFloat('0.##', PathLayer.StrokeWidth),
          Round(Layer.Opacity * 100)])
@@ -495,6 +669,7 @@ var
   CanvasLayer: TVectArtCanvasLayer;
   CellRect: TRect;
   Column: Integer;
+  ContourIndex: Integer;
   DetailText: string;
   LockRect: TRect;
   LineStrokeWidth: Integer;
@@ -503,7 +678,11 @@ var
   PathPoints: TArray<TPoint>;
   RectangleLayer: TVectArtRectangleLayer;
   RectangleRect: TRect;
+  RoundedRectangleLayer: TScreenLayoutRoundedRectangleLayer;
+  RoundedRadius: Integer;
   Row: Integer;
+  ShapeContours: TScreenLayoutThumbnailContours;
+  ShapeLayer: TScreenLayoutShapeLayer;
   TextX: Integer;
   ThumbnailArea: TRect;
   ThumbnailRect: TRect;
@@ -585,7 +764,18 @@ begin
       ACanvas.Brush.Handle.SetOpacity(RectangleLayer.Opacity)
     else
       ACanvas.Brush.Handle.SetOpacity(RectangleLayer.Opacity * 0.35);
-    ACanvas.FillRect(RectangleRect);
+    if Layer is TScreenLayoutRoundedRectangleLayer then
+    begin
+      RoundedRectangleLayer := TScreenLayoutRoundedRectangleLayer(Layer);
+      RoundedRadius := Max(Round(RoundedRectangleLayer.CornerRadii.TopLeft *
+        Min(RectangleRect.Width / Max(RectangleLayer.Bounds.Width, 1.0),
+          RectangleRect.Height / Max(RectangleLayer.Bounds.Height, 1.0))), 0);
+      ACanvas.RoundRect(RectangleRect.Left, RectangleRect.Top,
+        RectangleRect.Right, RectangleRect.Bottom, RoundedRadius * 2,
+        RoundedRadius * 2);
+    end
+    else
+      ACanvas.FillRect(RectangleRect);
     ACanvas.Brush.Handle.SetOpacity(1.0);
   end;
   if Layer is TVectArtPathLayer then
@@ -593,26 +783,22 @@ begin
     PathLayer := TVectArtPathLayer(Layer);
     LineStrokeWidth := VectArtLineThumbnailStrokeWidth(
       PathLayer.StrokeWidth);
-    PathPoints := VectArtPathThumbnailPoints(PathLayer.Points,
+    PathPoints := VectArtPathThumbnailPoints(
+      FlattenScreenLayoutPathVertices(PathLayer.Vertices, 16),
       ThumbnailRect, LineStrokeWidth);
     ACanvas.RenderTarget.PushAxisAlignedClip(ThumbnailRect,
       D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     try
-      if PathLayer.Closed and (Length(PathPoints) >= 3) then
+      if Length(PathPoints) >= 2 then
       begin
-        ACanvas.Pen.Style := psClear;
-        ACanvas.Brush.Style := bsSolid;
-        ACanvas.Brush.Color := PathLayer.FillColor;
-        if Layer.Visible then
-          ACanvas.Brush.Handle.SetOpacity(PathLayer.Opacity)
+        if PathLayer.Closed then
+        begin
+          PathDrawPoints := Copy(PathPoints);
+          SetLength(PathDrawPoints, Length(PathPoints) + 1);
+          PathDrawPoints[High(PathDrawPoints)] := PathPoints[0];
+        end
         else
-          ACanvas.Brush.Handle.SetOpacity(PathLayer.Opacity * 0.35);
-        ACanvas.Polygon(PathPoints);
-        ACanvas.Brush.Handle.SetOpacity(1.0);
-      end;
-      if not PathLayer.Closed and (Length(PathPoints) >= 2) then
-      begin
-        PathDrawPoints := Copy(PathPoints);
+          PathDrawPoints := Copy(PathPoints);
         ACanvas.Brush.Style := bsClear;
         if Layer.Visible then
           ACanvas.Pen.Color := BlendThumbnailColor(PathLayer.StrokeColor,
@@ -632,6 +818,39 @@ begin
       ACanvas.RenderTarget.PopAxisAlignedClip;
     end;
     ACanvas.Brush.Style := bsSolid;
+    ACanvas.Pen.Style := psSolid;
+    ACanvas.Pen.Width := 1;
+  end;
+  if Layer is TScreenLayoutShapeLayer then
+  begin
+    ShapeLayer := TScreenLayoutShapeLayer(Layer);
+    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(
+      ShapeLayer.StrokeWidth);
+    ShapeContours := VectArtShapeThumbnailContours(ShapeLayer.Contours,
+      ThumbnailRect, LineStrokeWidth);
+    ACanvas.Brush.Style := bsSolid;
+    if Layer.Visible then
+    begin
+      ACanvas.Brush.Color := BlendThumbnailColor(ShapeLayer.FillColor,
+        ShapeLayer.Opacity);
+      ACanvas.Pen.Color := BlendThumbnailColor(ShapeLayer.StrokeColor,
+        ShapeLayer.Opacity);
+    end
+    else
+    begin
+      ACanvas.Brush.Color := BlendThumbnailColor(ShapeLayer.FillColor,
+        ShapeLayer.Opacity * 0.35);
+      ACanvas.Pen.Color := BlendThumbnailColor(ShapeLayer.StrokeColor,
+        ShapeLayer.Opacity * 0.35);
+    end;
+    ACanvas.Pen.Width := LineStrokeWidth;
+    if ShapeLayer.StrokeStyle <> vssSolid then
+      ACanvas.Pen.Style := psDash
+    else
+      ACanvas.Pen.Style := psSolid;
+    for ContourIndex := 0 to High(ShapeContours) do
+      if Length(ShapeContours[ContourIndex]) >= 3 then
+        ACanvas.Polygon(ShapeContours[ContourIndex]);
     ACanvas.Pen.Style := psSolid;
     ACanvas.Pen.Width := 1;
   end;
@@ -663,7 +882,8 @@ begin
   else if Layer is TVectArtPathLayer then
   begin
     PathLayer := TVectArtPathLayer(Layer);
-    if not PathLayer.Closed and (Length(PathLayer.Points) = 2) then
+    if not PathLayer.Closed and
+      ScreenLayoutPathIsStraightLine(PathLayer.Vertices) then
       DetailText := Format('Line  %spx  %d%%',
         [FormatFloat('0.##', PathLayer.StrokeWidth),
          Round(Layer.Opacity * 100)])
@@ -709,6 +929,7 @@ begin
     Exit;
   FDocument := Value;
   FImageThumbnails.Clear;
+  FScrollOffset := 0;
   FThumbnailRevision := -1;
 end;
 
@@ -754,6 +975,7 @@ var
   ItemRect: TRect;
 begin
   SyncThumbnailCache;
+  EnsureSelectionVisible(Bounds);
   ACanvas.Brush.Style := bsSolid;
   ACanvas.Brush.Color := COLOR_LIST_BACKGROUND;
   ACanvas.FillRect(Bounds);
@@ -762,6 +984,8 @@ begin
   for I := 1 to FDocument.LayerCount - 1 do
   begin
     ItemRect := LayerItemRect(Bounds, I);
+    if ItemRect.Top >= Bounds.Bottom then
+      Continue;
     if ItemRect.Bottom <= Bounds.Top then
       Break;
     DrawLayerItem(ACanvas, ItemRect, FDocument[I],
@@ -776,6 +1000,7 @@ var
   ItemRect: TRect;
 begin
   SyncThumbnailCache;
+  EnsureSelectionVisible(Bounds);
   ACanvas.Brush.Style := bsSolid;
   ACanvas.Brush.Color := COLOR_LIST_BACKGROUND;
   ACanvas.FillRect(Bounds);
@@ -784,6 +1009,8 @@ begin
   for I := 1 to FDocument.LayerCount - 1 do
   begin
     ItemRect := LayerItemRect(Bounds, I);
+    if ItemRect.Top >= Bounds.Bottom then
+      Continue;
     if ItemRect.Bottom <= Bounds.Top then
       Break;
     DrawLayerItem(ACanvas, ItemRect, FDocument[I],
@@ -835,7 +1062,7 @@ begin
   if Index <= 0 then
     Exit(TRect.Empty);
   ItemBottom := Bounds.Bottom - LAYER_LIST_PADDING -
-    (Index - 1) * (LAYER_ROW_HEIGHT + LAYER_GAP);
+    (Index - 1) * (LAYER_ROW_HEIGHT + LAYER_GAP) + FScrollOffset;
   Result := Rect(Bounds.Left + LAYER_LIST_PADDING,
     ItemBottom - LAYER_ROW_HEIGHT,
     Bounds.Right - LAYER_LIST_PADDING, ItemBottom);
