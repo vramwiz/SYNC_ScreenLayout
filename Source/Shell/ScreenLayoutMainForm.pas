@@ -282,10 +282,14 @@ end;
 
 procedure TMainForm.DocumentChanged(Sender: TObject);
 begin
+  if FEditorState <> nil then
+    FEditorState.ValidateOpenGroupPath(FDocument);
   if FEditActionsUI <> nil then
     FEditActionsUI.RefreshState;
   if FEditorFrame <> nil then
     FEditorFrame.CanvasControl.Invalidate;
+  if FLayerFrame <> nil then
+    FLayerFrame.RefreshFromDocument;
   if (FDocument <> nil) and FDocument.IsInteractiveUpdate then
     Exit;
   if FLayerFrame <> nil then
@@ -346,6 +350,8 @@ var
 begin
   if FEditorFrame <> nil then
     FEditorFrame.CanvasControl.Invalidate;
+  if FObjectPropertiesFrame <> nil then
+    FObjectPropertiesFrame.RefreshFromDocument;
   if FToolPaletteFrame <> nil then
     FToolPaletteFrame.RefreshState;
   if FLineToolbar <> nil then
@@ -405,6 +411,18 @@ begin
       'finish   Canvas: ' + CanvasSize
   else
     lblStatus.Caption := 'Ready   Tool: Select   Canvas: ' + CanvasSize;
+  if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) then
+  begin
+    lblStatus.Caption := lblStatus.Caption + '   Open group: ' +
+      FEditorState.OpenGroup.Name;
+    if FEditorState.OpenGroupDepth > 1 then
+      lblStatus.Caption := lblStatus.Caption + '   Esc: parent group'
+    else
+      lblStatus.Caption := lblStatus.Caption + '   Esc: close';
+  end;
+  if (FEditorState <> nil) and (FEditorState.OpenGroupChild <> nil) then
+    lblStatus.Caption := lblStatus.Caption + '   Child: ' +
+      FEditorState.OpenGroupChild.Name;
 end;
 
 procedure TMainForm.FormKeyDown(Sender: TObject; var Key: Word;
@@ -461,6 +479,8 @@ begin
         OpenDialog.DefaultFolder := TPath.GetDocumentsPath;
       if not OpenDialog.Execute(Handle) then
         Exit;
+      if FEditorState <> nil then
+        FEditorState.OpenGroup := nil;
       if not TryLoadVectArtDocumentFromJsonFile(OpenDialog.FileName,
         FDocument, SkippedReferenceCount, ErrorMessage) then
         raise EConvertError.Create(ErrorMessage);
@@ -730,22 +750,36 @@ begin
   FShortcuts.Add(Ord('G'), [ssCtrl],
     procedure
     begin
-      GroupSelectedLayers(FDocument, FEditHistory);
+      if (FEditorState <> nil) and
+        (FEditorState.OpenGroup <> nil) then
+        GroupOpenGroupChildren(FDocument, FEditHistory, FEditorState)
+      else
+        GroupSelectedLayers(FDocument, FEditHistory);
     end,
     function: Boolean
     begin
-      Result := IsEditingSurfaceFocused and
-        CanGroupSelectedLayers(FDocument);
+      Result := IsEditingSurfaceFocused and (FEditorState <> nil) and
+        (((FEditorState.OpenGroup <> nil) and
+          CanGroupOpenGroupChildren(FEditorState)) or
+         ((FEditorState.OpenGroup = nil) and
+          CanGroupSelectedLayers(FDocument)));
     end);
   FShortcuts.Add(Ord('G'), [ssCtrl, ssShift],
     procedure
     begin
-      UngroupSelectedLayer(FDocument, FEditHistory);
+      if (FEditorState <> nil) and
+        (FEditorState.OpenGroup <> nil) then
+        UngroupOpenGroupChild(FDocument, FEditHistory, FEditorState)
+      else
+        UngroupSelectedLayer(FDocument, FEditHistory);
     end,
     function: Boolean
     begin
-      Result := IsEditingSurfaceFocused and
-        CanUngroupSelectedLayer(FDocument);
+      Result := IsEditingSurfaceFocused and (FEditorState <> nil) and
+        (((FEditorState.OpenGroup <> nil) and
+          CanUngroupOpenGroupChild(FEditorState)) or
+         ((FEditorState.OpenGroup = nil) and
+          CanUngroupSelectedLayer(FDocument)));
     end);
   FShortcuts.Add(VK_DELETE, [],
     procedure
@@ -760,12 +794,16 @@ begin
   FShortcuts.Add(VK_ESCAPE, [],
     procedure
     begin
-      FDocument.SetSelectedLayers([]);
+      if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) then
+        FEditorState.OpenParentGroup
+      else
+        FDocument.SetSelectedLayers([]);
     end,
     function: Boolean
     begin
       Result := IsEditingSurfaceFocused and (FDocument <> nil) and
-        (FDocument.SelectionCount > 0);
+        ((FDocument.SelectionCount > 0) or
+         ((FEditorState <> nil) and (FEditorState.OpenGroup <> nil)));
     end);
 end;
 

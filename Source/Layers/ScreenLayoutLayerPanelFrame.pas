@@ -76,12 +76,14 @@ begin
     FLayerActions.EditHistory := nil;
     FLayerActions.Document := nil;
     FLayerList.EditHistory := nil;
+    FLayerList.EditorState := nil;
     FLayerList.Document := nil;
   end
   else
   begin
     FLayerList.Document := FContext.Document;
     FLayerList.EditHistory := FContext.EditHistory;
+    FLayerList.EditorState := FContext.EditorState;
     FLayerActions.Document := FContext.Document;
     FLayerActions.EditHistory := FContext.EditHistory;
     FLayerActions.EditorState := FContext.EditorState;

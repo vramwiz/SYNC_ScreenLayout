@@ -20,6 +20,7 @@ type
     FDocument: TVectArtDocument;
     FImageThumbnails: TObjectDictionary<TVectArtImageLayer,
       TVectArtImageThumbnailCacheEntry>;
+    FOpenGroup: TScreenLayoutGroupLayer;
     FScrollOffset: Integer;
     FThumbnailRevision: Int64;
     procedure EnsureSelectionVisible(const Bounds: TRect);
@@ -58,6 +59,8 @@ type
     function LockButtonRect(const ItemRect: TRect): TRect;
     function VisibilityButtonRect(const ItemRect: TRect): TRect;
     property Document: TVectArtDocument read FDocument write SetDocument;
+    property OpenGroup: TScreenLayoutGroupLayer read FOpenGroup
+      write FOpenGroup;
   end;
 
 function VectArtLineThumbnailStrokeWidth(StrokeWidth: Single): Integer;
@@ -685,6 +688,12 @@ begin
   ACanvas.Brush.Style := bsClear;
   ACanvas.Pen.Color := COLOR_ROW_BORDER;
   ACanvas.FrameRect(ItemRect);
+  if Layer = FOpenGroup then
+  begin
+    ACanvas.Pen.Color := TColor($00D6A04A);
+    ACanvas.FrameRect(Rect(ItemRect.Left + 2, ItemRect.Top + 2,
+      ItemRect.Right - 2, ItemRect.Bottom - 2));
+  end;
   if Active then
   begin
     ACanvas.Brush.Style := bsSolid;
@@ -1071,6 +1080,12 @@ begin
   ACanvas.Brush.Style := bsClear;
   ACanvas.Pen.Color := COLOR_ROW_BORDER;
   ACanvas.FrameRect(ItemRect);
+  if Layer = FOpenGroup then
+  begin
+    ACanvas.Pen.Color := TColor($00D6A04A);
+    ACanvas.FrameRect(Rect(ItemRect.Left + 2, ItemRect.Top + 2,
+      ItemRect.Right - 2, ItemRect.Bottom - 2));
+  end;
   if Active then
   begin
     ACanvas.Brush.Style := bsSolid;

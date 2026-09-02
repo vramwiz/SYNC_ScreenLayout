@@ -70,7 +70,9 @@ implementation
 uses
   System.Generics.Collections, System.Math, System.SysUtils, Winapi.Windows,
   Vcl.Graphics, ScreenLayoutGeometry, ScreenLayoutShapeEditCommands,
-  ScreenLayoutEllipseGeometry, ScreenLayoutPathOperations;
+  ScreenLayoutEllipseGeometry, ScreenLayoutGroupCommands,
+  ScreenLayoutGroupTransformCommands,
+  ScreenLayoutLayerGeometry, ScreenLayoutPathOperations;
 
 const
   COLOR_BACKGROUND = TColor($00212121);
@@ -464,8 +466,79 @@ var
   XValue: Double;
   YValue: Double;
 begin
-  if FUpdating or (FDocument = nil) or
-    (FDocument.SelectionCount = 0) or SelectedLayersHaveLock then
+  if FUpdating or (FDocument = nil) then
+    Exit;
+  if (FEditorState <> nil) and
+    (FEditorState.OpenGroupChildCount = 1) and
+    (FEditorState.OpenGroupChild <> nil) then
+  begin
+    if FEditorState.OpenGroupChild.Locked or
+      not TryGetScreenLayoutLayerBounds(FEditorState.OpenGroupChild,
+        OldSelectionBounds) then
+      Exit;
+    if not TryStrToFloat(Trim(FXEdit.Text), XValue) or
+      not TryStrToFloat(Trim(FYEdit.Text), YValue) or
+      not TryStrToFloat(Trim(FWidthEdit.Text), WidthValue) or
+      not TryStrToFloat(Trim(FHeightEdit.Text), HeightValue) then
+    begin
+      RefreshFromDocument;
+      Exit;
+    end;
+    WidthValue := Max(WidthValue, MIN_OBJECT_SIZE);
+    HeightValue := Max(HeightValue, MIN_OBJECT_SIZE);
+    NewSelectionBounds := TRectF.Create(XValue - WidthValue * 0.5,
+      YValue - HeightValue * 0.5, XValue + WidthValue * 0.5,
+      YValue + HeightValue * 0.5);
+    if SameValue(OldSelectionBounds.Left, NewSelectionBounds.Left) and
+      SameValue(OldSelectionBounds.Top, NewSelectionBounds.Top) and
+      SameValue(OldSelectionBounds.Right, NewSelectionBounds.Right) and
+      SameValue(OldSelectionBounds.Bottom, NewSelectionBounds.Bottom) then
+      Exit;
+    ScaleScreenLayoutLayer(FEditorState.OpenGroupChild,
+      OldSelectionBounds, NewSelectionBounds);
+    FDocument.Changed;
+    if FEditHistory <> nil then
+      FEditHistory.AddApplied(TScreenLayoutScaleLayerCommand.Create(
+        FDocument, FEditorState.OpenGroupChild, OldSelectionBounds,
+        NewSelectionBounds));
+    Exit;
+  end;
+  if (FDocument.SelectionCount = 1) and
+    (FDocument.SelectedIndex > 0) and
+    (FDocument[FDocument.SelectedIndex] is TScreenLayoutGroupLayer) then
+  begin
+    if FDocument[FDocument.SelectedIndex].Locked or
+      not TryGetScreenLayoutLayerBounds(
+        FDocument[FDocument.SelectedIndex], OldSelectionBounds) then
+      Exit;
+    if not TryStrToFloat(Trim(FXEdit.Text), XValue) or
+      not TryStrToFloat(Trim(FYEdit.Text), YValue) or
+      not TryStrToFloat(Trim(FWidthEdit.Text), WidthValue) or
+      not TryStrToFloat(Trim(FHeightEdit.Text), HeightValue) then
+    begin
+      RefreshFromDocument;
+      Exit;
+    end;
+    WidthValue := Max(WidthValue, MIN_OBJECT_SIZE);
+    HeightValue := Max(HeightValue, MIN_OBJECT_SIZE);
+    NewSelectionBounds := TRectF.Create(XValue - WidthValue * 0.5,
+      YValue - HeightValue * 0.5, XValue + WidthValue * 0.5,
+      YValue + HeightValue * 0.5);
+    if SameValue(OldSelectionBounds.Left, NewSelectionBounds.Left) and
+      SameValue(OldSelectionBounds.Top, NewSelectionBounds.Top) and
+      SameValue(OldSelectionBounds.Right, NewSelectionBounds.Right) and
+      SameValue(OldSelectionBounds.Bottom, NewSelectionBounds.Bottom) then
+      Exit;
+    ScaleScreenLayoutLayer(FDocument[FDocument.SelectedIndex],
+      OldSelectionBounds, NewSelectionBounds);
+    FDocument.Changed;
+    if FEditHistory <> nil then
+      FEditHistory.AddApplied(TScreenLayoutScaleLayerCommand.Create(
+        FDocument, FDocument[FDocument.SelectedIndex], OldSelectionBounds,
+        NewSelectionBounds));
+    Exit;
+  end;
+  if (FDocument.SelectionCount = 0) or SelectedLayersHaveLock then
     Exit;
   if not TryStrToFloat(Trim(FXEdit.Text), XValue) or
     not TryStrToFloat(Trim(FYEdit.Text), YValue) or
@@ -863,7 +936,13 @@ begin
   Canvas.Font.Name := 'Segoe UI';
   Canvas.Font.Height := -12;
   Canvas.Font.Color := COLOR_LABEL;
-  if (FDocument = nil) or (FDocument.SelectionCount = 0) then
+  if (FEditorState <> nil) and (FEditorState.OpenGroupChildCount > 1) then
+    HeaderText := Format('%d objects selected',
+      [FEditorState.OpenGroupChildCount])
+  else if (FEditorState <> nil) and
+    (FEditorState.OpenGroupChild <> nil) then
+    HeaderText := FEditorState.OpenGroupChild.Name
+  else if (FDocument = nil) or (FDocument.SelectionCount = 0) then
     HeaderText := 'No selection'
   else if FDocument.SelectionCount = 1 then
     HeaderText := FDocument[FDocument.SelectedIndex].Name
@@ -959,7 +1038,51 @@ begin
     FColorEdit.Visible := False;
     FArcStartAngleEdit.Visible := False;
     FArcEndAngleEdit.Visible := False;
-    if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
+    if (FDocument <> nil) and (FEditorState <> nil) and
+      (FEditorState.OpenGroupChildCount = 1) and
+      (FEditorState.OpenGroupChild <> nil) and
+      TryGetScreenLayoutLayerBounds(FEditorState.OpenGroupChild, Bounds) then
+    begin
+      FXEdit.Text := FormatFloat('0.##', Bounds.CenterPoint.X);
+      FYEdit.Text := FormatFloat('0.##', Bounds.CenterPoint.Y);
+      FWidthEdit.Text := FormatFloat('0.##', Bounds.Width);
+      FHeightEdit.Text := FormatFloat('0.##', Bounds.Height);
+      ClearEditValue(FColorEdit);
+      ClearEditValue(FStrokeColorEdit);
+      ClearEditValue(FStrokeWidthEdit);
+      FMifStrokeStyleCombo.SetPendingItemIndex(-1);
+      FOpacityEdit.Text := FormatFloat('0.##',
+        FEditorState.OpenGroupChild.Opacity * 100);
+      SetEditorsEnabled(not FEditorState.OpenGroupChild.Locked);
+      FColorEdit.Enabled := False;
+      FStrokeColorEdit.Enabled := False;
+      FStrokeWidthEdit.Enabled := False;
+      FMifStrokeStyleCombo.Enabled := False;
+      FOpacityEdit.Enabled := False;
+    end
+    else if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
+      (FDocument.SelectedIndex > 0) and
+      (FDocument[FDocument.SelectedIndex] is TScreenLayoutGroupLayer) and
+      TryGetScreenLayoutLayerBounds(FDocument[FDocument.SelectedIndex],
+        Bounds) then
+    begin
+      FXEdit.Text := FormatFloat('0.##', Bounds.CenterPoint.X);
+      FYEdit.Text := FormatFloat('0.##', Bounds.CenterPoint.Y);
+      FWidthEdit.Text := FormatFloat('0.##', Bounds.Width);
+      FHeightEdit.Text := FormatFloat('0.##', Bounds.Height);
+      ClearEditValue(FColorEdit);
+      ClearEditValue(FStrokeColorEdit);
+      ClearEditValue(FStrokeWidthEdit);
+      FMifStrokeStyleCombo.SetPendingItemIndex(-1);
+      ClearEditValue(FOpacityEdit);
+      SetEditorsEnabled(not FDocument[FDocument.SelectedIndex].Locked);
+      FColorEdit.Enabled := False;
+      FStrokeColorEdit.Enabled := False;
+      FStrokeWidthEdit.Enabled := False;
+      FMifStrokeStyleCombo.Enabled := False;
+      FOpacityEdit.Enabled := False;
+    end
+    else if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
       (FDocument[FDocument.SelectedIndex] is
         TScreenLayoutRectangleLineLayer) then
     begin

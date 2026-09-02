@@ -37,6 +37,7 @@ implementation
 uses
   System.Math, System.SysUtils, Vcl.Graphics,
   ScreenLayoutEditCommands,
+  ScreenLayoutGroupCommands,
   ScreenLayoutLayerDuplication,
   ScreenLayoutLayerStructureCommands, ScreenLayoutTextCommands;
 
@@ -87,13 +88,23 @@ begin
     Exit;
   case Action of
     vlaDuplicate:
-      Result := CanDuplicateSelectedLayers(FDocument);
+      if CanEditOpenGroupChild(FEditorState) then
+        Result := True
+      else
+        Result := CanDuplicateSelectedGroups(FDocument) or
+          CanDuplicateSelectedLayers(FDocument);
     vlaDelete:
-      Result := SelectedLayersEditable;
+      Result := CanEditOpenGroupChild(FEditorState) or SelectedLayersEditable;
     vlaMoveForward:
-      Result := SelectedLayersEditable and CanMove(1);
+      if CanEditOpenGroupChild(FEditorState) then
+        Result := CanMoveOpenGroupChild(FEditorState, 1)
+      else
+        Result := SelectedLayersEditable and CanMove(1);
     vlaMoveBackward:
-      Result := SelectedLayersEditable and CanMove(-1);
+      if CanEditOpenGroupChild(FEditorState) then
+        Result := CanMoveOpenGroupChild(FEditorState, -1)
+      else
+        Result := SelectedLayersEditable and CanMove(-1);
   end;
 end;
 
@@ -287,10 +298,28 @@ begin
     Exit;
   case Action of
     vlaAdd: AddRectangle;
-    vlaDuplicate: DuplicateSelectedLayers(FDocument, FEditHistory);
-    vlaDelete: DeleteSelectedLayers;
-    vlaMoveForward: MoveSelectedLayers(1);
-    vlaMoveBackward: MoveSelectedLayers(-1);
+    vlaDuplicate:
+      if CanEditOpenGroupChild(FEditorState) then
+        DuplicateOpenGroupChild(FDocument, FEditHistory, FEditorState)
+      else if CanDuplicateSelectedGroups(FDocument) then
+        DuplicateSelectedGroups(FDocument, FEditHistory)
+      else
+        DuplicateSelectedLayers(FDocument, FEditHistory);
+    vlaDelete:
+      if CanEditOpenGroupChild(FEditorState) then
+        DeleteOpenGroupChild(FDocument, FEditHistory, FEditorState)
+      else
+        DeleteSelectedLayers;
+    vlaMoveForward:
+      if CanEditOpenGroupChild(FEditorState) then
+        MoveOpenGroupChild(FDocument, FEditHistory, FEditorState, 1)
+      else
+        MoveSelectedLayers(1);
+    vlaMoveBackward:
+      if CanEditOpenGroupChild(FEditorState) then
+        MoveOpenGroupChild(FDocument, FEditHistory, FEditorState, -1)
+      else
+        MoveSelectedLayers(-1);
   end;
 end;
 

@@ -9,7 +9,8 @@ uses
   Vcl.Direct2D, Vcl.Forms, Vcl.Graphics, Vcl.StdCtrls,
   ScreenLayoutCanvasInteraction,
   ScreenLayoutDocument, ScreenLayoutEditHistory,
-  ScreenLayoutEditorState, ScreenLayoutSelectionGeometry,
+  ScreenLayoutEditorState, ScreenLayoutGroupInteraction,
+  ScreenLayoutSelectionGeometry,
   ScreenLayoutShapeCreation, ScreenLayoutRenderer, ScreenLayoutTextEditing;
 
 type
@@ -19,6 +20,7 @@ type
     FDirect2DEnabled: Boolean;
     FDocument: TVectArtDocument;
     FEditorState: TVectArtEditorState;
+    FGroupDrag: TScreenLayoutGroupDrag;
     FInteraction: TVectArtCanvasInteraction;
     FReferenceBackground: TBitmap;
     FRenderedDocument: TBitmap;
@@ -120,7 +122,9 @@ implementation
 uses
   System.Math, System.Skia, Winapi.D2D1, Vcl.Clipbrd,
   ScreenLayoutCanvasPreview, ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
-  ScreenLayoutLayerGeometry, ScreenLayoutPathOperations,
+  ScreenLayoutGroupCommands,
+  ScreenLayoutLayerGeometry,
+  ScreenLayoutPathOperations,
   ScreenLayoutShapeOperations, ScreenLayoutTextCommands,
   ScreenLayoutTextGeometry, ScreenLayoutLayerNaming;
 
@@ -131,6 +135,7 @@ const
   COLOR_CANVAS_SHADOW   = TColor($00070707);
   COLOR_ROTATION_MARK   = TColor($00008000);
   COLOR_SELECTION       = clBlack;
+  COLOR_OPEN_GROUP      = TColor($00D6A04A);
   COLOR_TRANSPARENT_A   = TColor($00D8D8D8);
   COLOR_TRANSPARENT_B   = TColor($00FFFFFF);
   TRANSPARENCY_CELL     = 16;
@@ -169,6 +174,7 @@ begin
   ControlStyle := ControlStyle + [csOpaque];
   DoubleBuffered := True;
   FDirect2DEnabled := TDirect2DCanvas.Supported;
+  FGroupDrag := TScreenLayoutGroupDrag.Create;
   FInteraction := TVectArtCanvasInteraction.Create;
   FReferenceBackground := Vcl.Graphics.TBitmap.Create;
   FReferenceBackground.PixelFormat := pf32bit;
@@ -211,6 +217,7 @@ begin
   FRenderedDocument.Free;
   FReferenceBackground.Free;
   FShapeCreation.Free;
+  FGroupDrag.Free;
   FInteraction.Free;
   inherited Destroy;
 end;
@@ -1151,6 +1158,14 @@ end;
 procedure TVectArtCanvasControl.MouseDown(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
+  GroupChild: TVectArtLayer;
+  GroupChildBounds: TRectF;
+  GroupChildRect: TRect;
+  Handle: TVectArtSelectionHandle;
+  LayerIndex: Integer;
+  LogicalPoint: TPointF;
+  OpenGroupBounds: TRectF;
+  SelectionGeometry: TVectArtSelectionGeometry;
   TextLayerIndex: Integer;
 begin
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
@@ -1209,6 +1224,100 @@ begin
     if CanFocus then
       SetFocus;
     CalculateCanvasBounds;
+    FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+    if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
+      (FEditorState.OpenGroupChild <> nil) and
+      OpenGroupSelectionEditable(FEditorState) and
+      TryGetOpenGroupSelectionBounds(FEditorState, GroupChildBounds) then
+    begin
+      GroupChildRect := Rect(ToScreenX(GroupChildBounds.Left),
+        ToScreenY(GroupChildBounds.Top), ToScreenX(GroupChildBounds.Right),
+        ToScreenY(GroupChildBounds.Bottom));
+      SelectionGeometry := BuildSelectionGeometry(GroupChildRect,
+        SelectionFrameOffset(0, FZoom));
+      if HitTestRotationHandle(Point(X, Y), SelectionGeometry) then
+      begin
+        FGroupDrag.BeginRotate(FDocument,
+          FEditorState.GetOpenGroupChildren, GroupChildBounds.CenterPoint,
+          RadToDeg(ArcTan2(Y - ToScreenY(GroupChildBounds.CenterPoint.Y),
+            X - ToScreenX(GroupChildBounds.CenterPoint.X))));
+        MouseCapture := True;
+        Cursor := RotationHandleCursor;
+        Exit;
+      end;
+      Handle := HitTestSelectionHandle(Point(X, Y), SelectionGeometry);
+      if Handle <> vshNone then
+      begin
+        FGroupDrag.BeginResize(FDocument,
+          FEditorState.GetOpenGroupChildren, Point(X, Y), Handle,
+          GroupChildBounds);
+        MouseCapture := True;
+        Cursor := SelectionHandleCursor(Handle);
+        Exit;
+      end;
+    end;
+    if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) then
+      if not TryClientPointToLogical(Point(X, Y), LogicalPoint) or
+        not TryGetScreenLayoutLayerBounds(FEditorState.OpenGroup,
+          OpenGroupBounds) or not OpenGroupBounds.Contains(LogicalPoint) then
+        FEditorState.OpenGroup := nil;
+    if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
+      (ssDouble in Shift) and
+      TryClientPointToLogical(Point(X, Y), LogicalPoint) then
+    begin
+      GroupChild := HitTestGroupChild(FEditorState.OpenGroup, LogicalPoint);
+      if GroupChild is TScreenLayoutGroupLayer then
+      begin
+        FDocument.SetSelectedLayers([]);
+        FEditorState.OpenChildGroup(TScreenLayoutGroupLayer(GroupChild));
+        Invalidate;
+        Exit;
+      end;
+    end;
+    if (FEditorState <> nil) and (ssDouble in Shift) then
+    begin
+      LayerIndex := FInteraction.LayerAt(X, Y);
+      if (LayerIndex > 0) and
+        (FDocument[LayerIndex] is TScreenLayoutGroupLayer) then
+      begin
+        FDocument.SelectedIndex := LayerIndex;
+        if FEditorState.OpenGroup = FDocument[LayerIndex] then
+          FEditorState.OpenGroup := nil
+        else
+          FEditorState.OpenGroup := TScreenLayoutGroupLayer(
+            FDocument[LayerIndex]);
+        Invalidate;
+        Exit;
+      end;
+    end;
+    if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
+      TryClientPointToLogical(Point(X, Y), LogicalPoint) then
+    begin
+      GroupChild := HitTestGroupChild(FEditorState.OpenGroup,
+        LogicalPoint);
+      FDocument.SetSelectedLayers([]);
+      if ssCtrl in Shift then
+      begin
+        if GroupChild <> nil then
+          FEditorState.ToggleOpenGroupChild(GroupChild);
+        Invalidate;
+        Exit;
+      end;
+      if (GroupChild <> nil) and
+        not FEditorState.IsOpenGroupChildSelected(GroupChild) then
+        FEditorState.OpenGroupChild := GroupChild
+      else if GroupChild = nil then
+        FEditorState.OpenGroupChild := nil;
+      if (GroupChild <> nil) and OpenGroupSelectionEditable(FEditorState) then
+      begin
+        FGroupDrag.BeginMove(FDocument,
+          FEditorState.GetOpenGroupChildren, Point(X, Y));
+        MouseCapture := True;
+        Cursor := crSizeAll;
+      end;
+      Invalidate;
+      Exit;
+    end;
     if (FEditorState <> nil) and
       (FEditorState.CurrentTool = vetText) then
     begin
@@ -1271,7 +1380,32 @@ end;
 
 procedure TVectArtCanvasControl.MouseMove(Shift: TShiftState;
   X, Y: Integer);
+var
+  Angle: Single;
+  GroupChildBounds: TRectF;
+  GroupChildRect: TRect;
+  Handle: TVectArtSelectionHandle;
+  SelectionGeometry: TVectArtSelectionGeometry;
 begin
+  if FGroupDrag.UpdateMoveOrResize(X, Y, FZoom) then
+  begin
+    if FGroupDrag.Mode = slgdmMove then
+      Cursor := crSizeAll
+    else
+      Cursor := SelectionHandleCursor(FGroupDrag.ResizeHandle);
+    Invalidate;
+    Exit;
+  end;
+  if FGroupDrag.Mode = slgdmRotate then
+  begin
+    Angle := RadToDeg(ArcTan2(
+      Y - ToScreenY(FGroupDrag.RotationCenter.Y),
+      X - ToScreenX(FGroupDrag.RotationCenter.X)));
+    FGroupDrag.UpdateRotation(Angle);
+    Cursor := RotationHandleCursor;
+    Invalidate;
+    Exit;
+  end;
   if FTextDragActive then
   begin
     FTextDragCurrent := Point(X, Y);
@@ -1293,6 +1427,27 @@ begin
     Exit;
   end;
   CalculateCanvasBounds;
+  if (FEditorState <> nil) and (FEditorState.OpenGroupChild <> nil) and
+    OpenGroupSelectionEditable(FEditorState) and
+    TryGetOpenGroupSelectionBounds(FEditorState, GroupChildBounds) then
+  begin
+    GroupChildRect := Rect(ToScreenX(GroupChildBounds.Left),
+      ToScreenY(GroupChildBounds.Top), ToScreenX(GroupChildBounds.Right),
+      ToScreenY(GroupChildBounds.Bottom));
+    SelectionGeometry := BuildSelectionGeometry(GroupChildRect,
+      SelectionFrameOffset(0, FZoom));
+    if HitTestRotationHandle(Point(X, Y), SelectionGeometry) then
+    begin
+      Cursor := RotationHandleCursor;
+      Exit;
+    end;
+    Handle := HitTestSelectionHandle(Point(X, Y), SelectionGeometry);
+    if Handle <> vshNone then
+    begin
+      Cursor := SelectionHandleCursor(Handle);
+      Exit;
+    end;
+  end;
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   if FShapeCreation.MouseMove(Shift, X, Y) then
@@ -1337,6 +1492,14 @@ var
   Right: Single;
   Top: Single;
 begin
+  if (Button = mbLeft) and FGroupDrag.Active then
+  begin
+    MouseCapture := False;
+    FGroupDrag.Finish(EditHistory);
+    Cursor := crDefault;
+    Invalidate;
+    Exit;
+  end;
   if (Button = mbLeft) and FTextDragActive then
   begin
     FTextDragActive := False;
@@ -1591,6 +1754,55 @@ begin
         DocumentBitmap := nil;
       end;
 
+      if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
+        TryGetScreenLayoutLayerBounds(FEditorState.OpenGroup,
+          RotatedBounds) then
+      begin
+        LayerRect := Rect(ToScreenX(RotatedBounds.Left),
+          ToScreenY(RotatedBounds.Top), ToScreenX(RotatedBounds.Right),
+          ToScreenY(RotatedBounds.Bottom));
+        InflateRect(LayerRect, 5, 5);
+        Direct2DCanvas.Brush.Style := bsClear;
+        Direct2DCanvas.Pen.Color := COLOR_OPEN_GROUP;
+        Direct2DCanvas.Pen.Style := psDash;
+        Direct2DCanvas.Rectangle(LayerRect);
+        Direct2DCanvas.Pen.Style := psSolid;
+      end;
+      if (FEditorState <> nil) and
+        (FEditorState.OpenGroupChild <> nil) and
+        TryGetOpenGroupSelectionBounds(FEditorState, RotatedBounds) then
+      begin
+        LayerRect := Rect(ToScreenX(RotatedBounds.Left),
+          ToScreenY(RotatedBounds.Top), ToScreenX(RotatedBounds.Right),
+          ToScreenY(RotatedBounds.Bottom));
+        SelectionGeometry := BuildSelectionGeometry(LayerRect,
+          SelectionFrameOffset(0, FZoom));
+        Direct2DCanvas.Brush.Style := bsSolid;
+        Direct2DCanvas.Pen.Color := COLOR_SELECTION;
+        Direct2DCanvas.Polyline(SelectionGeometry.FramePoints);
+        if OpenGroupSelectionEditable(FEditorState) then
+        begin
+          for Handle := vshTopLeft to vshLeft do
+          begin
+            Direct2DCanvas.Brush.Color := clWhite;
+            Direct2DCanvas.FillRect(SelectionGeometry.Handles[Handle]);
+            Direct2DCanvas.Brush.Color := COLOR_SELECTION;
+            Direct2DCanvas.FrameRect(SelectionGeometry.Handles[Handle]);
+          end;
+          Direct2DCanvas.MoveTo(SelectionGeometry.RotationStem[0].X,
+            SelectionGeometry.RotationStem[0].Y);
+          Direct2DCanvas.LineTo(SelectionGeometry.RotationStem[1].X,
+            SelectionGeometry.RotationStem[1].Y);
+          Direct2DCanvas.Brush.Color := clWhite;
+          Direct2DCanvas.Pen.Color := COLOR_ROTATION_MARK;
+          Direct2DCanvas.Ellipse(
+            SelectionGeometry.PrimaryRotationHandle.Left,
+            SelectionGeometry.PrimaryRotationHandle.Top,
+            SelectionGeometry.PrimaryRotationHandle.Right,
+            SelectionGeometry.PrimaryRotationHandle.Bottom);
+        end;
+      end;
+
       if FDocument <> nil then
         for I := 1 to FDocument.LayerCount - 1 do
         begin
@@ -1789,7 +2001,8 @@ begin
               Direct2DCanvas.FrameRect(SelectionGeometry.Handles[Handle]);
             end;
           if (FDocument.SelectionCount = 1) and
-            ((FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
+            ((FDocument[FDocument.SelectedIndex] is TScreenLayoutGroupLayer) or
+             (FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
              (FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
              (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) or
              (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) or
@@ -2115,6 +2328,49 @@ begin
   end;
 
   DrawPremultipliedBitmap(Canvas, FCanvasBounds, FRenderedDocument);
+  if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
+    TryGetScreenLayoutLayerBounds(FEditorState.OpenGroup,
+      RotatedBounds) then
+  begin
+    LayerRect := Rect(ToScreenX(RotatedBounds.Left),
+      ToScreenY(RotatedBounds.Top), ToScreenX(RotatedBounds.Right),
+      ToScreenY(RotatedBounds.Bottom));
+    InflateRect(LayerRect, 5, 5);
+    Canvas.Brush.Style := bsClear;
+    Canvas.Pen.Color := COLOR_OPEN_GROUP;
+    Canvas.Pen.Style := psDash;
+    Canvas.Rectangle(LayerRect);
+    Canvas.Pen.Style := psSolid;
+  end;
+  if (FEditorState <> nil) and (FEditorState.OpenGroupChild <> nil) and
+    TryGetOpenGroupSelectionBounds(FEditorState, RotatedBounds) then
+  begin
+    LayerRect := Rect(ToScreenX(RotatedBounds.Left),
+      ToScreenY(RotatedBounds.Top), ToScreenX(RotatedBounds.Right),
+      ToScreenY(RotatedBounds.Bottom));
+    SelectionGeometry := BuildSelectionGeometry(LayerRect,
+      SelectionFrameOffset(0, FZoom));
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Pen.Color := COLOR_SELECTION;
+    Canvas.Polyline(SelectionGeometry.FramePoints);
+    if OpenGroupSelectionEditable(FEditorState) then
+    begin
+      for Handle := vshTopLeft to vshLeft do
+      begin
+        Canvas.Brush.Color := clWhite;
+        Canvas.FillRect(SelectionGeometry.Handles[Handle]);
+        Canvas.Brush.Color := COLOR_SELECTION;
+        Canvas.FrameRect(SelectionGeometry.Handles[Handle]);
+      end;
+      Canvas.MoveTo(SelectionGeometry.RotationStem[0].X,
+        SelectionGeometry.RotationStem[0].Y);
+      Canvas.LineTo(SelectionGeometry.RotationStem[1].X,
+        SelectionGeometry.RotationStem[1].Y);
+      Canvas.Brush.Color := clWhite;
+      Canvas.Pen.Color := COLOR_ROTATION_MARK;
+      Canvas.Ellipse(SelectionGeometry.PrimaryRotationHandle);
+    end;
+  end;
 
   if FDocument <> nil then
     for I := 1 to FDocument.LayerCount - 1 do
@@ -2308,7 +2564,8 @@ begin
           Canvas.FrameRect(SelectionGeometry.Handles[Handle]);
         end;
       if (FDocument.SelectionCount = 1) and
-        ((FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
+        ((FDocument[FDocument.SelectedIndex] is TScreenLayoutGroupLayer) or
+         (FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
          (FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
          (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) or
          (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) or

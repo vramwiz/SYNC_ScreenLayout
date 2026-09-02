@@ -83,12 +83,15 @@
         <DCCReference Include="Source\Core\Commands\ScreenLayoutTextCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutLayerStructureCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutLayerBatchCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\ScreenLayoutGroupTransformCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\ScreenLayoutGroupChildCommands.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutEditHistory.pas"/>
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJson.pas"/>
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJsonReader.pas"/>
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJsonWriter.pas"/>
         <DCCReference Include="Source\Editor\ScreenLayoutCanvas.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutCanvasInteraction.pas"/>
+        <DCCReference Include="Source\Editor\Interaction\ScreenLayoutGroupInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutInteractionGeometry.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutPathInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutShapeInteraction.pas"/>

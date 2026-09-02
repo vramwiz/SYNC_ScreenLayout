@@ -8,6 +8,10 @@ uses
 
 function TryGetScreenLayoutLayerBounds(Layer: TVectArtLayer;
   out Bounds: TRectF): Boolean;
+procedure RotateScreenLayoutLayer(Layer: TVectArtLayer;
+  const Center: TPointF; Degrees: Single);
+procedure ScaleScreenLayoutLayer(Layer: TVectArtLayer;
+  const SourceBounds, TargetBounds: TRectF);
 procedure TranslateScreenLayoutLayer(Layer: TVectArtLayer; DX, DY: Single);
 
 implementation
@@ -29,6 +33,16 @@ begin
     Result.Right := Max(Result.Right, Points[I].X);
     Result.Bottom := Max(Result.Bottom, Points[I].Y);
   end;
+end;
+
+function ScaleLayerPoint(const Point: TPointF;
+  const SourceBounds, TargetBounds: TRectF): TPointF;
+begin
+  Result := TPointF.Create(
+    TargetBounds.Left + (Point.X - SourceBounds.Left) /
+      Max(SourceBounds.Width, 0.0001) * TargetBounds.Width,
+    TargetBounds.Top + (Point.Y - SourceBounds.Top) /
+      Max(SourceBounds.Height, 0.0001) * TargetBounds.Height);
 end;
 
 function TryGetScreenLayoutLayerBounds(Layer: TVectArtLayer;
@@ -93,6 +107,167 @@ begin
   else
     Exit;
   Result := True;
+end;
+
+procedure RotateScreenLayoutLayer(Layer: TVectArtLayer;
+  const Center: TPointF; Degrees: Single);
+var
+  Bounds: TRectF;
+  BoundsCenter: TPointF;
+  Contours: TArray<TScreenLayoutContour>;
+  GroupLayer: TScreenLayoutGroupLayer;
+  I: Integer;
+  ImageLayer: TVectArtImageLayer;
+  NewCenter: TPointF;
+  Points: TVectArtImagePoints;
+  Vertices: TArray<TScreenLayoutVertex>;
+begin
+  if Layer is TScreenLayoutGroupLayer then
+  begin
+    GroupLayer := TScreenLayoutGroupLayer(Layer);
+    for I := 0 to GroupLayer.ChildCount - 1 do
+      RotateScreenLayoutLayer(GroupLayer[I], Center, Degrees);
+  end
+  else if Layer is TVectArtImageLayer then
+  begin
+    ImageLayer := TVectArtImageLayer(Layer);
+    Points := ImageLayer.Points;
+    for I := 0 to High(Points) do
+      Points[I] := RotatePointAround(Points[I], Center, Degrees);
+    ImageLayer.Points := Points;
+  end
+  else if Layer is TVectArtPathLayer then
+  begin
+    Vertices := RotateScreenLayoutPathVertices(
+      TVectArtPathLayer(Layer).Vertices, Center, Degrees);
+    TVectArtPathLayer(Layer).Vertices := Vertices;
+  end
+  else if Layer is TScreenLayoutShapeLayer then
+  begin
+    Contours := RotateScreenLayoutShapeContours(
+      TScreenLayoutShapeLayer(Layer).Contours, Center, Degrees);
+    TScreenLayoutShapeLayer(Layer).Contours := Contours;
+  end
+  else if Layer is TScreenLayoutRectangleLineLayer then
+  begin
+    Bounds := TScreenLayoutRectangleLineLayer(Layer).Bounds;
+    BoundsCenter := TPointF.Create(Bounds.CenterPoint.X, Bounds.CenterPoint.Y);
+    NewCenter := RotatePointAround(BoundsCenter, Center, Degrees);
+    Bounds.Offset(NewCenter.X - BoundsCenter.X, NewCenter.Y - BoundsCenter.Y);
+    TScreenLayoutRectangleLineLayer(Layer).Bounds := Bounds;
+    TScreenLayoutRectangleLineLayer(Layer).RotationDegrees :=
+      TScreenLayoutRectangleLineLayer(Layer).RotationDegrees + Degrees;
+  end
+  else if Layer is TScreenLayoutArcLayer then
+  begin
+    Bounds := TScreenLayoutArcLayer(Layer).Bounds;
+    BoundsCenter := TPointF.Create(Bounds.CenterPoint.X, Bounds.CenterPoint.Y);
+    NewCenter := RotatePointAround(BoundsCenter, Center, Degrees);
+    Bounds.Offset(NewCenter.X - BoundsCenter.X, NewCenter.Y - BoundsCenter.Y);
+    TScreenLayoutArcLayer(Layer).Bounds := Bounds;
+    TScreenLayoutArcLayer(Layer).RotationDegrees :=
+      TScreenLayoutArcLayer(Layer).RotationDegrees + Degrees;
+  end
+  else if Layer is TVectArtRectangleLayer then
+  begin
+    Bounds := TVectArtRectangleLayer(Layer).Bounds;
+    BoundsCenter := TPointF.Create(Bounds.CenterPoint.X, Bounds.CenterPoint.Y);
+    NewCenter := RotatePointAround(BoundsCenter, Center, Degrees);
+    Bounds.Offset(NewCenter.X - BoundsCenter.X, NewCenter.Y - BoundsCenter.Y);
+    TVectArtRectangleLayer(Layer).Bounds := Bounds;
+    TVectArtRectangleLayer(Layer).RotationDegrees :=
+      TVectArtRectangleLayer(Layer).RotationDegrees + Degrees;
+  end;
+end;
+
+procedure ScaleScreenLayoutLayer(Layer: TVectArtLayer;
+  const SourceBounds, TargetBounds: TRectF);
+var
+  Bounds: TRectF;
+  Contours: TArray<TScreenLayoutContour>;
+  GroupLayer: TScreenLayoutGroupLayer;
+  I: Integer;
+  ImageLayer: TVectArtImageLayer;
+  Points: TVectArtImagePoints;
+  Radii: TScreenLayoutCornerRadii;
+  ScaleValue: Single;
+  Vertices: TArray<TScreenLayoutVertex>;
+begin
+  if (SourceBounds.Width <= 0.0001) or
+    (SourceBounds.Height <= 0.0001) then
+    Exit;
+  if Layer is TScreenLayoutGroupLayer then
+  begin
+    GroupLayer := TScreenLayoutGroupLayer(Layer);
+    for I := 0 to GroupLayer.ChildCount - 1 do
+      ScaleScreenLayoutLayer(GroupLayer[I], SourceBounds, TargetBounds);
+  end
+  else if Layer is TVectArtImageLayer then
+  begin
+    ImageLayer := TVectArtImageLayer(Layer);
+    Points := ImageLayer.Points;
+    for I := 0 to High(Points) do
+      Points[I] := ScaleLayerPoint(Points[I], SourceBounds, TargetBounds);
+    ImageLayer.Points := Points;
+  end
+  else if Layer is TVectArtPathLayer then
+  begin
+    Vertices := ScaleScreenLayoutPathVertices(
+      TVectArtPathLayer(Layer).Vertices, SourceBounds, TargetBounds);
+    TVectArtPathLayer(Layer).Vertices := Vertices;
+  end
+  else if Layer is TScreenLayoutShapeLayer then
+  begin
+    Contours := ScaleScreenLayoutShapeContours(
+      TScreenLayoutShapeLayer(Layer).Contours, SourceBounds, TargetBounds);
+    TScreenLayoutShapeLayer(Layer).Contours := Contours;
+  end
+  else if Layer is TScreenLayoutRectangleLineLayer then
+  begin
+    Bounds := TScreenLayoutRectangleLineLayer(Layer).Bounds;
+    Bounds := TRectF.Create(ScaleLayerPoint(Bounds.TopLeft, SourceBounds,
+      TargetBounds), ScaleLayerPoint(Bounds.BottomRight, SourceBounds,
+      TargetBounds));
+    TScreenLayoutRectangleLineLayer(Layer).Bounds := Bounds;
+    if Layer is TScreenLayoutRoundedRectangleLineLayer then
+    begin
+      ScaleValue := Min(Abs(TargetBounds.Width / SourceBounds.Width),
+        Abs(TargetBounds.Height / SourceBounds.Height));
+      Radii := TScreenLayoutRoundedRectangleLineLayer(Layer).CornerRadii;
+      Radii.TopLeft := Radii.TopLeft * ScaleValue;
+      Radii.TopRight := Radii.TopRight * ScaleValue;
+      Radii.BottomRight := Radii.BottomRight * ScaleValue;
+      Radii.BottomLeft := Radii.BottomLeft * ScaleValue;
+      TScreenLayoutRoundedRectangleLineLayer(Layer).CornerRadii := Radii;
+    end;
+  end
+  else if Layer is TScreenLayoutArcLayer then
+  begin
+    Bounds := TScreenLayoutArcLayer(Layer).Bounds;
+    Bounds := TRectF.Create(ScaleLayerPoint(Bounds.TopLeft, SourceBounds,
+      TargetBounds), ScaleLayerPoint(Bounds.BottomRight, SourceBounds,
+      TargetBounds));
+    TScreenLayoutArcLayer(Layer).Bounds := Bounds;
+  end
+  else if Layer is TVectArtRectangleLayer then
+  begin
+    Bounds := TVectArtRectangleLayer(Layer).Bounds;
+    Bounds := TRectF.Create(ScaleLayerPoint(Bounds.TopLeft, SourceBounds,
+      TargetBounds), ScaleLayerPoint(Bounds.BottomRight, SourceBounds,
+      TargetBounds));
+    TVectArtRectangleLayer(Layer).Bounds := Bounds;
+    if Layer is TScreenLayoutRoundedRectangleLayer then
+    begin
+      ScaleValue := Min(Abs(TargetBounds.Width / SourceBounds.Width),
+        Abs(TargetBounds.Height / SourceBounds.Height));
+      Radii := TScreenLayoutRoundedRectangleLayer(Layer).CornerRadii;
+      Radii.TopLeft := Radii.TopLeft * ScaleValue;
+      Radii.TopRight := Radii.TopRight * ScaleValue;
+      Radii.BottomRight := Radii.BottomRight * ScaleValue;
+      Radii.BottomLeft := Radii.BottomLeft * ScaleValue;
+      TScreenLayoutRoundedRectangleLayer(Layer).CornerRadii := Radii;
+    end;
+  end;
 end;
 
 procedure TranslateScreenLayoutLayer(Layer: TVectArtLayer; DX, DY: Single);

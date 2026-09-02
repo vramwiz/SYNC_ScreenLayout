@@ -46,6 +46,7 @@ type
     FDragHandle: TVectArtSelectionHandle;
     FDragLayerIndex: Integer;
     FDragIsImage: Boolean;
+    FDragIsGroup: Boolean;
     FDragIsPath: Boolean;
     FDragIsShape: Boolean; // 単一Shapeの輪郭を直接変形している状態。
     FDragMode: TVectArtCanvasDragMode;
@@ -61,6 +62,9 @@ type
     FMoveShapeLayerIndices: TArray<Integer>; // 複数選択中のShapeレイヤー番号。
     FMoveStartShapeContours: TArray<TArray<TScreenLayoutContour>>; // ドラッグ開始時の輪郭群。
     FDragStartBounds: TRectF;
+    FDragCurrentGroupBounds: TRectF;
+    FGroupRotationCenter: TPointF;
+    FGroupRotationDegrees: Single;
     FArcStartAngle: Single;
     FArcStartSweep: Single;
     FDragStartImagePoints: TVectArtImagePoints;
@@ -170,6 +174,7 @@ implementation
 uses
   System.Math, System.Skia, ScreenLayoutEllipseGeometry,
   ScreenLayoutGeometry, ScreenLayoutGroupCommands,
+  ScreenLayoutGroupTransformCommands,
   ScreenLayoutInteractionGeometry, ScreenLayoutLayerGeometry,
   ScreenLayoutShapeEditCommands, ScreenLayoutPathOperations,
   ScreenLayoutShapeOperations,
@@ -473,7 +478,8 @@ begin
       Geometry := BuildSelectionGeometry(SelectionRect,
         SelectedLayersFrameOffset);
     if not FAxisAlignedSelection and (FDocument.SelectionCount = 1) and
-      ((FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
+      ((FDocument[FDocument.SelectedIndex] is TScreenLayoutGroupLayer) or
+       (FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
        (FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
        (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) or
        (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) or
@@ -719,6 +725,15 @@ var
   StartBounds: TRectF;
 begin
   NewSelectionBounds := ResizedBounds(X, Y);
+  if FDragIsGroup and (FDragLayerIndex > 0) and
+    (FDocument[FDragLayerIndex] is TScreenLayoutGroupLayer) then
+  begin
+    ScaleScreenLayoutLayer(FDocument[FDragLayerIndex],
+      FDragCurrentGroupBounds, NewSelectionBounds);
+    FDragCurrentGroupBounds := NewSelectionBounds;
+    FDocument.Changed;
+    Exit;
+  end;
   ScaleX := NewSelectionBounds.Width / FDragStartBounds.Width;
   ScaleY := NewSelectionBounds.Height / FDragStartBounds.Height;
   for I := 0 to High(FMoveLayerIndices) do
@@ -994,6 +1009,7 @@ begin
   FPathInteraction.EndDrag;
   FShapeInteraction.EndDrag;
   FDragIsImage := False;
+  FDragIsGroup := False;
   FDragIsPath := False;
   FDragIsShape := False;
   FMoveOccurred := False;
@@ -1009,6 +1025,7 @@ begin
   SetLength(FMoveGroupLayerIndices, 0);
   FMoveGroupDX := 0;
   FMoveGroupDY := 0;
+  FGroupRotationDegrees := 0;
   SetLength(FDragStartPathVertices, 0);
   SetLength(FDragStartShapeContours, 0);
 end;
@@ -1658,7 +1675,8 @@ begin
         SelectedLayersFrameOffset);
     if not FAxisAlignedSelection and (FDocument.SelectionCount = 1) and
       HitTestRotationHandle(Point(X, Y), Geometry) and
-      ((FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
+      ((FDocument[FDocument.SelectedIndex] is TScreenLayoutGroupLayer) or
+       (FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
        (FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
        (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) or
        (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) or
@@ -1667,11 +1685,24 @@ begin
     begin
       FDragMode := vcdmRotate;
       FDragLayerIndex := FDocument.SelectedIndex;
+      FDragIsGroup := FDocument[FDragLayerIndex] is TScreenLayoutGroupLayer;
       FDragIsImage := FDocument[FDragLayerIndex] is TVectArtImageLayer;
       FDragIsPath := FDocument[FDragLayerIndex] is TVectArtPathLayer;
       FDragIsShape := FDocument[FDragLayerIndex] is
         TScreenLayoutShapeLayer;
-      if FDragIsImage then
+      if FDragIsGroup then
+      begin
+        if not TryGetScreenLayoutLayerBounds(
+          FDocument[FDragLayerIndex], FDragStartBounds) then
+          Exit(False);
+        FDragCurrentGroupBounds := FDragStartBounds;
+        FGroupRotationCenter := FDragStartBounds.CenterPoint;
+        FGroupRotationDegrees := 0;
+        FRotationStartValue := 0;
+        CenterX := ToScreenX(FGroupRotationCenter.X);
+        CenterY := ToScreenY(FGroupRotationCenter.Y);
+      end
+      else if FDragIsImage then
       begin
         ImageLayer := TVectArtImageLayer(FDocument[FDragLayerIndex]);
         FDragStartImagePoints := ImageLayer.Points;
@@ -1743,13 +1774,22 @@ begin
       begin
         FDragMode := vcdmResize;
         FDragLayerIndex := FDocument.SelectedIndex;
+        FDragIsGroup := (FDocument.SelectionCount = 1) and
+          (FDocument[FDragLayerIndex] is TScreenLayoutGroupLayer);
         FDragIsImage := (FDocument.SelectionCount = 1) and
           (FDocument[FDragLayerIndex] is TVectArtImageLayer);
         FDragIsPath := (FDocument.SelectionCount = 1) and
           (FDocument[FDragLayerIndex] is TVectArtPathLayer);
         FDragIsShape := (FDocument.SelectionCount = 1) and
           (FDocument[FDragLayerIndex] is TScreenLayoutShapeLayer);
-        if FDragIsImage then
+        if FDragIsGroup then
+        begin
+          if not TryGetScreenLayoutLayerBounds(
+            FDocument[FDragLayerIndex], FDragStartBounds) then
+            Exit(False);
+          FDragCurrentGroupBounds := FDragStartBounds;
+        end
+        else if FDragIsImage then
           FDragStartImagePoints := TVectArtImageLayer(
             FDocument[FDragLayerIndex]).Points
         else if FDragIsPath then
@@ -1759,7 +1799,7 @@ begin
           FDragStartShapeContours := CloneScreenLayoutShapeContours(
             TScreenLayoutShapeLayer(
               FDocument[FDragLayerIndex]).Contours)
-        else
+        else if not FDragIsGroup then
           CaptureMoveSelection;
         if (FDocument.SelectionCount = 1) and
           (FDocument[FDragLayerIndex] is TScreenLayoutRectangleLineLayer) then
@@ -1773,7 +1813,7 @@ begin
           (FDocument[FDragLayerIndex] is TVectArtRectangleLayer) then
           FDragStartBounds := TVectArtRectangleLayer(
             FDocument[FDragLayerIndex]).Bounds
-        else
+        else if not FDragIsGroup then
           FDragStartBounds := SelectedLayersLogicalRect;
       end;
     end;
@@ -1810,6 +1850,8 @@ begin
         Exit(False);
       end;
       FDragMode := vcdmMove;
+      FDragIsGroup := (FDocument.SelectionCount = 1) and
+        (FDocument[FDragLayerIndex] is TScreenLayoutGroupLayer);
       FDragIsImage := (FDocument.SelectionCount = 1) and
         (FDocument[FDragLayerIndex] is TVectArtImageLayer);
       FDragIsPath := (FDocument.SelectionCount = 1) and
@@ -1841,10 +1883,12 @@ var
   CenterX: Single;
   CenterY: Single;
   CurrentMouseAngle: Single;
+  DesiredRotation: Single;
   DX: Single;
   DY: Single;
   I: Integer;
   ImagePointIndex: Integer;
+  IncrementRotation: Single;
   NewBounds: TRectF;
   NewImagePoints: TVectArtImagePoints;
   NewPathVertices: TArray<TScreenLayoutVertex>;
@@ -2089,6 +2133,24 @@ begin
   begin
     if FDragLayerIndex <= 0 then
       Exit(True);
+    if FDragIsGroup and
+      (FDocument[FDragLayerIndex] is TScreenLayoutGroupLayer) then
+    begin
+      CenterX := ToScreenX(FGroupRotationCenter.X);
+      CenterY := ToScreenY(FGroupRotationCenter.Y);
+      CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
+      DesiredRotation := CurrentMouseAngle - FRotationStartMouseAngle;
+      while DesiredRotation > 180 do
+        DesiredRotation := DesiredRotation - 360;
+      while DesiredRotation < -180 do
+        DesiredRotation := DesiredRotation + 360;
+      IncrementRotation := DesiredRotation - FGroupRotationDegrees;
+      RotateScreenLayoutLayer(FDocument[FDragLayerIndex],
+        FGroupRotationCenter, IncrementRotation);
+      FGroupRotationDegrees := DesiredRotation;
+      FDocument.Changed;
+      Exit(True);
+    end;
     if FDragIsImage and
       (FDocument[FDragLayerIndex] is TVectArtImageLayer) then
     begin
@@ -2191,7 +2253,22 @@ begin
     else if FDragMode in [vcdmShapeVertex, vcdmShapeBezierHandle] then
       FShapeInteraction.CommitDrag
     else if FDragMode in [vcdmMove, vcdmResize] then
-      if FDragIsImage then
+      if FDragIsGroup and (FDragMode = vcdmResize) then
+      begin
+        if (FEditHistory <> nil) and
+          (not SameValue(FDragStartBounds.Left,
+              FDragCurrentGroupBounds.Left) or
+           not SameValue(FDragStartBounds.Top,
+              FDragCurrentGroupBounds.Top) or
+           not SameValue(FDragStartBounds.Right,
+              FDragCurrentGroupBounds.Right) or
+           not SameValue(FDragStartBounds.Bottom,
+              FDragCurrentGroupBounds.Bottom)) then
+          FEditHistory.AddApplied(TScreenLayoutScaleLayerCommand.Create(
+            FDocument, FDocument[FDragLayerIndex], FDragStartBounds,
+            FDragCurrentGroupBounds));
+      end
+      else if FDragIsImage then
         CommitImagePointsCommand
       else if FDragIsPath then
         CommitPathVerticesCommand
@@ -2200,7 +2277,15 @@ begin
       else
         CommitBoundsCommand;
     if FDragMode = vcdmRotate then
-      if FDragIsImage then
+      if FDragIsGroup then
+      begin
+        if (FEditHistory <> nil) and
+          not SameValue(FGroupRotationDegrees, 0.0) then
+          FEditHistory.AddApplied(TScreenLayoutRotateLayerCommand.Create(
+            FDocument, FDocument[FDragLayerIndex], FGroupRotationCenter,
+            FGroupRotationDegrees));
+      end
+      else if FDragIsImage then
         CommitImagePointsCommand
       else if FDragIsPath then
         CommitPathVerticesCommand
