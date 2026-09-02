@@ -76,6 +76,8 @@ type
       Shift: TShiftState);
     procedure MoveTextCaretVertical(Direction: Integer;
       ExtendSelection: Boolean);
+    procedure SetTextCaretFromClientPoint(X, Y: Integer;
+      ExtendSelection: Boolean);
     procedure UpdateTextEditorBackground;
     procedure UpdateTextEditorBounds;
     procedure UpdateTextLayerFromBuffer;
@@ -290,7 +292,7 @@ begin
   FTextEditor.Font.Size := Round(Layer.FontSize);
   FTextEditor.Font.Color := Layer.FillColor;
   FTextEditing := True;
-  UpdateTextLayerFromBuffer;
+  UpdateTextEditorBounds;
   UpdateTextEditorBackground;
   FTextEditor.Visible := True;
   FTextEditor.BringToFront;
@@ -298,12 +300,19 @@ begin
 end;
 
 procedure TVectArtCanvasControl.DblClick;
+var
+  ClientPoint: TPoint;
 begin
   if (FDocument <> nil) and (FDocument.SelectedIndex > 0) and
     (FDocument.SelectedIndex < FDocument.LayerCount) and
     (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextLayer) then
   begin
-    BeginExistingTextEdit(FDocument.SelectedIndex);
+    GetCursorPos(ClientPoint);
+    ClientPoint := ScreenToClient(ClientPoint);
+    if not FTextEditing or
+      (FTextLayerIndex <> FDocument.SelectedIndex) then
+      BeginExistingTextEdit(FDocument.SelectedIndex);
+    SetTextCaretFromClientPoint(ClientPoint.X, ClientPoint.Y, False);
     Exit;
   end;
   inherited DblClick;
@@ -602,6 +611,50 @@ begin
   Invalidate;
 end;
 
+procedure TVectArtCanvasControl.SetTextCaretFromClientPoint(X, Y: Integer;
+  ExtendSelection: Boolean);
+var
+  Center: TPointF;
+  Layout: TScreenLayoutTextLayout;
+  Layer: TScreenLayoutTextLayer;
+  LocalPoint: TPointF;
+  LogicalPoint: TPointF;
+  ScaleX: Single;
+  ScaleY: Single;
+begin
+  if not FTextEditing or (FDocument = nil) or
+    (FTextLayerIndex <= 0) or (FTextLayerIndex >= FDocument.LayerCount) or
+    not (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
+    Exit;
+  Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
+  LogicalPoint := TPointF.Create(
+    ScreenToLogicalX(X, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(Y, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height));
+  Center := TPointF.Create((Layer.Bounds.Left + Layer.Bounds.Right) * 0.5,
+    (Layer.Bounds.Top + Layer.Bounds.Bottom) * 0.5);
+  LocalPoint := RotatePointAround(LogicalPoint, Center,
+    -Layer.RotationDegrees);
+  Layout := BuildScreenLayoutTextLayout(FTextBuffer, Layer.FontFamily,
+    Layer.FontSize, Layer.WrapWidth);
+  ScaleX := Layer.Bounds.Width / Max(Layout.Width, 1.0);
+  ScaleY := Layer.Bounds.Height / Max(Layout.Height, Layer.FontSize);
+  FTextCaretIndex := ScreenLayoutTextCaretIndexAtPoint(FTextBuffer,
+    Layer.FontFamily, Layer.FontSize, Layer.WrapWidth,
+    (LocalPoint.X - Layer.Bounds.Left) / Max(ScaleX, 0.0001),
+    (LocalPoint.Y - Layer.Bounds.Top) / Max(ScaleY, 0.0001));
+  if not ExtendSelection then
+    FTextSelectionAnchor := FTextCaretIndex;
+  FTextPreferredCaretX := -1.0;
+  UpdateTextEditorBounds;
+  UpdateTextEditorBackground;
+  FTextEditor.Visible := True;
+  FTextEditor.BringToFront;
+  FTextEditor.SetFocus;
+  Invalidate;
+end;
+
 procedure TVectArtCanvasControl.TextEditorKeyDown(Sender: TObject;
   var Key: Word; Shift: TShiftState);
 var
@@ -870,9 +923,13 @@ procedure TVectArtCanvasControl.UpdateTextEditorBounds;
 var
   CaretLayout: TScreenLayoutTextLayout;
   CaretPoint: TPointF;
+  Center: TPointF;
+  FullLayout: TScreenLayoutTextLayout;
   LastLine: Integer;
   Layer: TScreenLayoutTextLayer;
   Prefix: string;
+  ScaleX: Single;
+  ScaleY: Single;
   ScreenPoint: TPoint;
 begin
   if not FTextEditing or (FDocument = nil) or
@@ -880,19 +937,27 @@ begin
     not (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
     Exit;
   Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
+  FullLayout := BuildScreenLayoutTextLayout(FTextBuffer, Layer.FontFamily,
+    Layer.FontSize, Layer.WrapWidth);
+  ScaleX := Layer.Bounds.Width / Max(FullLayout.Width, 1.0);
+  ScaleY := Layer.Bounds.Height / Max(FullLayout.Height, Layer.FontSize);
   FTextEditor.Font.Name := Layer.FontFamily;
-  FTextEditor.Font.Height := -Max(Round(Layer.FontSize * FZoom), 1);
+  FTextEditor.Font.Height := -Max(Round(Layer.FontSize * ScaleY * FZoom), 1);
   FTextEditor.Font.Color := Layer.FillColor;
   Prefix := Copy(FTextBuffer, 1, FTextCaretIndex);
   CaretLayout := BuildScreenLayoutTextLayout(Prefix, Layer.FontFamily,
     Layer.FontSize, Layer.WrapWidth);
   LastLine := Max(High(CaretLayout.Lines), 0);
-  CaretPoint := TPointF.Create(FTextGuideBounds.Left,
-    FTextGuideBounds.Top + LastLine * CaretLayout.LineHeight);
+  CaretPoint := TPointF.Create(Layer.Bounds.Left,
+    Layer.Bounds.Top + LastLine * CaretLayout.LineHeight * ScaleY);
   if Length(CaretLayout.Lines) > 0 then
     CaretPoint.X := CaretPoint.X + CreateScreenLayoutTextFont(
       Layer.FontFamily, Layer.FontSize).MeasureText(
-      CaretLayout.Lines[LastLine]);
+      CaretLayout.Lines[LastLine]) * ScaleX;
+  Center := TPointF.Create((Layer.Bounds.Left + Layer.Bounds.Right) * 0.5,
+    (Layer.Bounds.Top + Layer.Bounds.Bottom) * 0.5);
+  CaretPoint := RotatePointAround(CaretPoint, Center,
+    Layer.RotationDegrees);
   ScreenPoint := Point(ToScreenX(CaretPoint.X), ToScreenY(CaretPoint.Y));
   ScreenPoint.X := EnsureRange(ScreenPoint.X, FCanvasBounds.Left,
     Max(FCanvasBounds.Right - TEXT_INPUT_EDIT_WIDTH, FCanvasBounds.Left));
@@ -900,7 +965,7 @@ begin
     Max(FCanvasBounds.Bottom - 1, FCanvasBounds.Top));
   FTextEditor.SetBounds(ScreenPoint.X, ScreenPoint.Y,
     TEXT_INPUT_EDIT_WIDTH,
-    Max(Round(CaretLayout.LineHeight * FZoom), 1));
+    Max(Round(CaretLayout.LineHeight * ScaleY * FZoom), 1));
   FTextCompositionLabel.Font.Name := Layer.FontFamily;
   FTextCompositionLabel.Font.Height := FTextEditor.Font.Height;
   FTextCompositionLabel.Font.Color := Layer.FillColor;
@@ -1119,6 +1184,24 @@ begin
   begin
     if FTextEditing then
     begin
+      CalculateCanvasBounds;
+      FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+      TextLayerIndex := FInteraction.LayerAt(X, Y);
+      if TextLayerIndex = FTextLayerIndex then
+      begin
+        SetTextCaretFromClientPoint(X, Y, ssShift in Shift);
+        Exit;
+      end;
+      if (FEditorState <> nil) and
+        (FEditorState.CurrentTool = vetText) and
+        (TextLayerIndex > 0) and
+        (FDocument[TextLayerIndex] is TScreenLayoutTextLayer) then
+      begin
+        FinishTextEdit(False, False);
+        BeginExistingTextEdit(TextLayerIndex);
+        SetTextCaretFromClientPoint(X, Y, ssShift in Shift);
+        Exit;
+      end;
       FinishTextEdit(False);
       Exit;
     end;
@@ -1136,6 +1219,7 @@ begin
         (FDocument[TextLayerIndex] is TScreenLayoutTextLayer) then
       begin
         BeginExistingTextEdit(TextLayerIndex);
+        SetTextCaretFromClientPoint(X, Y, ssShift in Shift);
         Cursor := crIBeam;
         Invalidate;
         Exit;

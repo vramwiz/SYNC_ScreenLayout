@@ -45,6 +45,9 @@ function BuildScreenLayoutTextCaretLines(const Text, FontFamily: string;
 function ScreenLayoutTextCaretIndexAtLineX(
   const Line: TScreenLayoutCaretLine; const FontFamily: string;
   FontSize, TargetX: Single): Integer;
+// 折り返し後の組版座標から、最も近い行と文字間のUTF-16位置を返す。
+function ScreenLayoutTextCaretIndexAtPoint(const Text, FontFamily: string;
+  FontSize, WrapWidth, TargetX, TargetY: Single): Integer;
 // 選択範囲を削除してカーソルを範囲先頭へ移し、削除した場合にTrueを返す。
 function DeleteScreenLayoutTextSelection(var Text: string;
   var CaretIndex, SelectionAnchor: Integer;
@@ -161,6 +164,26 @@ begin
     PreviousWidth := Width;
     Inc(I, CharacterLength);
   end;
+end;
+
+function ScreenLayoutTextCaretIndexAtPoint(const Text, FontFamily: string;
+  FontSize, WrapWidth, TargetX, TargetY: Single): Integer;
+var
+  Font: ISkFont;
+  LineHeight: Single;
+  LineIndex: Integer;
+  Lines: TArray<TScreenLayoutCaretLine>;
+begin
+  Lines := BuildScreenLayoutTextCaretLines(Text, FontFamily, FontSize,
+    WrapWidth);
+  if Length(Lines) = 0 then
+    Exit(0);
+  Font := CreateScreenLayoutTextFont(FontFamily, FontSize);
+  LineHeight := Max(Font.Spacing, FontSize);
+  LineIndex := EnsureRange(Floor(TargetY / Max(LineHeight, 1.0)), 0,
+    High(Lines));
+  Result := ScreenLayoutTextCaretIndexAtLineX(Lines[LineIndex],
+    FontFamily, FontSize, TargetX);
 end;
 
 function DeleteScreenLayoutTextSelection(var Text: string;
