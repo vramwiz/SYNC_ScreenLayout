@@ -24,6 +24,9 @@
         <CfgParent>Cfg_1</CfgParent>
         <Cfg_1>true</Cfg_1>
         <Base>true</Base>
+        <ScreenDesignBuildDir>$(MSBuildProjectDirectory)\Win64\ScreenDesignMaker\Debug</ScreenDesignBuildDir>
+        <DCC_DcuOutput>$(ScreenDesignBuildDir)\DCU</DCC_DcuOutput>
+        <DCC_ExeOutput>$(ScreenDesignBuildDir)</DCC_ExeOutput>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' or '$(Cfg_2)'!=''">
         <Cfg_2>true</Cfg_2>
@@ -49,6 +52,9 @@
         <DCC_DebugInformation>0</DCC_DebugInformation>
         <DCC_LocalDebugSymbols>false</DCC_LocalDebugSymbols>
         <DCC_Optimize>true</DCC_Optimize>
+        <ScreenDesignBuildDir>$(MSBuildProjectDirectory)\Win64\ScreenDesignMaker\Release</ScreenDesignBuildDir>
+        <DCC_DcuOutput>$(ScreenDesignBuildDir)\DCU</DCC_DcuOutput>
+        <DCC_ExeOutput>$(ScreenDesignBuildDir)</DCC_ExeOutput>
     </PropertyGroup>
     <ItemGroup>
         <DelphiCompile Include="$(MainSource)">

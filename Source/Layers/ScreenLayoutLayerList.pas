@@ -292,7 +292,7 @@ begin
       if (Layer is TScreenLayoutGroupLayer) and
         PtInRect(FRenderer.ExpandButtonRect(ItemRect), Point(X, Y)) then
       begin
-        if not (ssDouble in Shift) then
+        if ssDouble in Shift then
           ToggleGroupExpanded(TScreenLayoutGroupLayer(Layer), Parent);
         Exit;
       end;
@@ -336,6 +336,9 @@ begin
           Command.Free;
         Exit;
       end;
+      if (Layer is TScreenLayoutGroupLayer) and (FEditorState <> nil) and
+        FEditorState.IsGroupInOpenPath(TScreenLayoutGroupLayer(Layer)) then
+        Exit;
       if Parent <> nil then
       begin
         if FEditorState.OpenGroup <> Parent then
