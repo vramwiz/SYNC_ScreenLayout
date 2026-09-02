@@ -120,7 +120,8 @@ implementation
 uses
   System.Math, System.Skia, Winapi.D2D1, Vcl.Clipbrd,
   ScreenLayoutCanvasPreview, ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
-  ScreenLayoutPathOperations, ScreenLayoutShapeOperations, ScreenLayoutTextCommands,
+  ScreenLayoutLayerGeometry, ScreenLayoutPathOperations,
+  ScreenLayoutShapeOperations, ScreenLayoutTextCommands,
   ScreenLayoutTextGeometry, ScreenLayoutLayerNaming;
 
 const
@@ -1595,14 +1596,20 @@ begin
         begin
           Layer := FDocument[I];
           if not Layer.Visible or
-            not ((Layer is TScreenLayoutRectangleLineLayer) or
+            not ((Layer is TScreenLayoutGroupLayer) or
+              (Layer is TScreenLayoutRectangleLineLayer) or
               (Layer is TVectArtRectangleLayer) or
               (Layer is TScreenLayoutArcLayer) or
               (Layer is TVectArtPathLayer) or
               (Layer is TScreenLayoutShapeLayer) or
               (Layer is TVectArtImageLayer)) then
             Continue;
-          if Layer is TScreenLayoutRectangleLineLayer then
+          if Layer is TScreenLayoutGroupLayer then
+          begin
+            if not TryGetScreenLayoutLayerBounds(Layer, RotatedBounds) then
+              Continue;
+          end
+          else if Layer is TScreenLayoutRectangleLineLayer then
           begin
             RectangleLine := TScreenLayoutRectangleLineLayer(Layer);
             RotatedBounds := QuadBounds(RectangleCorners(
@@ -2114,14 +2121,20 @@ begin
     begin
       Layer := FDocument[I];
       if not Layer.Visible or
-        not ((Layer is TScreenLayoutRectangleLineLayer) or
+        not ((Layer is TScreenLayoutGroupLayer) or
+          (Layer is TScreenLayoutRectangleLineLayer) or
           (Layer is TVectArtRectangleLayer) or
           (Layer is TScreenLayoutArcLayer) or
           (Layer is TVectArtPathLayer) or
           (Layer is TScreenLayoutShapeLayer) or
           (Layer is TVectArtImageLayer)) then
         Continue;
-      if Layer is TScreenLayoutRectangleLineLayer then
+      if Layer is TScreenLayoutGroupLayer then
+      begin
+        if not TryGetScreenLayoutLayerBounds(Layer, RotatedBounds) then
+          Continue;
+      end
+      else if Layer is TScreenLayoutRectangleLineLayer then
       begin
         RectangleLine := TScreenLayoutRectangleLineLayer(Layer);
         RotatedBounds := QuadBounds(RectangleCorners(RectangleLine.Bounds,

@@ -14,6 +14,7 @@ uses
   ScreenLayoutEditorWorkspaceFrame, ScreenLayoutLayerPanelFrame,
   ScreenLayoutLineToolbar,
   ScreenLayoutLayerOperations, ScreenLayoutEditActionsUI,
+  ScreenLayoutGroupCommands,
   ScreenLayoutObjectPropertiesFrame, ScreenLayoutToolFrames,
   ScreenLayoutToolPaletteFrame;
 
@@ -725,6 +726,26 @@ begin
     begin
       Result := IsEditingSurfaceFocused and (FLayerFrame <> nil) and
         FLayerFrame.CanRunLayerAction(vlaDuplicate);
+    end);
+  FShortcuts.Add(Ord('G'), [ssCtrl],
+    procedure
+    begin
+      GroupSelectedLayers(FDocument, FEditHistory);
+    end,
+    function: Boolean
+    begin
+      Result := IsEditingSurfaceFocused and
+        CanGroupSelectedLayers(FDocument);
+    end);
+  FShortcuts.Add(Ord('G'), [ssCtrl, ssShift],
+    procedure
+    begin
+      UngroupSelectedLayer(FDocument, FEditHistory);
+    end,
+    function: Boolean
+    begin
+      Result := IsEditingSurfaceFocused and
+        CanUngroupSelectedLayer(FDocument);
     end);
   FShortcuts.Add(VK_DELETE, [],
     procedure

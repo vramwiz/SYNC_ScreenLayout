@@ -11,7 +11,8 @@ uses
 type
   TVectArtLayerKind = (vlkCanvas, vlkRectangle, vlkRoundedRectangle,
     vlkPath, vlkImage, vlkShape, vlkEllipse, vlkArc, vlkRectangleLine,
-    vlkRoundedRectangleLine, vlkEllipseLine, vlkEllipseArcShape, vlkText);
+    vlkRoundedRectangleLine, vlkEllipseLine, vlkEllipseArcShape, vlkText,
+    vlkGroup);
   TVectArtImageSourceKind = (visImage, visLogo);
   TVectArtImagePoints = array[0..3] of TPointF;
   // WebArt Designerの線種コンボとMIF vector stroke style 0..8を同順で保持する。
@@ -55,6 +56,22 @@ type
     property Name: string read FName write FName;
     property Opacity: Single read FOpacity write FOpacity;
     property Visible: Boolean read FVisible write FVisible;
+  end;
+
+  // 複数レイヤーを積層順のまま所有する。子の座標はDocument座標のまま保持する。
+  TScreenLayoutGroupLayer = class(TVectArtLayer)
+  private
+    FChildren: TObjectList<TVectArtLayer>;
+    function GetChild(Index: Integer): TVectArtLayer;
+    function GetChildCount: Integer;
+  public
+    constructor Create(const AName: string);
+    destructor Destroy; override;
+    procedure AddChild(Layer: TVectArtLayer);
+    function ExtractChild(Index: Integer): TVectArtLayer;
+    procedure InsertChild(Index: Integer; Layer: TVectArtLayer);
+    property ChildCount: Integer read GetChildCount;
+    property Children[Index: Integer]: TVectArtLayer read GetChild; default;
   end;
 
   TVectArtCanvasLayer = class(TVectArtLayer)
@@ -437,6 +454,10 @@ type
     procedure EndInteractiveUpdate;
     procedure EndUpdate;
     function GetSelectedLayerIndices: TArray<Integer>;
+    // 所有権を呼び出し側へ移し、レイヤーデータを破棄せずDocumentから取り外す。
+    function ExtractLayer(Index: Integer): TVectArtLayer;
+    // 呼び出し側から所有権を受け取り、既存レイヤーを指定積層位置へ挿入する。
+    function InsertLayer(Index: Integer; Layer: TVectArtLayer): Integer;
     function InsertRectangle(Index: Integer;
       const Data: TVectArtRectangleData): Integer;
     // 角丸半径と回転を含む角丸四角を指定位置へ挿入し、実際のレイヤー番号を返す。
@@ -562,6 +583,50 @@ implementation
 
 uses
   System.Math, ScreenLayoutEllipseGeometry, ScreenLayoutGeometry;
+
+{ TScreenLayoutGroupLayer }
+
+procedure TScreenLayoutGroupLayer.AddChild(Layer: TVectArtLayer);
+begin
+  if Layer = nil then
+    raise EArgumentNilException.Create('Layer');
+  FChildren.Add(Layer);
+end;
+
+constructor TScreenLayoutGroupLayer.Create(const AName: string);
+begin
+  inherited Create(vlkGroup, AName);
+  FChildren := TObjectList<TVectArtLayer>.Create(True);
+end;
+
+destructor TScreenLayoutGroupLayer.Destroy;
+begin
+  FChildren.Free;
+  inherited Destroy;
+end;
+
+function TScreenLayoutGroupLayer.ExtractChild(Index: Integer): TVectArtLayer;
+begin
+  Result := FChildren.Extract(FChildren[Index]);
+end;
+
+function TScreenLayoutGroupLayer.GetChild(Index: Integer): TVectArtLayer;
+begin
+  Result := FChildren[Index];
+end;
+
+function TScreenLayoutGroupLayer.GetChildCount: Integer;
+begin
+  Result := FChildren.Count;
+end;
+
+procedure TScreenLayoutGroupLayer.InsertChild(Index: Integer;
+  Layer: TVectArtLayer);
+begin
+  if Layer = nil then
+    raise EArgumentNilException.Create('Layer');
+  FChildren.Insert(EnsureRange(Index, 0, FChildren.Count), Layer);
+end;
 
 function UniformScreenLayoutCornerRadii(
   Radius: Single): TScreenLayoutCornerRadii;
@@ -994,6 +1059,46 @@ end;
 function TVectArtDocument.GetSelectedLayerIndices: TArray<Integer>;
 begin
   Result := FSelectedLayers.ToArray;
+end;
+
+function TVectArtDocument.ExtractLayer(Index: Integer): TVectArtLayer;
+var
+  I: Integer;
+  Selection: TList<Integer>;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) then
+    raise EArgumentOutOfRangeException.Create('Index');
+  Result := FLayers.Extract(FLayers[Index]);
+  Selection := TList<Integer>.Create;
+  try
+    for I := 0 to FSelectedLayers.Count - 1 do
+      if FSelectedLayers[I] < Index then
+        Selection.Add(FSelectedLayers[I])
+      else if FSelectedLayers[I] > Index then
+        Selection.Add(FSelectedLayers[I] - 1);
+    SetSelectedLayersCore(Selection.ToArray, False);
+  finally
+    Selection.Free;
+  end;
+  Changed;
+end;
+
+function TVectArtDocument.InsertLayer(Index: Integer;
+  Layer: TVectArtLayer): Integer;
+var
+  I: Integer;
+  Selection: TArray<Integer>;
+begin
+  if Layer = nil then
+    raise EArgumentNilException.Create('Layer');
+  Result := EnsureRange(Index, 1, FLayers.Count);
+  Selection := FSelectedLayers.ToArray;
+  FLayers.Insert(Result, Layer);
+  for I := 0 to High(Selection) do
+    if Selection[I] >= Result then
+      Inc(Selection[I]);
+  SetSelectedLayersCore(Selection, False);
+  Changed;
 end;
 
 function TVectArtDocument.GetIsInteractiveUpdate: Boolean;

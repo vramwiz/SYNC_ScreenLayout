@@ -29,6 +29,10 @@ type
     procedure SyncThumbnailCache;
     procedure DrawImageThumbnail(ACanvas: TCustomCanvas;
       const ThumbnailRect: TRect; ImageLayer: TVectArtImageLayer);
+    procedure DrawGroupThumbnail(ACanvas: TCanvas;
+      const ThumbnailRect: TRect; GroupLayer: TScreenLayoutGroupLayer); overload;
+    procedure DrawGroupThumbnail(ACanvas: TDirect2DCanvas;
+      const ThumbnailRect: TRect; GroupLayer: TScreenLayoutGroupLayer); overload;
     procedure DrawTextThumbnail(ACanvas: TCanvas;
       const ThumbnailRect: TRect; TextLayer: TScreenLayoutTextLayer;
       Visible: Boolean); overload;
@@ -68,7 +72,7 @@ implementation
 uses
   System.Classes, System.Math, System.Skia, Winapi.D2D1, Winapi.Windows,
   ScreenLayoutEllipseGeometry, ScreenLayoutPathOperations,
-  ScreenLayoutShapeOperations;
+  ScreenLayoutShapeOperations, ScreenLayoutLayerGeometry;
 
 const
   COLOR_LIST_BACKGROUND   = TColor($001A1A1A);
@@ -110,6 +114,135 @@ begin
     Result[I] := ScreenLayoutEllipsePoint(ArcLayer.Bounds,
       ArcLayer.RotationDegrees, ArcLayer.StartAngleDegrees +
       ArcLayer.SweepAngleDegrees * I / SEGMENT_COUNT);
+end;
+
+function GroupThumbnailChildRect(const ChildBounds, GroupBounds: TRectF;
+  const ThumbnailRect: TRect): TRect;
+var
+  Height: Single;
+  Width: Single;
+begin
+  Width := Max(GroupBounds.Width, 1.0);
+  Height := Max(GroupBounds.Height, 1.0);
+  Result := Rect(
+    Round(ThumbnailRect.Left +
+      (ChildBounds.Left - GroupBounds.Left) / Width * ThumbnailRect.Width),
+    Round(ThumbnailRect.Top +
+      (ChildBounds.Top - GroupBounds.Top) / Height * ThumbnailRect.Height),
+    Round(ThumbnailRect.Left +
+      (ChildBounds.Right - GroupBounds.Left) / Width * ThumbnailRect.Width),
+    Round(ThumbnailRect.Top +
+      (ChildBounds.Bottom - GroupBounds.Top) / Height * ThumbnailRect.Height));
+  if Result.Width = 0 then
+    Inc(Result.Right);
+  if Result.Height = 0 then
+    Inc(Result.Bottom);
+end;
+
+function GroupThumbnailLayerColor(Layer: TVectArtLayer): TColor;
+begin
+  if Layer is TVectArtRectangleLayer then
+    Result := TVectArtRectangleLayer(Layer).FillColor
+  else if Layer is TScreenLayoutShapeLayer then
+    Result := TScreenLayoutShapeLayer(Layer).FillColor
+  else if Layer is TScreenLayoutRectangleLineLayer then
+    Result := TScreenLayoutRectangleLineLayer(Layer).StrokeColor
+  else if Layer is TScreenLayoutArcLayer then
+    Result := TScreenLayoutArcLayer(Layer).StrokeColor
+  else if Layer is TVectArtPathLayer then
+    Result := TVectArtPathLayer(Layer).StrokeColor
+  else if Layer is TVectArtImageLayer then
+    Result := TColor($00B0B0B0)
+  else
+    Result := COLOR_TEXT_SECONDARY;
+end;
+
+function GroupLayerDetailText(GroupLayer: TScreenLayoutGroupLayer): string;
+var
+  I: Integer;
+  NameList: string;
+begin
+  NameList := '';
+  for I := 0 to Min(GroupLayer.ChildCount - 1, 2) do
+  begin
+    if NameList <> '' then
+      NameList := NameList + ' / ';
+    NameList := NameList + GroupLayer[I].Name;
+  end;
+  if GroupLayer.ChildCount > 3 then
+    NameList := NameList + ' / ...';
+  Result := Format('Group  %d layers', [GroupLayer.ChildCount]);
+  if NameList <> '' then
+    Result := Result + '  ' + NameList;
+end;
+
+procedure TVectArtLayerRenderer.DrawGroupThumbnail(ACanvas: TCanvas;
+  const ThumbnailRect: TRect; GroupLayer: TScreenLayoutGroupLayer);
+var
+  ChildBounds: TRectF;
+  ChildRect: TRect;
+  GroupBounds: TRectF;
+  I: Integer;
+  Layer: TVectArtLayer;
+begin
+  if not TryGetScreenLayoutLayerBounds(GroupLayer, GroupBounds) then
+    Exit;
+  for I := 0 to GroupLayer.ChildCount - 1 do
+  begin
+    Layer := GroupLayer[I];
+    if not Layer.Visible or
+      not TryGetScreenLayoutLayerBounds(Layer, ChildBounds) then
+      Continue;
+    ChildRect := GroupThumbnailChildRect(ChildBounds, GroupBounds,
+      ThumbnailRect);
+    ACanvas.Pen.Color := GroupThumbnailLayerColor(Layer);
+    ACanvas.Pen.Width := 1;
+    if (Layer is TScreenLayoutRectangleLineLayer) or
+      (Layer is TScreenLayoutArcLayer) or (Layer is TVectArtPathLayer) then
+      ACanvas.Brush.Style := bsClear
+    else
+    begin
+      ACanvas.Brush.Style := bsSolid;
+      ACanvas.Brush.Color := BlendThumbnailColor(
+        GroupThumbnailLayerColor(Layer), Layer.Opacity);
+    end;
+    ACanvas.Rectangle(ChildRect);
+  end;
+end;
+
+procedure TVectArtLayerRenderer.DrawGroupThumbnail(
+  ACanvas: TDirect2DCanvas; const ThumbnailRect: TRect;
+  GroupLayer: TScreenLayoutGroupLayer);
+var
+  ChildBounds: TRectF;
+  ChildRect: TRect;
+  GroupBounds: TRectF;
+  I: Integer;
+  Layer: TVectArtLayer;
+begin
+  if not TryGetScreenLayoutLayerBounds(GroupLayer, GroupBounds) then
+    Exit;
+  for I := 0 to GroupLayer.ChildCount - 1 do
+  begin
+    Layer := GroupLayer[I];
+    if not Layer.Visible or
+      not TryGetScreenLayoutLayerBounds(Layer, ChildBounds) then
+      Continue;
+    ChildRect := GroupThumbnailChildRect(ChildBounds, GroupBounds,
+      ThumbnailRect);
+    ACanvas.Pen.Color := GroupThumbnailLayerColor(Layer);
+    ACanvas.Pen.Width := 1;
+    if (Layer is TScreenLayoutRectangleLineLayer) or
+      (Layer is TScreenLayoutArcLayer) or (Layer is TVectArtPathLayer) then
+      ACanvas.Brush.Style := bsClear
+    else
+    begin
+      ACanvas.Brush.Style := bsSolid;
+      ACanvas.Brush.Color := BlendThumbnailColor(
+        GroupThumbnailLayerColor(Layer), Layer.Opacity);
+    end;
+    ACanvas.Rectangle(ChildRect);
+  end;
 end;
 
 procedure TVectArtLayerRenderer.DrawTextThumbnail(ACanvas: TCanvas;
@@ -608,6 +741,9 @@ begin
       Inc(Row);
     end;
   end;
+  if Layer is TScreenLayoutGroupLayer then
+    DrawGroupThumbnail(ACanvas, ThumbnailRect,
+      TScreenLayoutGroupLayer(Layer));
   if Layer is TScreenLayoutTextLayer then
     DrawTextThumbnail(ACanvas, ThumbnailRect,
       TScreenLayoutTextLayer(Layer), Layer.Visible);
@@ -814,6 +950,8 @@ begin
   if Layer is TVectArtCanvasLayer then
     DetailText := Format('%d x %d  %d%%', [TVectArtCanvasLayer(Layer).Width,
       TVectArtCanvasLayer(Layer).Height, Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutGroupLayer then
+    DetailText := GroupLayerDetailText(TScreenLayoutGroupLayer(Layer))
   else if Layer is TScreenLayoutTextLayer then
     DetailText := Format('Text  %spt  %d%%',
       [FormatFloat('0.##', TScreenLayoutTextLayer(Layer).FontSize),
@@ -989,6 +1127,9 @@ begin
       Inc(Row);
     end;
   end;
+  if Layer is TScreenLayoutGroupLayer then
+    DrawGroupThumbnail(ACanvas, ThumbnailRect,
+      TScreenLayoutGroupLayer(Layer));
   if Layer is TScreenLayoutTextLayer then
     DrawTextThumbnail(ACanvas, ThumbnailRect,
       TScreenLayoutTextLayer(Layer), Layer.Visible);
@@ -1195,6 +1336,8 @@ begin
   if Layer is TVectArtCanvasLayer then
     DetailText := Format('%d x %d  %d%%', [TVectArtCanvasLayer(Layer).Width,
       TVectArtCanvasLayer(Layer).Height, Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutGroupLayer then
+    DetailText := GroupLayerDetailText(TScreenLayoutGroupLayer(Layer))
   else if Layer is TScreenLayoutTextLayer then
     DetailText := Format('Text  %spt  %d%%',
       [FormatFloat('0.##', TScreenLayoutTextLayer(Layer).FontSize),

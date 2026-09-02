@@ -16,7 +16,7 @@ uses
   System.SysUtils, System.Types, Vcl.Graphics;
 
 const
-  DOCUMENT_FORMAT_VERSION = 12;
+  DOCUMENT_FORMAT_VERSION = 13;
 
 function SerializeVectArtDocument(Document: TVectArtDocument): string;
 var
@@ -33,6 +33,12 @@ var
   EllipseJson: TJSONObject;
   EllipseLine: TScreenLayoutEllipseLineLayer;
   EllipseLineJson: TJSONObject;
+  Group: TScreenLayoutGroupLayer;
+  GroupJson: TJSONObject;
+  GroupLayersJson: TJSONArray;
+  ChildIndex: Integer;
+  ChildLayer: TVectArtLayer;
+  ChildInTemporaryDocument: Boolean;
   I: Integer;
   Image: TVectArtImageLayer;
   ImageJson: TJSONObject;
@@ -59,6 +65,11 @@ var
   ShapeJson: TJSONObject;
   TextLayer: TScreenLayoutTextLayer;
   TextJson: TJSONObject;
+  TemporaryDocument: TVectArtDocument;
+  TemporaryJson: TJSONValue;
+  TemporaryLayers: TJSONArray;
+  TemporaryRoot: TJSONObject;
+  TemporaryText: string;
   VertexIndex: Integer;
   VertexJson: TJSONObject;
   VerticesJson: TJSONArray;
@@ -86,6 +97,51 @@ begin
     for I := 1 to Document.LayerCount - 1 do
     begin
       Layer := Document.Layers[I];
+      if Layer is TScreenLayoutGroupLayer then
+      begin
+        Group := TScreenLayoutGroupLayer(Layer);
+        GroupJson := TJSONObject.Create;
+        GroupJson.AddPair('type', 'group');
+        GroupJson.AddPair('name', Group.Name);
+        GroupJson.AddPair('opacity', TJSONNumber.Create(Group.Opacity));
+        GroupJson.AddPair('visible', TJSONBool.Create(Group.Visible));
+        GroupJson.AddPair('locked', TJSONBool.Create(Group.Locked));
+        GroupLayersJson := TJSONArray.Create;
+        GroupJson.AddPair('layers', GroupLayersJson);
+        for ChildIndex := 0 to Group.ChildCount - 1 do
+        begin
+          ChildLayer := Group.ExtractChild(ChildIndex);
+          TemporaryDocument := TVectArtDocument.Create;
+          ChildInTemporaryDocument := False;
+          try
+            TemporaryDocument.InsertLayer(1, ChildLayer);
+            ChildInTemporaryDocument := True;
+            TemporaryText := SerializeVectArtDocument(TemporaryDocument);
+            TemporaryJson := TJSONObject.ParseJSONValue(TemporaryText);
+            try
+              if not (TemporaryJson is TJSONObject) then
+                raise EConvertError.Create('Cannot serialize group child');
+              TemporaryRoot := TJSONObject(TemporaryJson);
+              TemporaryLayers := TemporaryRoot.GetValue<TJSONArray>('layers');
+              if (TemporaryLayers <> nil) and
+                (TemporaryLayers.Count = 1) then
+                GroupLayersJson.AddElement(TJSONObject.ParseJSONValue(
+                  TemporaryLayers.Items[0].ToJSON));
+            finally
+              TemporaryJson.Free;
+            end;
+          finally
+            if ChildInTemporaryDocument then
+              ChildLayer := TemporaryDocument.ExtractLayer(1);
+            TemporaryDocument.Free;
+            Group.InsertChild(ChildIndex, ChildLayer);
+          end;
+        end;
+        LayersJson.AddElement(GroupJson);
+        if I = Document.SelectedIndex then
+          SerializedSelectedIndex := LayersJson.Count;
+        Continue;
+      end;
       if Layer is TScreenLayoutTextLayer then
       begin
         TextLayer := TScreenLayoutTextLayer(Layer);

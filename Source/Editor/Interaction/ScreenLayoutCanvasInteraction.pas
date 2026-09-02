@@ -51,6 +51,9 @@ type
     FDragMode: TVectArtCanvasDragMode;
     FMoveLayerIndices: TArray<Integer>;
     FMoveStartBounds: TArray<TRectF>;
+    FMoveGroupLayerIndices: TArray<Integer>;
+    FMoveGroupDX: Single;
+    FMoveGroupDY: Single;
     FMoveImageLayerIndices: TArray<Integer>;
     FMoveStartImagePoints: TArray<TVectArtImagePoints>;
     FMovePathLayerIndices: TArray<Integer>;
@@ -166,7 +169,8 @@ implementation
 
 uses
   System.Math, System.Skia, ScreenLayoutEllipseGeometry,
-  ScreenLayoutGeometry, ScreenLayoutInteractionGeometry,
+  ScreenLayoutGeometry, ScreenLayoutGroupCommands,
+  ScreenLayoutInteractionGeometry, ScreenLayoutLayerGeometry,
   ScreenLayoutShapeEditCommands, ScreenLayoutPathOperations,
   ScreenLayoutShapeOperations,
   ScreenLayoutShapePath;
@@ -794,7 +798,8 @@ begin
   try
     for I := 1 to FDocument.LayerCount - 1 do
       if FDocument[I].Visible and
-        ((FDocument[I] is TScreenLayoutRectangleLineLayer) or
+        ((FDocument[I] is TScreenLayoutGroupLayer) or
+         (FDocument[I] is TScreenLayoutRectangleLineLayer) or
          (FDocument[I] is TVectArtRectangleLayer) or
          (FDocument[I] is TScreenLayoutArcLayer) or
          (FDocument[I] is TVectArtPathLayer) or
@@ -813,6 +818,7 @@ end;
 
 procedure TVectArtCanvasInteraction.CaptureMoveSelection;
 var
+  GroupIndex: Integer;
   I: Integer;
   ImageIndex: Integer;
   MoveIndex: Integer;
@@ -827,14 +833,23 @@ begin
   SetLength(FMoveStartPathVertices, FDocument.SelectionCount);
   SetLength(FMoveShapeLayerIndices, FDocument.SelectionCount);
   SetLength(FMoveStartShapeContours, FDocument.SelectionCount);
+  SetLength(FMoveGroupLayerIndices, FDocument.SelectionCount);
   MoveIndex := 0;
   ImageIndex := 0;
   PathIndex := 0;
   ShapeIndex := 0;
+  GroupIndex := 0;
+  FMoveGroupDX := 0;
+  FMoveGroupDY := 0;
   for I := 1 to FDocument.LayerCount - 1 do
     if FDocument.IsLayerSelected(I) then
     begin
-      if (FDocument[I] is TScreenLayoutRectangleLineLayer) or
+      if FDocument[I] is TScreenLayoutGroupLayer then
+      begin
+        FMoveGroupLayerIndices[GroupIndex] := I;
+        Inc(GroupIndex);
+      end
+      else if (FDocument[I] is TScreenLayoutRectangleLineLayer) or
         (FDocument[I] is TVectArtRectangleLayer) or
         (FDocument[I] is TScreenLayoutArcLayer) then
       begin
@@ -881,6 +896,7 @@ begin
   SetLength(FMoveStartPathVertices, PathIndex);
   SetLength(FMoveShapeLayerIndices, ShapeIndex);
   SetLength(FMoveStartShapeContours, ShapeIndex);
+  SetLength(FMoveGroupLayerIndices, GroupIndex);
 end;
 
 procedure TVectArtCanvasInteraction.CommitBoundsCommand;
@@ -899,7 +915,8 @@ begin
     ((Length(FMoveLayerIndices) = 0) and
      (Length(FMoveImageLayerIndices) = 0) and
      (Length(FMovePathLayerIndices) = 0) and
-     (Length(FMoveShapeLayerIndices) = 0)) then
+     (Length(FMoveShapeLayerIndices) = 0) and
+     (Length(FMoveGroupLayerIndices) = 0)) then
     Exit;
   Command := TVectArtCompoundCommand.Create;
   SetLength(NewBounds, Length(FMoveLayerIndices));
@@ -958,6 +975,11 @@ begin
         FMoveShapeLayerIndices[I], FMoveStartShapeContours[I],
         ShapeLayer.Contours));
   end;
+  if (Length(FMoveGroupLayerIndices) > 0) and
+    (not SameValue(FMoveGroupDX, 0.0) or
+     not SameValue(FMoveGroupDY, 0.0)) then
+    Command.Add(TScreenLayoutTranslateGroupsCommand.Create(FDocument,
+      FMoveGroupLayerIndices, FMoveGroupDX, FMoveGroupDY));
   if Command.Count > 0 then
     FEditHistory.AddApplied(Command)
   else
@@ -984,6 +1006,9 @@ begin
   SetLength(FMoveStartPathVertices, 0);
   SetLength(FMoveShapeLayerIndices, 0);
   SetLength(FMoveStartShapeContours, 0);
+  SetLength(FMoveGroupLayerIndices, 0);
+  FMoveGroupDX := 0;
+  FMoveGroupDY := 0;
   SetLength(FDragStartPathVertices, 0);
   SetLength(FDragStartShapeContours, 0);
 end;
@@ -1009,6 +1034,7 @@ end;
 function TVectArtCanvasInteraction.HitTestLayer(X, Y: Integer): Integer;
 var
   ArcLayer: TScreenLayoutArcLayer;
+  Bounds: TRectF;
   I: Integer;
   J: Integer;
   Layer: TVectArtLayer;
@@ -1037,6 +1063,13 @@ begin
     Layer := FDocument[I];
     if not Layer.Visible then
       Continue;
+    if (Layer is TScreenLayoutGroupLayer) and
+      TryGetScreenLayoutLayerBounds(Layer, Bounds) then
+    begin
+      if Bounds.Contains(TPointF.Create(LogicalX, LogicalY)) then
+        Exit(I);
+      Continue;
+    end;
     if Layer is TVectArtImageLayer then
     begin
       ImageLayer := TVectArtImageLayer(Layer);
@@ -1149,7 +1182,16 @@ var
 begin
   Result := TRect.Empty;
   if (FDocument = nil) or (Index <= 0) or
-    (Index >= FDocument.LayerCount) or
+    (Index >= FDocument.LayerCount) then
+    Exit;
+  if (FDocument[Index] is TScreenLayoutGroupLayer) and
+    TryGetScreenLayoutLayerBounds(FDocument[Index], Bounds) then
+  begin
+    Result := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
+      ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
+    Exit;
+  end;
+  if
     not ((FDocument[Index] is TScreenLayoutRectangleLineLayer) or
       (FDocument[Index] is TVectArtRectangleLayer) or
       (FDocument[Index] is TScreenLayoutArcLayer) or
@@ -1232,14 +1274,20 @@ begin
     Exit;
   for I := 1 to FDocument.LayerCount - 1 do
     if FDocument.IsLayerSelected(I) and FDocument[I].Visible and
-      ((FDocument[I] is TScreenLayoutRectangleLineLayer) or
+      ((FDocument[I] is TScreenLayoutGroupLayer) or
+       (FDocument[I] is TScreenLayoutRectangleLineLayer) or
        (FDocument[I] is TVectArtRectangleLayer) or
        (FDocument[I] is TScreenLayoutArcLayer) or
        (FDocument[I] is TVectArtPathLayer) or
        (FDocument[I] is TScreenLayoutShapeLayer) or
        (FDocument[I] is TVectArtImageLayer)) then
     begin
-      if FDocument[I] is TScreenLayoutRectangleLineLayer then
+      if FDocument[I] is TScreenLayoutGroupLayer then
+      begin
+        if not TryGetScreenLayoutLayerBounds(FDocument[I], Bounds) then
+          Continue;
+      end
+      else if FDocument[I] is TScreenLayoutRectangleLineLayer then
       begin
         RectangleLine := TScreenLayoutRectangleLineLayer(FDocument[I]);
         Bounds := QuadBounds(RectangleCorners(RectangleLine.Bounds,
@@ -2025,6 +2073,15 @@ begin
         FMoveStartShapeContours[I], DX, DY);
       FDocument.SetShapeContours(FMoveShapeLayerIndices[I],
         NewShapeContours);
+    end;
+    if Length(FMoveGroupLayerIndices) > 0 then
+    begin
+      for I := 0 to High(FMoveGroupLayerIndices) do
+        TranslateScreenLayoutLayer(FDocument[FMoveGroupLayerIndices[I]],
+          DX - FMoveGroupDX, DY - FMoveGroupDY);
+      FMoveGroupDX := DX;
+      FMoveGroupDY := DY;
+      FDocument.Changed;
     end;
     Exit(True);
   end

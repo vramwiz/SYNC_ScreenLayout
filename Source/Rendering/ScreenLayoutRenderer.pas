@@ -47,13 +47,48 @@ procedure CompositeVectArtRgba(const Source: TVectArtRenderBuffer;
 implementation
 
 uses
-  System.Math, System.Skia, System.Types, System.UITypes,
+  System.Generics.Collections, System.Math, System.Skia, System.Types,
+  System.UITypes,
   TextRendererSkiaRuntime, Vcl.Graphics, Winapi.Windows,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
   ScreenLayoutShapePath, ScreenLayoutTextGeometry;
 
 const
   MAX_RENDER_DIMENSION = 16384;
+
+procedure AppendScreenLayoutRenderLayers(Layer: TVectArtLayer;
+  Layers: TList<TVectArtLayer>);
+var
+  GroupLayer: TScreenLayoutGroupLayer;
+  I: Integer;
+begin
+  if (Layer = nil) or not Layer.Visible then
+    Exit;
+  if Layer is TScreenLayoutGroupLayer then
+  begin
+    GroupLayer := TScreenLayoutGroupLayer(Layer);
+    for I := 0 to GroupLayer.ChildCount - 1 do
+      AppendScreenLayoutRenderLayers(GroupLayer[I], Layers);
+  end
+  else
+    Layers.Add(Layer);
+end;
+
+function ScreenLayoutRenderLayers(
+  Document: TVectArtDocument): TArray<TVectArtLayer>;
+var
+  I: Integer;
+  Layers: TList<TVectArtLayer>;
+begin
+  Layers := TList<TVectArtLayer>.Create;
+  try
+    for I := 1 to Document.LayerCount - 1 do
+      AppendScreenLayoutRenderLayers(Document[I], Layers);
+    Result := Layers.ToArray;
+  finally
+    Layers.Free;
+  end;
+end;
 
 function VclColorToAlphaColor(Color: TColor; Opacity: Single): TAlphaColor;
 var
@@ -252,6 +287,7 @@ var
   RectangleLayer: TVectArtRectangleLayer;
   RectangleLine: TScreenLayoutRectangleLineLayer;
   RectangleLineCorners: TVectArtQuad;
+  RenderLayers: TArray<TVectArtLayer>;
   RoundedRectangleLayer: TScreenLayoutRoundedRectangleLayer;
   RoundedRectangleLine: TScreenLayoutRoundedRectangleLineLayer;
   ScaleX: Single;
@@ -297,9 +333,10 @@ begin
   ImagePaint.AntiAlias := True;
   Canvas.Scale(ScaleX, ScaleY);
   Canvas.Translate(CanvasLayer.Width * 0.5, CanvasLayer.Height * 0.5);
-  for I := 1 to Document.LayerCount - 1 do
+  RenderLayers := ScreenLayoutRenderLayers(Document);
+  for I := 0 to High(RenderLayers) do
   begin
-    Layer := Document[I];
+    Layer := RenderLayers[I];
     if not Layer.Visible then
       Continue;
     if Layer is TVectArtImageLayer then

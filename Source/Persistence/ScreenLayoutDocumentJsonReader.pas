@@ -21,7 +21,7 @@ uses
   System.SysUtils, System.Types, Vcl.Graphics;
 
 const
-  DOCUMENT_FORMAT_VERSION = 12;
+  DOCUMENT_FORMAT_VERSION = 13;
 
 type
   TRequiredJSONValueClass = class of TJSONValue;
@@ -90,6 +90,18 @@ var
   DiscardedShape: TScreenLayoutShapeData;
   DiscardedText: TScreenLayoutTextData;
   FillRuleValue: Integer;
+  GroupData: TArray<TScreenLayoutGroupLayer>;
+  GroupJson: TJSONObject;
+  GroupLayersJson: TJSONArray;
+  GroupValue: TScreenLayoutGroupLayer;
+  ChildDocument: TVectArtDocument;
+  ChildIndex: Integer;
+  ChildRoot: TJSONObject;
+  ChildLayers: TJSONArray;
+  ChildSkippedReferenceCount: Integer;
+  ChildErrorMessage: string;
+  ChildText: string;
+  ExtractedLayer: TVectArtLayer;
   I: Integer;
   ImageData: TArray<TVectArtImageData>;
   ImageFileName: string;
@@ -171,6 +183,7 @@ begin
       SetLength(ImageData, LayersJson.Count);
       SetLength(ShapeData, LayersJson.Count);
       SetLength(TextData, LayersJson.Count);
+      SetLength(GroupData, LayersJson.Count);
       SetLength(LayerTypes, LayersJson.Count);
       for I := 0 to LayersJson.Count - 1 do
       begin
@@ -178,6 +191,62 @@ begin
           raise EConvertError.CreateFmt('Layer %d is not a JSON object', [I]);
         LayerJson := TJSONObject(LayersJson.Items[I]);
         LayerTypes[I] := ReadString(LayerJson, 'type');
+        if LayerTypes[I] = 'group' then
+        begin
+          GroupJson := LayerJson;
+          GroupValue := TScreenLayoutGroupLayer.Create(
+            ReadString(GroupJson, 'name'));
+          try
+            GroupValue.Opacity := ReadSingle(GroupJson, 'opacity');
+            GroupValue.Visible := ReadBoolean(GroupJson, 'visible');
+            GroupValue.Locked := ReadBoolean(GroupJson, 'locked');
+            GroupLayersJson := TJSONArray(RequireValue(GroupJson, 'layers',
+              TJSONArray));
+            for ChildIndex := 0 to GroupLayersJson.Count - 1 do
+            begin
+              if not (GroupLayersJson.Items[ChildIndex] is TJSONObject) then
+                raise EConvertError.CreateFmt(
+                  'Group child %d is not a JSON object', [ChildIndex]);
+              ChildRoot := TJSONObject.Create;
+              try
+                ChildRoot.AddPair('version',
+                  TJSONNumber.Create(DOCUMENT_FORMAT_VERSION));
+                ChildRoot.AddPair('canvas', TJSONObject.ParseJSONValue(
+                  CanvasJson.ToJSON));
+                ChildLayers := TJSONArray.Create;
+                ChildLayers.AddElement(TJSONObject.ParseJSONValue(
+                  GroupLayersJson.Items[ChildIndex].ToJSON));
+                ChildRoot.AddPair('layers', ChildLayers);
+                ChildRoot.AddPair('selectedIndex', TJSONNumber.Create(-1));
+                ChildText := ChildRoot.ToJSON;
+              finally
+                ChildRoot.Free;
+              end;
+              ChildDocument := TVectArtDocument.Create;
+              try
+                if not TryDeserializeVectArtDocumentCore(ChildText,
+                  BaseDirectory, ChildDocument, ChildSkippedReferenceCount,
+                  ChildErrorMessage) then
+                  raise EConvertError.CreateFmt(
+                    'Cannot load group child %d: %s',
+                    [ChildIndex, ChildErrorMessage]);
+                Inc(SkippedReferenceCount, ChildSkippedReferenceCount);
+                if ChildDocument.LayerCount > 1 then
+                begin
+                  ExtractedLayer := ChildDocument.ExtractLayer(1);
+                  GroupValue.AddChild(ExtractedLayer);
+                end;
+              finally
+                ChildDocument.Free;
+              end;
+            end;
+            GroupData[I] := GroupValue;
+            GroupValue := nil;
+          finally
+            GroupValue.Free;
+          end;
+          Continue;
+        end;
         if LayerTypes[I] = 'text' then
         begin
           TextValue.Name := ReadString(LayerJson, 'name');
@@ -630,7 +699,12 @@ begin
       if Canvas = nil then
         raise EInvalidOp.Create('Document canvas is missing');
       while Document.LayerCount > 1 do
-        if Document[Document.LayerCount - 1] is
+        if Document[Document.LayerCount - 1] is TScreenLayoutGroupLayer then
+        begin
+          ExtractedLayer := Document.ExtractLayer(Document.LayerCount - 1);
+          ExtractedLayer.Free;
+        end
+        else if Document[Document.LayerCount - 1] is
           TScreenLayoutEllipseArcShapeLayer then
           Document.RemoveEllipseArcShape(Document.LayerCount - 1,
             DiscardedArcShape)
@@ -676,6 +750,11 @@ begin
       begin
         if LayerTypes[I] = 'ellipseArcShape' then
           Document.InsertEllipseArcShape(Document.LayerCount, ArcShapeData[I])
+        else if LayerTypes[I] = 'group' then
+        begin
+          Document.InsertLayer(Document.LayerCount, GroupData[I]);
+          GroupData[I] := nil;
+        end
         else if LayerTypes[I] = 'ellipseLine' then
           Document.InsertEllipseLine(Document.LayerCount, EllipseLineData[I])
         else if LayerTypes[I] = 'roundedRectangleLine' then
@@ -713,6 +792,8 @@ begin
     end;
   finally
     Json.Free;
+    for I := 0 to High(GroupData) do
+      GroupData[I].Free;
   end;
 end;
 
