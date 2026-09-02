@@ -61,7 +61,8 @@ implementation
 
 uses
   System.Classes, System.Math, Winapi.D2D1, Winapi.Windows,
-  ScreenLayoutPathOperations, ScreenLayoutShapeOperations;
+  ScreenLayoutEllipseGeometry, ScreenLayoutPathOperations,
+  ScreenLayoutShapeOperations;
 
 const
   COLOR_LIST_BACKGROUND   = TColor($001A1A1A);
@@ -87,6 +88,20 @@ const
 
 type
   TScreenLayoutThumbnailContours = TArray<TArray<TPoint>>;
+
+function ScreenLayoutArcThumbnailSourcePoints(
+  ArcLayer: TScreenLayoutArcLayer): TArray<TPointF>;
+const
+  SEGMENT_COUNT = 32;
+var
+  I: Integer;
+begin
+  SetLength(Result, SEGMENT_COUNT + 1);
+  for I := 0 to SEGMENT_COUNT do
+    Result[I] := ScreenLayoutEllipsePoint(ArcLayer.Bounds,
+      ArcLayer.RotationDegrees, ArcLayer.StartAngleDegrees +
+      ArcLayer.SweepAngleDegrees * I / SEGMENT_COUNT);
+end;
 
 constructor TVectArtLayerRenderer.Create;
 begin
@@ -405,6 +420,11 @@ end;
 procedure TVectArtLayerRenderer.DrawLayerItem(ACanvas: TCanvas;
   const ItemRect: TRect; Layer: TVectArtLayer; Selected, Active: Boolean);
 var
+  ArcLayer: TScreenLayoutArcLayer;
+  ArcPoints: TArray<TPoint>;
+  ArcShape: TScreenLayoutEllipseArcShapeLayer;
+  ArcShapeEnd: TPoint;
+  ArcShapeStart: TPoint;
   CanvasLayer: TVectArtCanvasLayer;
   CellRect: TRect;
   Column: Integer;
@@ -415,6 +435,8 @@ var
   PathDrawPoints: TArray<TPoint>;
   PathLayer: TVectArtPathLayer;
   PathPoints: TArray<TPoint>;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
+  RoundedRectangleLine: TScreenLayoutRoundedRectangleLineLayer;
   RectangleLayer: TVectArtRectangleLayer;
   RectangleRect: TRect;
   RoundedRectangleLayer: TScreenLayoutRoundedRectangleLayer;
@@ -505,7 +527,30 @@ begin
     else
       ACanvas.Brush.Color := BlendThumbnailColor(RectangleLayer.FillColor,
         RectangleLayer.Opacity * 0.35);
-    if Layer is TScreenLayoutRoundedRectangleLayer then
+    if Layer is TScreenLayoutEllipseArcShapeLayer then
+    begin
+      ArcShape := TScreenLayoutEllipseArcShapeLayer(Layer);
+      ArcShapeStart := Point(
+        Round((RectangleRect.Left + RectangleRect.Right) * 0.5 +
+          Cos(DegToRad(ArcShape.StartAngleDegrees)) *
+          RectangleRect.Width * 0.5),
+        Round((RectangleRect.Top + RectangleRect.Bottom) * 0.5 +
+          Sin(DegToRad(ArcShape.StartAngleDegrees)) *
+          RectangleRect.Height * 0.5));
+      ArcShapeEnd := Point(
+        Round((RectangleRect.Left + RectangleRect.Right) * 0.5 +
+          Cos(DegToRad(ArcShape.StartAngleDegrees +
+            ArcShape.SweepAngleDegrees)) * RectangleRect.Width * 0.5),
+        Round((RectangleRect.Top + RectangleRect.Bottom) * 0.5 +
+          Sin(DegToRad(ArcShape.StartAngleDegrees +
+            ArcShape.SweepAngleDegrees)) * RectangleRect.Height * 0.5));
+      ACanvas.Pie(RectangleRect.Left, RectangleRect.Top, RectangleRect.Right,
+        RectangleRect.Bottom, ArcShapeStart.X, ArcShapeStart.Y,
+        ArcShapeEnd.X, ArcShapeEnd.Y);
+    end
+    else if Layer is TScreenLayoutEllipseLayer then
+      ACanvas.Ellipse(RectangleRect)
+    else if Layer is TScreenLayoutRoundedRectangleLayer then
     begin
       RoundedRectangleLayer := TScreenLayoutRoundedRectangleLayer(Layer);
       RoundedRadius := Max(Round(RoundedRectangleLayer.CornerRadii.TopLeft *
@@ -517,6 +562,69 @@ begin
     end
     else
       ACanvas.FillRect(RectangleRect);
+  end;
+  if Layer is TScreenLayoutRectangleLineLayer then
+  begin
+    RectangleLine := TScreenLayoutRectangleLineLayer(Layer);
+    RectangleRect := FitThumbnailRect(ThumbnailRect,
+      Max(Round(RectangleLine.Bounds.Width), 1),
+      Max(Round(RectangleLine.Bounds.Height), 1));
+    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(
+      RectangleLine.StrokeWidth);
+    ACanvas.Brush.Style := bsClear;
+    if Layer.Visible then
+      ACanvas.Pen.Color := BlendThumbnailColor(RectangleLine.StrokeColor,
+        RectangleLine.Opacity)
+    else
+      ACanvas.Pen.Color := BlendThumbnailColor(RectangleLine.StrokeColor,
+        RectangleLine.Opacity * 0.35);
+    ACanvas.Pen.Width := LineStrokeWidth;
+    if RectangleLine.StrokeStyle <> vssSolid then
+      ACanvas.Pen.Style := psDash
+    else
+      ACanvas.Pen.Style := psSolid;
+    if Layer is TScreenLayoutEllipseLineLayer then
+      ACanvas.Ellipse(RectangleRect)
+    else if Layer is TScreenLayoutRoundedRectangleLineLayer then
+    begin
+      RoundedRectangleLine := TScreenLayoutRoundedRectangleLineLayer(Layer);
+      RoundedRadius := Max(Round(RoundedRectangleLine.CornerRadii.TopLeft *
+        Min(RectangleRect.Width / Max(RectangleLine.Bounds.Width, 1.0),
+          RectangleRect.Height / Max(RectangleLine.Bounds.Height, 1.0))), 0);
+      ACanvas.RoundRect(RectangleRect.Left, RectangleRect.Top,
+        RectangleRect.Right, RectangleRect.Bottom, RoundedRadius * 2,
+        RoundedRadius * 2);
+    end
+    else
+      ACanvas.Rectangle(RectangleRect);
+  end;
+  if Layer is TScreenLayoutArcLayer then
+  begin
+    ArcLayer := TScreenLayoutArcLayer(Layer);
+    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(ArcLayer.StrokeWidth);
+    ArcPoints := VectArtPathThumbnailPoints(
+      ScreenLayoutArcThumbnailSourcePoints(ArcLayer), ThumbnailRect,
+      LineStrokeWidth);
+    SavedDC := SaveDC(ACanvas.Handle);
+    try
+      IntersectClipRect(ACanvas.Handle, ThumbnailRect.Left,
+        ThumbnailRect.Top, ThumbnailRect.Right, ThumbnailRect.Bottom);
+      ACanvas.Brush.Style := bsClear;
+      if Layer.Visible then
+        ACanvas.Pen.Color := BlendThumbnailColor(ArcLayer.StrokeColor,
+          ArcLayer.Opacity)
+      else
+        ACanvas.Pen.Color := BlendThumbnailColor(ArcLayer.StrokeColor,
+          ArcLayer.Opacity * 0.35);
+      ACanvas.Pen.Width := LineStrokeWidth;
+      if ArcLayer.StrokeStyle <> vssSolid then
+        ACanvas.Pen.Style := psDash
+      else
+        ACanvas.Pen.Style := psSolid;
+      ACanvas.Polyline(ArcPoints);
+    finally
+      RestoreDC(ACanvas.Handle, SavedDC);
+    end;
   end;
   if Layer is TVectArtPathLayer then
   begin
@@ -609,6 +717,8 @@ begin
   if Layer is TVectArtCanvasLayer then
     DetailText := Format('%d x %d  %d%%', [TVectArtCanvasLayer(Layer).Width,
       TVectArtCanvasLayer(Layer).Height, Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutEllipseArcShapeLayer then
+    DetailText := Format('Arc Shape  %d%%', [Round(Layer.Opacity * 100)])
   else if Layer is TVectArtRectangleLayer then
     DetailText := Format('%d x %d  %d%%',
       [Round(TVectArtRectangleLayer(Layer).Bounds.Width),
@@ -619,6 +729,24 @@ begin
       DetailText := Format('Logo  %d%%', [Round(Layer.Opacity * 100)])
     else
       DetailText := Format('Image  %d%%', [Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutEllipseLineLayer then
+    DetailText := Format('Ellipse Line  %spx  %d%%',
+      [FormatFloat('0.##', TScreenLayoutEllipseLineLayer(Layer).StrokeWidth),
+       Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutRoundedRectangleLineLayer then
+    DetailText := Format('Rounded Rectangle Line  %spx  %d%%',
+      [FormatFloat('0.##',
+       TScreenLayoutRoundedRectangleLineLayer(Layer).StrokeWidth),
+       Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutRectangleLineLayer then
+    DetailText := Format('Rectangle Line  %spx  %d%%',
+      [FormatFloat('0.##',
+       TScreenLayoutRectangleLineLayer(Layer).StrokeWidth),
+       Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutArcLayer then
+    DetailText := Format('Arc  %spx  %d%%',
+      [FormatFloat('0.##', TScreenLayoutArcLayer(Layer).StrokeWidth),
+       Round(Layer.Opacity * 100)])
   else if Layer is TVectArtPathLayer then
   begin
     PathLayer := TVectArtPathLayer(Layer);
@@ -666,6 +794,11 @@ end;
 procedure TVectArtLayerRenderer.DrawLayerItem(ACanvas: TDirect2DCanvas;
   const ItemRect: TRect; Layer: TVectArtLayer; Selected, Active: Boolean);
 var
+  ArcLayer: TScreenLayoutArcLayer;
+  ArcPoints: TArray<TPoint>;
+  ArcShape: TScreenLayoutEllipseArcShapeLayer;
+  ArcShapeEnd: TPoint;
+  ArcShapeStart: TPoint;
   CanvasLayer: TVectArtCanvasLayer;
   CellRect: TRect;
   Column: Integer;
@@ -676,6 +809,8 @@ var
   PathDrawPoints: TArray<TPoint>;
   PathLayer: TVectArtPathLayer;
   PathPoints: TArray<TPoint>;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
+  RoundedRectangleLine: TScreenLayoutRoundedRectangleLineLayer;
   RectangleLayer: TVectArtRectangleLayer;
   RectangleRect: TRect;
   RoundedRectangleLayer: TScreenLayoutRoundedRectangleLayer;
@@ -764,7 +899,30 @@ begin
       ACanvas.Brush.Handle.SetOpacity(RectangleLayer.Opacity)
     else
       ACanvas.Brush.Handle.SetOpacity(RectangleLayer.Opacity * 0.35);
-    if Layer is TScreenLayoutRoundedRectangleLayer then
+    if Layer is TScreenLayoutEllipseArcShapeLayer then
+    begin
+      ArcShape := TScreenLayoutEllipseArcShapeLayer(Layer);
+      ArcShapeStart := Point(
+        Round((RectangleRect.Left + RectangleRect.Right) * 0.5 +
+          Cos(DegToRad(ArcShape.StartAngleDegrees)) *
+          RectangleRect.Width * 0.5),
+        Round((RectangleRect.Top + RectangleRect.Bottom) * 0.5 +
+          Sin(DegToRad(ArcShape.StartAngleDegrees)) *
+          RectangleRect.Height * 0.5));
+      ArcShapeEnd := Point(
+        Round((RectangleRect.Left + RectangleRect.Right) * 0.5 +
+          Cos(DegToRad(ArcShape.StartAngleDegrees +
+            ArcShape.SweepAngleDegrees)) * RectangleRect.Width * 0.5),
+        Round((RectangleRect.Top + RectangleRect.Bottom) * 0.5 +
+          Sin(DegToRad(ArcShape.StartAngleDegrees +
+            ArcShape.SweepAngleDegrees)) * RectangleRect.Height * 0.5));
+      ACanvas.Pie(RectangleRect.Left, RectangleRect.Top, RectangleRect.Right,
+        RectangleRect.Bottom, ArcShapeStart.X, ArcShapeStart.Y,
+        ArcShapeEnd.X, ArcShapeEnd.Y);
+    end
+    else if Layer is TScreenLayoutEllipseLayer then
+      ACanvas.Ellipse(RectangleRect)
+    else if Layer is TScreenLayoutRoundedRectangleLayer then
     begin
       RoundedRectangleLayer := TScreenLayoutRoundedRectangleLayer(Layer);
       RoundedRadius := Max(Round(RoundedRectangleLayer.CornerRadii.TopLeft *
@@ -777,6 +935,69 @@ begin
     else
       ACanvas.FillRect(RectangleRect);
     ACanvas.Brush.Handle.SetOpacity(1.0);
+  end;
+  if Layer is TScreenLayoutRectangleLineLayer then
+  begin
+    RectangleLine := TScreenLayoutRectangleLineLayer(Layer);
+    RectangleRect := FitThumbnailRect(ThumbnailRect,
+      Max(Round(RectangleLine.Bounds.Width), 1),
+      Max(Round(RectangleLine.Bounds.Height), 1));
+    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(
+      RectangleLine.StrokeWidth);
+    ACanvas.Brush.Style := bsClear;
+    if Layer.Visible then
+      ACanvas.Pen.Color := BlendThumbnailColor(RectangleLine.StrokeColor,
+        RectangleLine.Opacity)
+    else
+      ACanvas.Pen.Color := BlendThumbnailColor(RectangleLine.StrokeColor,
+        RectangleLine.Opacity * 0.35);
+    ACanvas.Pen.Width := LineStrokeWidth;
+    if RectangleLine.StrokeStyle <> vssSolid then
+      ACanvas.Pen.Style := psDash
+    else
+      ACanvas.Pen.Style := psSolid;
+    if Layer is TScreenLayoutEllipseLineLayer then
+      ACanvas.Ellipse(RectangleRect)
+    else if Layer is TScreenLayoutRoundedRectangleLineLayer then
+    begin
+      RoundedRectangleLine := TScreenLayoutRoundedRectangleLineLayer(Layer);
+      RoundedRadius := Max(Round(RoundedRectangleLine.CornerRadii.TopLeft *
+        Min(RectangleRect.Width / Max(RectangleLine.Bounds.Width, 1.0),
+          RectangleRect.Height / Max(RectangleLine.Bounds.Height, 1.0))), 0);
+      ACanvas.RoundRect(RectangleRect.Left, RectangleRect.Top,
+        RectangleRect.Right, RectangleRect.Bottom, RoundedRadius * 2,
+        RoundedRadius * 2);
+    end
+    else
+      ACanvas.Rectangle(RectangleRect);
+  end;
+  if Layer is TScreenLayoutArcLayer then
+  begin
+    ArcLayer := TScreenLayoutArcLayer(Layer);
+    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(ArcLayer.StrokeWidth);
+    ArcPoints := VectArtPathThumbnailPoints(
+      ScreenLayoutArcThumbnailSourcePoints(ArcLayer), ThumbnailRect,
+      LineStrokeWidth);
+    ACanvas.RenderTarget.PushAxisAlignedClip(ThumbnailRect,
+      D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    try
+      ACanvas.Brush.Style := bsClear;
+      if Layer.Visible then
+        ACanvas.Pen.Color := BlendThumbnailColor(ArcLayer.StrokeColor,
+          ArcLayer.Opacity)
+      else
+        ACanvas.Pen.Color := BlendThumbnailColor(ArcLayer.StrokeColor,
+          ArcLayer.Opacity * 0.35);
+      ACanvas.Pen.Width := LineStrokeWidth;
+      if ArcLayer.StrokeStyle <> vssSolid then
+        ACanvas.Pen.Style := psDash
+      else
+        ACanvas.Pen.Style := psSolid;
+      ACanvas.Polyline(ArcPoints);
+    finally
+      ACanvas.RenderTarget.PopAxisAlignedClip;
+    end;
+    ACanvas.Brush.Style := bsSolid;
   end;
   if Layer is TVectArtPathLayer then
   begin
@@ -869,6 +1090,8 @@ begin
   if Layer is TVectArtCanvasLayer then
     DetailText := Format('%d x %d  %d%%', [TVectArtCanvasLayer(Layer).Width,
       TVectArtCanvasLayer(Layer).Height, Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutEllipseArcShapeLayer then
+    DetailText := Format('Arc Shape  %d%%', [Round(Layer.Opacity * 100)])
   else if Layer is TVectArtRectangleLayer then
     DetailText := Format('%d x %d  %d%%',
       [Round(TVectArtRectangleLayer(Layer).Bounds.Width),
@@ -879,6 +1102,24 @@ begin
       DetailText := Format('Logo  %d%%', [Round(Layer.Opacity * 100)])
     else
       DetailText := Format('Image  %d%%', [Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutEllipseLineLayer then
+    DetailText := Format('Ellipse Line  %spx  %d%%',
+      [FormatFloat('0.##', TScreenLayoutEllipseLineLayer(Layer).StrokeWidth),
+       Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutRoundedRectangleLineLayer then
+    DetailText := Format('Rounded Rectangle Line  %spx  %d%%',
+      [FormatFloat('0.##',
+       TScreenLayoutRoundedRectangleLineLayer(Layer).StrokeWidth),
+       Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutRectangleLineLayer then
+    DetailText := Format('Rectangle Line  %spx  %d%%',
+      [FormatFloat('0.##',
+       TScreenLayoutRectangleLineLayer(Layer).StrokeWidth),
+       Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutArcLayer then
+    DetailText := Format('Arc  %spx  %d%%',
+      [FormatFloat('0.##', TScreenLayoutArcLayer(Layer).StrokeWidth),
+       Round(Layer.Opacity * 100)])
   else if Layer is TVectArtPathLayer then
   begin
     PathLayer := TVectArtPathLayer(Layer);

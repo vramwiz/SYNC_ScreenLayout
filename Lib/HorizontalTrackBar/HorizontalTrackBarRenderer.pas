@@ -1,4 +1,4 @@
-// 横型トラックバーの状態を受け取り、VCL Canvasへ外観だけを描画する。
+﻿// 横型トラックバーの状態を受け取り、VCL Canvasへ外観だけを描画する。
 unit HorizontalTrackBarRenderer;
 
 interface

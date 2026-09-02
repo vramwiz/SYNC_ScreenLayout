@@ -70,6 +70,21 @@ type
     procedure Undo; override;
   end;
 
+  TScreenLayoutArcAnglesCommand = class(TVectArtEditCommand)
+  private
+    FDocument: TVectArtDocument;
+    FLayerIndex: Integer;
+    FNewStartAngle: Single;
+    FNewSweepAngle: Single;
+    FOldStartAngle: Single;
+    FOldSweepAngle: Single;
+  public
+    constructor Create(ADocument: TVectArtDocument; LayerIndex: Integer;
+      OldStartAngle, OldSweepAngle, NewStartAngle, NewSweepAngle: Single);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
   TScreenLayoutRoundedRectangleRadiiCommand = class(TVectArtEditCommand)
   private
     FDocument: TVectArtDocument;
@@ -205,7 +220,12 @@ var
 begin
   if FDocument = nil then Exit;
   for I := 0 to Min(High(FLayerIndices), High(Values)) do
-    FDocument.SetRectangleBounds(FLayerIndices[I], Values[I]);
+    if FDocument[FLayerIndices[I]] is TScreenLayoutRectangleLineLayer then
+      FDocument.SetRectangleLineBounds(FLayerIndices[I], Values[I])
+    else if FDocument[FLayerIndices[I]] is TScreenLayoutArcLayer then
+      FDocument.SetArcBounds(FLayerIndices[I], Values[I])
+    else
+      FDocument.SetRectangleBounds(FLayerIndices[I], Values[I]);
 end;
 
 constructor TVectArtBoundsCommand.Create(ADocument: TVectArtDocument;
@@ -264,13 +284,58 @@ end;
 procedure TVectArtRotationCommand.Execute;
 begin
   if FDocument <> nil then
-    FDocument.SetRectangleRotation(FLayerIndex, FNewValue);
+    if FDocument[FLayerIndex] is TScreenLayoutRectangleLineLayer then
+      FDocument.SetRectangleLineRotation(FLayerIndex, FNewValue)
+    else if FDocument[FLayerIndex] is TScreenLayoutArcLayer then
+      FDocument.SetArcRotation(FLayerIndex, FNewValue)
+    else
+      FDocument.SetRectangleRotation(FLayerIndex, FNewValue);
 end;
 
 procedure TVectArtRotationCommand.Undo;
 begin
   if FDocument <> nil then
-    FDocument.SetRectangleRotation(FLayerIndex, FOldValue);
+    if FDocument[FLayerIndex] is TScreenLayoutRectangleLineLayer then
+      FDocument.SetRectangleLineRotation(FLayerIndex, FOldValue)
+    else if FDocument[FLayerIndex] is TScreenLayoutArcLayer then
+      FDocument.SetArcRotation(FLayerIndex, FOldValue)
+    else
+      FDocument.SetRectangleRotation(FLayerIndex, FOldValue);
+end;
+
+constructor TScreenLayoutArcAnglesCommand.Create(
+  ADocument: TVectArtDocument; LayerIndex: Integer; OldStartAngle,
+  OldSweepAngle, NewStartAngle, NewSweepAngle: Single);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FLayerIndex := LayerIndex;
+  FOldStartAngle := OldStartAngle;
+  FOldSweepAngle := OldSweepAngle;
+  FNewStartAngle := NewStartAngle;
+  FNewSweepAngle := NewSweepAngle;
+end;
+
+procedure TScreenLayoutArcAnglesCommand.Execute;
+begin
+  if (FDocument <> nil) and (FLayerIndex > 0) and
+    (FLayerIndex < FDocument.LayerCount) and
+    (FDocument[FLayerIndex] is TScreenLayoutEllipseArcShapeLayer) then
+    FDocument.SetEllipseArcShapeAngles(FLayerIndex, FNewStartAngle,
+      FNewSweepAngle)
+  else if FDocument <> nil then
+    FDocument.SetArcAngles(FLayerIndex, FNewStartAngle, FNewSweepAngle);
+end;
+
+procedure TScreenLayoutArcAnglesCommand.Undo;
+begin
+  if (FDocument <> nil) and (FLayerIndex > 0) and
+    (FLayerIndex < FDocument.LayerCount) and
+    (FDocument[FLayerIndex] is TScreenLayoutEllipseArcShapeLayer) then
+    FDocument.SetEllipseArcShapeAngles(FLayerIndex, FOldStartAngle,
+      FOldSweepAngle)
+  else if FDocument <> nil then
+    FDocument.SetArcAngles(FLayerIndex, FOldStartAngle, FOldSweepAngle);
 end;
 
 constructor TScreenLayoutRoundedRectangleRadiiCommand.Create(
@@ -286,13 +351,21 @@ end;
 
 procedure TScreenLayoutRoundedRectangleRadiiCommand.Execute;
 begin
-  if FDocument <> nil then
+  if (FDocument <> nil) and (FLayerIndex > 0) and
+    (FLayerIndex < FDocument.LayerCount) and
+    (FDocument[FLayerIndex] is TScreenLayoutRoundedRectangleLineLayer) then
+    FDocument.SetRoundedRectangleLineCornerRadii(FLayerIndex, FNewValue)
+  else if FDocument <> nil then
     FDocument.SetRoundedRectangleCornerRadii(FLayerIndex, FNewValue);
 end;
 
 procedure TScreenLayoutRoundedRectangleRadiiCommand.Undo;
 begin
-  if FDocument <> nil then
+  if (FDocument <> nil) and (FLayerIndex > 0) and
+    (FLayerIndex < FDocument.LayerCount) and
+    (FDocument[FLayerIndex] is TScreenLayoutRoundedRectangleLineLayer) then
+    FDocument.SetRoundedRectangleLineCornerRadii(FLayerIndex, FOldValue)
+  else if FDocument <> nil then
     FDocument.SetRoundedRectangleCornerRadii(FLayerIndex, FOldValue);
 end;
 
@@ -323,7 +396,11 @@ procedure TVectArtStrokeCommand.Apply(Color: TColor; Width: Single;
 begin
   if FDocument = nil then
     Exit;
-  if FDocument[FLayerIndex] is TVectArtPathLayer then
+  if FDocument[FLayerIndex] is TScreenLayoutRectangleLineLayer then
+    FDocument.SetRectangleLineStroke(FLayerIndex, Color, Width, Style)
+  else if FDocument[FLayerIndex] is TScreenLayoutArcLayer then
+    FDocument.SetArcStroke(FLayerIndex, Color, Width, Style)
+  else if FDocument[FLayerIndex] is TVectArtPathLayer then
     FDocument.SetPathStroke(FLayerIndex, Color, Width, Style);
 end;
 
@@ -366,13 +443,19 @@ end;
 procedure TVectArtPathLineCapCommand.Execute;
 begin
   if FDocument <> nil then
-    FDocument.SetPathLineCap(FLayerIndex, FNewValue);
+    if FDocument[FLayerIndex] is TScreenLayoutArcLayer then
+      FDocument.SetArcLineCap(FLayerIndex, FNewValue)
+    else
+      FDocument.SetPathLineCap(FLayerIndex, FNewValue);
 end;
 
 procedure TVectArtPathLineCapCommand.Undo;
 begin
   if FDocument <> nil then
-    FDocument.SetPathLineCap(FLayerIndex, FOldValue);
+    if FDocument[FLayerIndex] is TScreenLayoutArcLayer then
+      FDocument.SetArcLineCap(FLayerIndex, FOldValue)
+    else
+      FDocument.SetPathLineCap(FLayerIndex, FOldValue);
 end;
 
 procedure TVectArtLayerBooleanCommand.ApplyValue(Value: Boolean);

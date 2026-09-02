@@ -13,6 +13,8 @@ uses
 type
   TVectArtObjectPropertiesControl = class(TCustomControl)
   private
+    FArcEndAngleEdit: TEdit;
+    FArcStartAngleEdit: TEdit;
     FColorEdit: TEdit;
     FDocument: TVectArtDocument;
     FEditHistory: TVectArtEditHistory;
@@ -28,6 +30,7 @@ type
     FXEdit: TEdit;
     FYEdit: TEdit;
     procedure ApplyColor;
+    procedure ApplyArcAngles;
     procedure ApplyGeometry;
     procedure ApplyOpacity;
     procedure ApplyStrokeColor;
@@ -67,7 +70,7 @@ implementation
 uses
   System.Generics.Collections, System.Math, System.SysUtils, Winapi.Windows,
   Vcl.Graphics, ScreenLayoutGeometry, ScreenLayoutShapeEditCommands,
-  ScreenLayoutPathOperations;
+  ScreenLayoutEllipseGeometry, ScreenLayoutPathOperations;
 
 const
   COLOR_BACKGROUND = TColor($00212121);
@@ -76,6 +79,40 @@ const
   COLOR_TEXT = TColor($00EEEEEE);
   EDIT_HEIGHT = 25;
   MIN_OBJECT_SIZE = 1.0;
+
+procedure ReadStrokeLayer(Layer: TVectArtLayer; out Color: TColor;
+  out Width: Single; out Style: TVectArtMifStrokeStyle);
+begin
+  if Layer is TScreenLayoutRectangleLineLayer then
+  begin
+    Color := TScreenLayoutRectangleLineLayer(Layer).StrokeColor;
+    Width := TScreenLayoutRectangleLineLayer(Layer).StrokeWidth;
+    Style := TScreenLayoutRectangleLineLayer(Layer).StrokeStyle;
+  end
+  else if Layer is TScreenLayoutArcLayer then
+  begin
+    Color := TScreenLayoutArcLayer(Layer).StrokeColor;
+    Width := TScreenLayoutArcLayer(Layer).StrokeWidth;
+    Style := TScreenLayoutArcLayer(Layer).StrokeStyle;
+  end
+  else
+  begin
+    Color := TVectArtPathLayer(Layer).StrokeColor;
+    Width := TVectArtPathLayer(Layer).StrokeWidth;
+    Style := TVectArtPathLayer(Layer).MifStrokeStyle;
+  end;
+end;
+
+procedure SetStrokeLayer(Document: TVectArtDocument; Index: Integer;
+  Color: TColor; Width: Single; Style: TVectArtMifStrokeStyle);
+begin
+  if Document[Index] is TScreenLayoutRectangleLineLayer then
+    Document.SetRectangleLineStroke(Index, Color, Width, Style)
+  else if Document[Index] is TScreenLayoutArcLayer then
+    Document.SetArcStroke(Index, Color, Width, Style)
+  else
+    Document.SetPathStroke(Index, Color, Width, Style);
+end;
 
 constructor TVectArtObjectPropertiesControl.Create(AOwner: TComponent);
 var
@@ -89,6 +126,8 @@ begin
   FYEdit := NewDarkEdit;
   FWidthEdit := NewDarkEdit;
   FHeightEdit := NewDarkEdit;
+  FArcStartAngleEdit := NewDarkEdit;
+  FArcEndAngleEdit := NewDarkEdit;
   FColorEdit := NewDarkEdit;
   FStrokeColorEdit := NewDarkEdit;
   FStrokeWidthEdit := NewDarkEdit;
@@ -103,25 +142,98 @@ begin
   end;
   SetEditorsEnabled(False);
   SetPathStyleControlsVisible(False);
+  FArcStartAngleEdit.Visible := False;
+  FArcEndAngleEdit.Visible := False;
+end;
+
+procedure TVectArtObjectPropertiesControl.ApplyArcAngles;
+var
+  ArcLayer: TScreenLayoutArcLayer;
+  ArcShapeLayer: TScreenLayoutEllipseArcShapeLayer;
+  EndAngle: Double;
+  NewStartAngle: Single;
+  NewSweepAngle: Single;
+  OldStartAngle: Single;
+  OldSweepAngle: Single;
+  StartAngle: Double;
+  SweepValue: Double;
+begin
+  if FUpdating or (FDocument = nil) or
+    (FDocument.SelectionCount <> 1) or SelectedLayersHaveLock or
+    not ((FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) or
+      (FDocument[FDocument.SelectedIndex] is
+        TScreenLayoutEllipseArcShapeLayer)) then
+    Exit;
+  if not TryStrToFloat(Trim(FArcStartAngleEdit.Text), StartAngle) or
+    not TryStrToFloat(Trim(FArcEndAngleEdit.Text), EndAngle) then
+  begin
+    RefreshFromDocument;
+    Exit;
+  end;
+  if FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer then
+  begin
+    ArcLayer := TScreenLayoutArcLayer(FDocument[FDocument.SelectedIndex]);
+    OldStartAngle := ArcLayer.StartAngleDegrees;
+    OldSweepAngle := ArcLayer.SweepAngleDegrees;
+  end
+  else
+  begin
+    ArcShapeLayer := TScreenLayoutEllipseArcShapeLayer(
+      FDocument[FDocument.SelectedIndex]);
+    OldStartAngle := ArcShapeLayer.StartAngleDegrees;
+    OldSweepAngle := ArcShapeLayer.SweepAngleDegrees;
+  end;
+  NewStartAngle := NormalizeScreenLayoutEllipseAngleDegrees(StartAngle);
+  SweepValue := EndAngle - NewStartAngle;
+  if Abs(SweepValue) >= 360.0 then
+    NewSweepAngle := 360.0
+  else
+    NewSweepAngle := NormalizeScreenLayoutEllipseAngleDegrees(SweepValue);
+  if SameValue(OldStartAngle, NewStartAngle) and
+    SameValue(OldSweepAngle, NewSweepAngle) then
+    Exit;
+  if FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer then
+    FDocument.SetArcAngles(FDocument.SelectedIndex, NewStartAngle,
+      NewSweepAngle)
+  else
+    FDocument.SetEllipseArcShapeAngles(FDocument.SelectedIndex,
+      NewStartAngle, NewSweepAngle);
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutArcAnglesCommand.Create(FDocument,
+      FDocument.SelectedIndex, OldStartAngle, OldSweepAngle,
+      NewStartAngle, NewSweepAngle));
 end;
 
 procedure TVectArtObjectPropertiesControl.ApplyPathLineCap(Sender: TObject);
 var
+  ArcLayer: TScreenLayoutArcLayer;
   NewValue: TVectArtLineCap;
   OldValue: TVectArtLineCap;
   PathLayer: TVectArtPathLayer;
 begin
   if FUpdating or (FDocument = nil) or
     (FDocument.SelectionCount <> 1) or SelectedLayersHaveLock or
-    not (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) or
+    not ((FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) or
+      (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer)) or
     not (Sender is TVectArtLineCapButton) then
     Exit;
-  PathLayer := TVectArtPathLayer(FDocument[FDocument.SelectedIndex]);
-  OldValue := PathLayer.LineCap;
+  if FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer then
+  begin
+    ArcLayer := TScreenLayoutArcLayer(FDocument[FDocument.SelectedIndex]);
+    OldValue := ArcLayer.LineCap;
+  end
+  else
+  begin
+    PathLayer := TVectArtPathLayer(FDocument[FDocument.SelectedIndex]);
+    OldValue := PathLayer.LineCap;
+  end;
   NewValue := TVectArtLineCapButton(Sender).LineCap;
   if OldValue = NewValue then
     Exit;
-  FDocument.SetPathLineCap(FDocument.SelectedIndex, NewValue);
+  if FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer then
+    FDocument.SetArcLineCap(FDocument.SelectedIndex, NewValue)
+  else
+    FDocument.SetPathLineCap(FDocument.SelectedIndex, NewValue);
   if FEditHistory <> nil then
     FEditHistory.AddApplied(TVectArtPathLineCapCommand.Create(FDocument,
       FDocument.SelectedIndex, OldValue, NewValue));
@@ -139,7 +251,9 @@ var
   LayerIndices: TArray<Integer>;
   NewColor: TColor;
   OldColor: TColor;
-  PathLayer: TVectArtPathLayer;
+  Layer: TVectArtLayer;
+  OldStyle: TVectArtMifStrokeStyle;
+  OldWidth: Single;
   Red: Integer;
   Value: Integer;
 begin
@@ -163,14 +277,12 @@ begin
   for I := 0 to High(LayerIndices) do
   begin
     LayerIndex := LayerIndices[I];
-    PathLayer := TVectArtPathLayer(FDocument[LayerIndex]);
-    OldColor := PathLayer.StrokeColor;
-    FDocument.SetPathStroke(LayerIndex, NewColor, PathLayer.StrokeWidth,
-      PathLayer.MifStrokeStyle);
+    Layer := FDocument[LayerIndex];
+    ReadStrokeLayer(Layer, OldColor, OldWidth, OldStyle);
+    SetStrokeLayer(FDocument, LayerIndex, NewColor, OldWidth, OldStyle);
     if (Command <> nil) and (OldColor <> NewColor) then
       Command.Add(TVectArtStrokeCommand.Create(FDocument, LayerIndex,
-        OldColor, PathLayer.StrokeWidth, PathLayer.MifStrokeStyle, NewColor,
-        PathLayer.StrokeWidth, PathLayer.MifStrokeStyle));
+        OldColor, OldWidth, OldStyle, NewColor, OldWidth, OldStyle));
   end;
   if (Command <> nil) and (Command.Count > 0) then
     FEditHistory.AddApplied(Command)
@@ -188,7 +300,9 @@ var
   LayerIndices: TArray<Integer>;
   NewStyle: TVectArtMifStrokeStyle;
   OldStyle: TVectArtMifStrokeStyle;
-  PathLayer: TVectArtPathLayer;
+  Color: TColor;
+  Layer: TVectArtLayer;
+  Width: Single;
 begin
   if FUpdating or (FDocument = nil) or (FDocument.SelectionCount = 0) or
     SelectedLayersHaveLock or (FMifStrokeStyleCombo.ItemIndex < 0) then
@@ -204,14 +318,12 @@ begin
   for I := 0 to High(LayerIndices) do
   begin
     LayerIndex := LayerIndices[I];
-    PathLayer := TVectArtPathLayer(FDocument[LayerIndex]);
-    OldStyle := PathLayer.MifStrokeStyle;
-    FDocument.SetPathStroke(LayerIndex, PathLayer.StrokeColor,
-      PathLayer.StrokeWidth, NewStyle);
+    Layer := FDocument[LayerIndex];
+    ReadStrokeLayer(Layer, Color, Width, OldStyle);
+    SetStrokeLayer(FDocument, LayerIndex, Color, Width, NewStyle);
     if (Command <> nil) and (OldStyle <> NewStyle) then
       Command.Add(TVectArtStrokeCommand.Create(FDocument, LayerIndex,
-        PathLayer.StrokeColor, PathLayer.StrokeWidth, OldStyle,
-        PathLayer.StrokeColor, PathLayer.StrokeWidth, NewStyle));
+        Color, Width, OldStyle, Color, Width, NewStyle));
   end;
   if (Command <> nil) and (Command.Count > 0) then
     FEditHistory.AddApplied(Command)
@@ -229,7 +341,9 @@ var
   LayerIndices: TArray<Integer>;
   NewWidth: Double;
   OldWidth: Single;
-  PathLayer: TVectArtPathLayer;
+  Color: TColor;
+  Layer: TVectArtLayer;
+  Style: TVectArtMifStrokeStyle;
 begin
   if FUpdating or (FDocument = nil) or (FDocument.SelectionCount = 0) or
     SelectedLayersHaveLock then
@@ -247,14 +361,12 @@ begin
   for I := 0 to High(LayerIndices) do
   begin
     LayerIndex := LayerIndices[I];
-    PathLayer := TVectArtPathLayer(FDocument[LayerIndex]);
-    OldWidth := PathLayer.StrokeWidth;
-    FDocument.SetPathStroke(LayerIndex, PathLayer.StrokeColor, NewWidth,
-      PathLayer.MifStrokeStyle);
+    Layer := FDocument[LayerIndex];
+    ReadStrokeLayer(Layer, Color, OldWidth, Style);
+    SetStrokeLayer(FDocument, LayerIndex, Color, NewWidth, Style);
     if (Command <> nil) and not SameValue(OldWidth, NewWidth) then
       Command.Add(TVectArtStrokeCommand.Create(FDocument, LayerIndex,
-        PathLayer.StrokeColor, OldWidth, PathLayer.MifStrokeStyle,
-        PathLayer.StrokeColor, NewWidth, PathLayer.MifStrokeStyle));
+        Color, OldWidth, Style, Color, NewWidth, Style));
   end;
   if (Command <> nil) and (Command.Count > 0) then
     FEditHistory.AddApplied(Command)
@@ -322,6 +434,7 @@ end;
 procedure TVectArtObjectPropertiesControl.ApplyGeometry;
 var
   AngleRadians: Double;
+  ArcLayer: TScreenLayoutArcLayer;
   Bounds: TRectF;
   HeightValue: Double;
   I: Integer;
@@ -341,6 +454,7 @@ var
   OldStartPoint: TPointF;
   OldPathVertices: TArray<TScreenLayoutVertex>;
   PathLayer: TVectArtPathLayer;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
   ImageLayer: TVectArtImageLayer;
   ScaleX: Single;
   ScaleY: Single;
@@ -359,6 +473,50 @@ begin
     not TryStrToFloat(Trim(FHeightEdit.Text), HeightValue) then
   begin
     RefreshFromDocument;
+    Exit;
+  end;
+  if (FDocument.SelectionCount = 1) and
+    (FDocument[FDocument.SelectedIndex] is
+      TScreenLayoutRectangleLineLayer) then
+  begin
+    RectangleLine := TScreenLayoutRectangleLineLayer(
+      FDocument[FDocument.SelectedIndex]);
+    WidthValue := Max(WidthValue, MIN_OBJECT_SIZE);
+    HeightValue := Max(HeightValue, MIN_OBJECT_SIZE);
+    OldBounds := [RectangleLine.Bounds];
+    NewBounds := [TRectF.Create(XValue - WidthValue * 0.5,
+      YValue - HeightValue * 0.5, XValue + WidthValue * 0.5,
+      YValue + HeightValue * 0.5)];
+    if SameValue(OldBounds[0].Left, NewBounds[0].Left) and
+      SameValue(OldBounds[0].Top, NewBounds[0].Top) and
+      SameValue(OldBounds[0].Right, NewBounds[0].Right) and
+      SameValue(OldBounds[0].Bottom, NewBounds[0].Bottom) then
+      Exit;
+    FDocument.SetRectangleLineBounds(FDocument.SelectedIndex, NewBounds[0]);
+    if FEditHistory <> nil then
+      FEditHistory.AddApplied(TVectArtBoundsCommand.Create(FDocument,
+        [FDocument.SelectedIndex], OldBounds, NewBounds));
+    Exit;
+  end;
+  if (FDocument.SelectionCount = 1) and
+    (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) then
+  begin
+    ArcLayer := TScreenLayoutArcLayer(FDocument[FDocument.SelectedIndex]);
+    WidthValue := Max(WidthValue, MIN_OBJECT_SIZE);
+    HeightValue := Max(HeightValue, MIN_OBJECT_SIZE);
+    OldBounds := [ArcLayer.Bounds];
+    NewBounds := [TRectF.Create(XValue - WidthValue * 0.5,
+      YValue - HeightValue * 0.5, XValue + WidthValue * 0.5,
+      YValue + HeightValue * 0.5)];
+    if SameValue(OldBounds[0].Left, NewBounds[0].Left) and
+      SameValue(OldBounds[0].Top, NewBounds[0].Top) and
+      SameValue(OldBounds[0].Right, NewBounds[0].Right) and
+      SameValue(OldBounds[0].Bottom, NewBounds[0].Bottom) then
+      Exit;
+    FDocument.SetArcBounds(FDocument.SelectedIndex, NewBounds[0]);
+    if FEditHistory <> nil then
+      FEditHistory.AddApplied(TVectArtBoundsCommand.Create(FDocument,
+        [FDocument.SelectedIndex], OldBounds, NewBounds));
     Exit;
   end;
   if (FDocument.SelectionCount = 1) and
@@ -526,6 +684,8 @@ begin
       for I := 1 to FDocument.LayerCount - 1 do
         if FDocument.IsLayerSelected(I) and
           ((FDocument[I] is TVectArtRectangleLayer) or
+           (FDocument[I] is TScreenLayoutRectangleLineLayer) or
+           (FDocument[I] is TScreenLayoutArcLayer) or
            (FDocument[I] is TVectArtPathLayer) or
            (FDocument[I] is TVectArtImageLayer)) then
           Indices.Add(I);
@@ -576,7 +736,9 @@ end;
 
 procedure TVectArtObjectPropertiesControl.EditExit(Sender: TObject);
 begin
-  if Sender = FColorEdit then
+  if (Sender = FArcStartAngleEdit) or (Sender = FArcEndAngleEdit) then
+    ApplyArcAngles
+  else if Sender = FColorEdit then
     ApplyColor
   else if Sender = FStrokeColorEdit then
     ApplyStrokeColor
@@ -666,7 +828,9 @@ begin
     if FDocument <> nil then
       for I := 1 to FDocument.LayerCount - 1 do
         if FDocument.IsLayerSelected(I) and
-          (FDocument[I] is TVectArtPathLayer) then
+          ((FDocument[I] is TScreenLayoutRectangleLineLayer) or
+           (FDocument[I] is TVectArtPathLayer) or
+           (FDocument[I] is TScreenLayoutArcLayer)) then
           Indices.Add(I);
     Result := Indices.ToArray;
   finally
@@ -728,6 +892,11 @@ begin
   end;
   if FColorEdit.Visible then
     Canvas.TextOut(12, 139, 'Fill color');
+  if FArcStartAngleEdit.Visible then
+  begin
+    Canvas.TextOut(12, 139, 'Start angle');
+    Canvas.TextOut((ClientWidth div 2) + 4, 139, 'End angle');
+  end;
   if FStrokeColorEdit.Visible then
   begin
     Canvas.TextOut(12, 190, 'Stroke color');
@@ -767,6 +936,8 @@ end;
 
 procedure TVectArtObjectPropertiesControl.RefreshFromDocument;
 var
+  ArcLayer: TScreenLayoutArcLayer;
+  ArcShapeLayer: TScreenLayoutEllipseArcShapeLayer;
   Bounds: TRectF;
   ColorValue: TColor;
   CommonColor: Boolean;
@@ -777,6 +948,7 @@ var
   OpacityValue: Single;
   PathLayer: TVectArtPathLayer;
   PathVertices: TArray<TScreenLayoutVertex>;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
   RectangleLayer: TVectArtRectangleLayer;
   StrokeColorValue: TColor;
 begin
@@ -785,7 +957,98 @@ begin
     SetPathStyleControlsVisible(False);
     SetStrokeControlsVisible(False);
     FColorEdit.Visible := False;
+    FArcStartAngleEdit.Visible := False;
+    FArcEndAngleEdit.Visible := False;
     if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
+      (FDocument[FDocument.SelectedIndex] is
+        TScreenLayoutRectangleLineLayer) then
+    begin
+      RectangleLine := TScreenLayoutRectangleLineLayer(
+        FDocument[FDocument.SelectedIndex]);
+      Bounds := RectangleLine.Bounds;
+      FXEdit.Text := FormatFloat('0.##', (Bounds.Left + Bounds.Right) * 0.5);
+      FYEdit.Text := FormatFloat('0.##', (Bounds.Top + Bounds.Bottom) * 0.5);
+      FWidthEdit.Text := FormatFloat('0.##', Bounds.Width);
+      FHeightEdit.Text := FormatFloat('0.##', Bounds.Height);
+      SetStrokeControlsVisible(True);
+      StrokeColorValue := ColorToRGB(RectangleLine.StrokeColor);
+      FStrokeColorEdit.Text := Format('#%.2x%.2x%.2x',
+        [GetRValue(StrokeColorValue), GetGValue(StrokeColorValue),
+         GetBValue(StrokeColorValue)]);
+      FStrokeWidthEdit.Text := FormatFloat('0.##', RectangleLine.StrokeWidth);
+      FMifStrokeStyleCombo.SetPendingItemIndex(
+        Ord(RectangleLine.StrokeStyle));
+      FOpacityEdit.Text := FormatFloat('0.##', RectangleLine.Opacity * 100);
+      SetEditorsEnabled(not RectangleLine.Locked);
+      FColorEdit.Enabled := False;
+    end
+    else if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
+      (FDocument[FDocument.SelectedIndex] is
+        TScreenLayoutEllipseArcShapeLayer) then
+    begin
+      ArcShapeLayer := TScreenLayoutEllipseArcShapeLayer(
+        FDocument[FDocument.SelectedIndex]);
+      Bounds := ArcShapeLayer.Bounds;
+      FXEdit.Text := FormatFloat('0.##', (Bounds.Left + Bounds.Right) * 0.5);
+      FYEdit.Text := FormatFloat('0.##', (Bounds.Top + Bounds.Bottom) * 0.5);
+      FWidthEdit.Text := FormatFloat('0.##', Bounds.Width);
+      FHeightEdit.Text := FormatFloat('0.##', Bounds.Height);
+      FArcStartAngleEdit.Visible := True;
+      FArcEndAngleEdit.Visible := True;
+      FArcStartAngleEdit.Text := FormatFloat('0.##',
+        ArcShapeLayer.StartAngleDegrees);
+      FArcEndAngleEdit.Text := FormatFloat('0.##',
+        ArcShapeLayer.StartAngleDegrees + ArcShapeLayer.SweepAngleDegrees);
+      FColorEdit.Visible := True;
+      ColorValue := ColorToRGB(ArcShapeLayer.FillColor);
+      FColorEdit.Text := Format('#%.2x%.2x%.2x', [GetRValue(ColorValue),
+        GetGValue(ColorValue), GetBValue(ColorValue)]);
+      FOpacityEdit.Text := FormatFloat('0.##', ArcShapeLayer.Opacity * 100);
+      SetEditorsEnabled(not ArcShapeLayer.Locked);
+      FStrokeColorEdit.Enabled := False;
+      FStrokeWidthEdit.Enabled := False;
+      FMifStrokeStyleCombo.Enabled := False;
+    end
+    else if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
+      (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) then
+    begin
+      ArcLayer := TScreenLayoutArcLayer(FDocument[FDocument.SelectedIndex]);
+      Bounds := ArcLayer.Bounds;
+      FXEdit.Text := FormatFloat('0.##', (Bounds.Left + Bounds.Right) * 0.5);
+      FYEdit.Text := FormatFloat('0.##', (Bounds.Top + Bounds.Bottom) * 0.5);
+      FWidthEdit.Text := FormatFloat('0.##', Bounds.Width);
+      FHeightEdit.Text := FormatFloat('0.##', Bounds.Height);
+      FArcStartAngleEdit.Visible := True;
+      FArcEndAngleEdit.Visible := True;
+      FArcStartAngleEdit.Text := FormatFloat('0.##',
+        ArcLayer.StartAngleDegrees);
+      FArcEndAngleEdit.Text := FormatFloat('0.##',
+        ArcLayer.StartAngleDegrees + ArcLayer.SweepAngleDegrees);
+      SetStrokeControlsVisible(True);
+      StrokeColorValue := ColorToRGB(ArcLayer.StrokeColor);
+      FStrokeColorEdit.Text := Format('#%.2x%.2x%.2x',
+        [GetRValue(StrokeColorValue), GetGValue(StrokeColorValue),
+         GetBValue(StrokeColorValue)]);
+      FStrokeWidthEdit.Text := FormatFloat('0.##', ArcLayer.StrokeWidth);
+      FMifStrokeStyleCombo.SetPendingItemIndex(Ord(ArcLayer.StrokeStyle));
+      SetPathStyleControlsVisible(True);
+      FPathLineCapButtons[vlcSquare].Selected :=
+        ArcLayer.LineCap = vlcSquare;
+      FPathLineCapButtons[vlcRound].Selected :=
+        ArcLayer.LineCap = vlcRound;
+      FPathLineCapButtons[vlcTriangle].Selected :=
+        ArcLayer.LineCap = vlcTriangle;
+      FOpacityEdit.Text := FormatFloat('0.##', ArcLayer.Opacity * 100);
+      SetEditorsEnabled(not ArcLayer.Locked);
+      FColorEdit.Enabled := False;
+      if ArcLayer.Locked then
+      begin
+        FPathLineCapButtons[vlcSquare].Enabled := False;
+        FPathLineCapButtons[vlcRound].Enabled := False;
+        FPathLineCapButtons[vlcTriangle].Enabled := False;
+      end;
+    end
+    else if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
       (FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) then
     begin
       RectangleLayer := TVectArtRectangleLayer(
@@ -973,6 +1236,8 @@ begin
       ClearEditValue(FYEdit);
       ClearEditValue(FWidthEdit);
       ClearEditValue(FHeightEdit);
+      ClearEditValue(FArcStartAngleEdit);
+      ClearEditValue(FArcEndAngleEdit);
       ClearEditValue(FColorEdit);
       ClearEditValue(FStrokeColorEdit);
       ClearEditValue(FStrokeWidthEdit);
@@ -1028,6 +1293,9 @@ begin
   FWidthEdit.SetBounds(12, 107, ColumnWidth, EDIT_HEIGHT);
   FHeightEdit.SetBounds((ClientWidth div 2) + 4, 107, ColumnWidth,
     EDIT_HEIGHT);
+  FArcStartAngleEdit.SetBounds(12, 158, ColumnWidth, EDIT_HEIGHT);
+  FArcEndAngleEdit.SetBounds((ClientWidth div 2) + 4, 158, ColumnWidth,
+    EDIT_HEIGHT);
   FColorEdit.SetBounds(12, 158, Max(ClientWidth - 66, 48), EDIT_HEIGHT);
   FStrokeColorEdit.SetBounds(12, 207, Max(ClientWidth - 66, 48), EDIT_HEIGHT);
   FStrokeWidthEdit.SetBounds(12, 256, ColumnWidth, EDIT_HEIGHT);
@@ -1057,6 +1325,8 @@ begin
   FYEdit.Enabled := Value;
   FWidthEdit.Enabled := Value;
   FHeightEdit.Enabled := Value;
+  FArcStartAngleEdit.Enabled := Value;
+  FArcEndAngleEdit.Enabled := Value;
   FColorEdit.Enabled := Value;
   FStrokeColorEdit.Enabled := Value;
   FStrokeWidthEdit.Enabled := Value;

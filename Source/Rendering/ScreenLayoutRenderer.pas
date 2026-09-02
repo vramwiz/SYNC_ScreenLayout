@@ -49,7 +49,8 @@ implementation
 uses
   System.Math, System.Skia, System.Types, System.UITypes,
   TextRendererSkiaRuntime, Vcl.Graphics, Winapi.Windows,
-  ScreenLayoutGeometry, ScreenLayoutShapePath;
+  ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
+  ScreenLayoutShapePath;
 
 const
   MAX_RENDER_DIMENSION = 16384;
@@ -220,9 +221,17 @@ procedure RenderVectArtDocument(Document: TVectArtDocument;
   Target: TVectArtRenderBuffer; Width, Height: Integer;
   MinimumStrokeWidth: Single);
 var
+  ArcEndPoint: TPointF;
+  ArcEndTangent: TPointF;
+  ArcLayer: TScreenLayoutArcLayer;
+  ArcStartPoint: TPointF;
+  ArcStartTangent: TPointF;
   Canvas: ISkCanvas;
   CanvasLayer: TVectArtCanvasLayer;
   DashIntervals: TArray<Single>;
+  EllipseLayer: TScreenLayoutEllipseLayer;
+  EllipseLine: TScreenLayoutEllipseLineLayer;
+  EllipseArcShape: TScreenLayoutEllipseArcShapeLayer;
   I: Integer;
   J: Integer;
   ImageInfo: TSkImageInfo;
@@ -240,7 +249,10 @@ var
   PathSegmentCount: Integer;
   PathVertices: TArray<TScreenLayoutVertex>;
   RectangleLayer: TVectArtRectangleLayer;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
+  RectangleLineCorners: TVectArtQuad;
   RoundedRectangleLayer: TScreenLayoutRoundedRectangleLayer;
+  RoundedRectangleLine: TScreenLayoutRoundedRectangleLineLayer;
   ScaleX: Single;
   ScaleY: Single;
   StrokeWidth: Single;
@@ -348,6 +360,103 @@ begin
       end;
       Continue;
     end;
+    if Layer is TScreenLayoutRectangleLineLayer then
+    begin
+      RectangleLine := TScreenLayoutRectangleLineLayer(Layer);
+      if Layer is TScreenLayoutEllipseLineLayer then
+      begin
+        EllipseLine := TScreenLayoutEllipseLineLayer(Layer);
+        Path := BuildScreenLayoutEllipseLinePath(EllipseLine);
+      end
+      else if Layer is TScreenLayoutRoundedRectangleLineLayer then
+      begin
+        RoundedRectangleLine := TScreenLayoutRoundedRectangleLineLayer(Layer);
+        Path := BuildRoundedRectanglePath(RoundedRectangleLine.Bounds,
+          RoundedRectangleLine.CornerRadii);
+      end
+      else
+      begin
+        RectangleLineCorners := RectangleCorners(RectangleLine.Bounds,
+          RectangleLine.RotationDegrees);
+        PathBuilder := TSkPathBuilder.Create;
+        PathBuilder.MoveTo(RectangleLineCorners[0].X,
+          RectangleLineCorners[0].Y);
+        for J := 1 to High(RectangleLineCorners) do
+          PathBuilder.LineTo(RectangleLineCorners[J].X,
+            RectangleLineCorners[J].Y);
+        PathBuilder.Close;
+        Path := PathBuilder.Detach;
+      end;
+      StrokeWidth := Max(RectangleLine.StrokeWidth, MinimumStrokeWidth);
+      StrokePaint.Color := VclColorToAlphaColor(RectangleLine.StrokeColor,
+        RectangleLine.Opacity);
+      StrokePaint.StrokeWidth := StrokeWidth;
+      StrokePaint.StrokeCap := TSkStrokeCap.Butt;
+      DashIntervals := VectArtStrokeDashIntervals(RectangleLine.StrokeStyle,
+        StrokeWidth);
+      if Length(DashIntervals) > 0 then
+        StrokePaint.PathEffect := TSkPathEffect.MakeDash(DashIntervals, 0)
+      else
+        StrokePaint.PathEffect := nil;
+      if Layer is TScreenLayoutRoundedRectangleLineLayer then
+      begin
+        Canvas.Save;
+        try
+          Canvas.Rotate(RectangleLine.RotationDegrees,
+            (RectangleLine.Bounds.Left + RectangleLine.Bounds.Right) * 0.5,
+            (RectangleLine.Bounds.Top + RectangleLine.Bounds.Bottom) * 0.5);
+          Canvas.DrawPath(Path, StrokePaint);
+        finally
+          Canvas.Restore;
+        end;
+      end
+      else
+        Canvas.DrawPath(Path, StrokePaint);
+      Continue;
+    end;
+    if Layer is TScreenLayoutArcLayer then
+    begin
+      ArcLayer := TScreenLayoutArcLayer(Layer);
+      Path := BuildScreenLayoutArcPath(ArcLayer);
+      StrokeWidth := Max(ArcLayer.StrokeWidth, MinimumStrokeWidth);
+      StrokePaint.Color := VclColorToAlphaColor(ArcLayer.StrokeColor,
+        ArcLayer.Opacity);
+      StrokePaint.StrokeWidth := StrokeWidth;
+      DashIntervals := VectArtStrokeDashIntervals(ArcLayer.StrokeStyle,
+        StrokeWidth);
+      if Length(DashIntervals) > 0 then
+        StrokePaint.PathEffect := TSkPathEffect.MakeDash(DashIntervals, 0)
+      else
+        StrokePaint.PathEffect := nil;
+      case ArcLayer.LineCap of
+        vlcRound: StrokePaint.StrokeCap := TSkStrokeCap.Round;
+        vlcTriangle: StrokePaint.StrokeCap := TSkStrokeCap.Butt;
+      else
+        StrokePaint.StrokeCap := TSkStrokeCap.Square;
+      end;
+      Canvas.DrawPath(Path, StrokePaint);
+      if ArcLayer.LineCap = vlcTriangle then
+      begin
+        ArcStartPoint := ScreenLayoutEllipsePoint(ArcLayer.Bounds,
+          ArcLayer.RotationDegrees, ArcLayer.StartAngleDegrees);
+        ArcEndPoint := ScreenLayoutArcEndPoint(ArcLayer.Bounds,
+          ArcLayer.RotationDegrees, ArcLayer.StartAngleDegrees,
+          ArcLayer.SweepAngleDegrees);
+        ArcStartTangent := ScreenLayoutEllipseTangent(ArcLayer.Bounds,
+          ArcLayer.RotationDegrees, ArcLayer.StartAngleDegrees);
+        ArcEndTangent := ScreenLayoutEllipseTangent(ArcLayer.Bounds,
+          ArcLayer.RotationDegrees, ArcLayer.StartAngleDegrees +
+          ArcLayer.SweepAngleDegrees);
+        Paint.Color := StrokePaint.Color;
+        Paint.Style := TSkPaintStyle.Fill;
+        DrawTriangleLineCap(Canvas, ArcStartPoint,
+          TPointF.Create(-ArcStartTangent.X, -ArcStartTangent.Y),
+          StrokeWidth * 0.5, Paint);
+        DrawTriangleLineCap(Canvas, ArcEndPoint, ArcEndTangent,
+          StrokeWidth * 0.5, Paint);
+      end;
+      Continue;
+    end;
     if Layer is TVectArtPathLayer then
     begin
       PathLayer := TVectArtPathLayer(Layer);
@@ -404,6 +513,25 @@ begin
         Paint.Style := TSkPaintStyle.Fill;
         DrawPathTriangleCaps(Canvas, PathVertices, StrokeWidth, Paint);
       end;
+      Continue;
+    end;
+    if Layer is TScreenLayoutEllipseArcShapeLayer then
+    begin
+      EllipseArcShape := TScreenLayoutEllipseArcShapeLayer(Layer);
+      Paint.AntiAlias := True;
+      Paint.Color := VclColorToAlphaColor(EllipseArcShape.FillColor,
+        EllipseArcShape.Opacity);
+      Canvas.DrawPath(BuildScreenLayoutEllipseArcShapePath(EllipseArcShape),
+        Paint);
+      Continue;
+    end;
+    if Layer is TScreenLayoutEllipseLayer then
+    begin
+      EllipseLayer := TScreenLayoutEllipseLayer(Layer);
+      Paint.AntiAlias := True;
+      Paint.Color := VclColorToAlphaColor(EllipseLayer.FillColor,
+        EllipseLayer.Opacity);
+      Canvas.DrawPath(BuildScreenLayoutEllipsePath(EllipseLayer), Paint);
       Continue;
     end;
     if Layer is TScreenLayoutRoundedRectangleLayer then

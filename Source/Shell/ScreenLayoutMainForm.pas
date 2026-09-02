@@ -66,6 +66,7 @@ type
     FLayerMenuItem: TPanel;
     FObjectPropertiesMenuItem: TPanel;
     FToolPaletteMenuItem: TPanel;
+    procedure ActivateToolShortcut(const Tool: TVectArtEditorTool);
     procedure AttachFrame(AFrame: TFrame; AHost: TWinControl);
     procedure CanvasSettingsRequest(Sender: TObject);
     function CreateViewMenuItem(const Caption: string): TPanel;
@@ -79,6 +80,8 @@ type
     procedure InitializeShortcuts;
     function IsEditingSurfaceFocused: Boolean;
     function IsTextInputFocused: Boolean;
+    function ToolShortcutEnabled: Boolean;
+    function VertexShortcutEnabled: Boolean;
     procedure LoadLayoutSettings;
     procedure LoadDocument;
     procedure SaveLayoutSettings;
@@ -128,6 +131,12 @@ begin
     Result := '✓ ' + Caption
   else
     Result := '□ ' + Caption;
+end;
+
+procedure TMainForm.ActivateToolShortcut(const Tool: TVectArtEditorTool);
+begin
+  if FEditorState <> nil then
+    FEditorState.ActivateTool(Tool);
 end;
 
 function ConstrainToMonitor(const Bounds: TRect): TRect;
@@ -330,6 +339,7 @@ end;
 procedure TMainForm.EditorStateChanged(Sender: TObject);
 var
   CanvasSize: string;
+  VertexMode: string;
 begin
   if FEditorFrame <> nil then
     FEditorFrame.CanvasControl.Invalidate;
@@ -342,23 +352,48 @@ begin
       FDocument.CanvasLayer.Height])
   else
     CanvasSize := '-';
+  VertexMode := 'Sharp';
   if (FEditorState <> nil) and
+    (FEditorState.NextVertexKind = slvkBezier) then
+    VertexMode := 'Bezier';
+  if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetRectangleLine) then
+    lblStatus.Caption := 'Ready   Tool: Rectangle Line   Canvas: ' + CanvasSize
+  else if (FEditorState <> nil) and
     (FEditorState.CurrentTool = vetRectangle) then
     lblStatus.Caption := 'Ready   Tool: Rectangle   Canvas: ' + CanvasSize
+  else if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetRoundedRectangleLine) then
+    lblStatus.Caption := 'Ready   Tool: Rounded Rectangle Line   Canvas: ' +
+      CanvasSize
   else if (FEditorState <> nil) and
     (FEditorState.CurrentTool = vetRoundedRectangle) then
     lblStatus.Caption := 'Ready   Tool: Rounded Rectangle   Canvas: ' +
       CanvasSize
   else if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetEllipseLine) then
+    lblStatus.Caption := 'Ready   Tool: Ellipse Line   Canvas: ' + CanvasSize
+  else if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetEllipse) then
+    lblStatus.Caption := 'Ready   Tool: Ellipse   Canvas: ' + CanvasSize
+  else if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetArc) then
+    lblStatus.Caption := 'Ready   Tool: Arc   Canvas: ' + CanvasSize
+  else if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetArcShape) then
+    lblStatus.Caption := 'Ready   Tool: Arc Shape   Canvas: ' + CanvasSize
+  else if (FEditorState <> nil) and
     (FEditorState.CurrentTool = vetLine) then
     lblStatus.Caption := 'Ready   Tool: Line   Canvas: ' + CanvasSize
   else if (FEditorState <> nil) and
     (FEditorState.CurrentTool = vetPath) then
-    lblStatus.Caption := 'Path: V sharp / B bezier, click vertices, ' +
+    lblStatus.Caption := 'Path (' + VertexMode +
+      '): V sharp / B bezier, click vertices, ' +
       'double-click/right-click to finish   Canvas: ' + CanvasSize
   else if (FEditorState <> nil) and
     (FEditorState.CurrentTool = vetShape) then
-    lblStatus.Caption := 'Shape: click at least three vertices, then click ' +
+    lblStatus.Caption := 'Shape (' + VertexMode +
+      '): click at least three vertices, then click ' +
       'the first point or double-click/right-click to close   Canvas: ' +
       CanvasSize
   else
@@ -572,6 +607,66 @@ end;
 procedure TMainForm.InitializeShortcuts;
 begin
   FShortcuts := TShortcutAction.Create;
+  FShortcuts.Add(Ord('S'), [],
+    procedure
+    begin
+      ActivateToolShortcut(vetSelect);
+    end,
+    ToolShortcutEnabled);
+  FShortcuts.Add(Ord('R'), [],
+    procedure
+    begin
+      ActivateToolShortcut(vetRectangle);
+    end,
+    ToolShortcutEnabled);
+  FShortcuts.Add(Ord('U'), [],
+    procedure
+    begin
+      ActivateToolShortcut(vetRoundedRectangle);
+    end,
+    ToolShortcutEnabled);
+  FShortcuts.Add(Ord('C'), [],
+    procedure
+    begin
+      ActivateToolShortcut(vetEllipse);
+    end,
+    ToolShortcutEnabled);
+  FShortcuts.Add(Ord('A'), [],
+    procedure
+    begin
+      ActivateToolShortcut(vetArcShape);
+    end,
+    ToolShortcutEnabled);
+  FShortcuts.Add(Ord('L'), [],
+    procedure
+    begin
+      ActivateToolShortcut(vetLine);
+    end,
+    ToolShortcutEnabled);
+  FShortcuts.Add(Ord('P'), [],
+    procedure
+    begin
+      ActivateToolShortcut(vetPath);
+    end,
+    ToolShortcutEnabled);
+  FShortcuts.Add(Ord('G'), [],
+    procedure
+    begin
+      ActivateToolShortcut(vetShape);
+    end,
+    ToolShortcutEnabled);
+  FShortcuts.Add(Ord('V'), [],
+    procedure
+    begin
+      FEditorState.NextVertexKind := slvkSharp;
+    end,
+    VertexShortcutEnabled);
+  FShortcuts.Add(Ord('B'), [],
+    procedure
+    begin
+      FEditorState.NextVertexKind := slvkBezier;
+    end,
+    VertexShortcutEnabled);
   FShortcuts.Add(Ord('Z'), [ssCtrl],
     procedure
     begin
@@ -656,6 +751,17 @@ begin
   FocusedControl := FindControl(GetFocus);
   Result := (FocusedControl is TCustomEdit) or
     (FocusedControl is TCustomComboBox);
+end;
+
+function TMainForm.ToolShortcutEnabled: Boolean;
+begin
+  Result := (FEditorState <> nil) and not IsTextInputFocused;
+end;
+
+function TMainForm.VertexShortcutEnabled: Boolean;
+begin
+  Result := ToolShortcutEnabled and
+    (FEditorState.CurrentTool in [vetPath, vetShape]);
 end;
 
 procedure TMainForm.SelectAllLayers;

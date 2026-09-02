@@ -7,8 +7,10 @@ uses
   System.Classes, Vcl.Graphics, ScreenLayoutDocument;
 
 type
-  TVectArtEditorTool = (vetSelect, vetRectangle, vetRoundedRectangle,
-    vetLine, vetPath, vetShape);
+  TVectArtEditorTool = (vetSelect, vetRectangleLine, vetRectangle,
+    vetRoundedRectangleLine, vetRoundedRectangle,
+    vetEllipseLine, vetEllipse, vetArc, vetArcShape, vetLine, vetPath,
+    vetShape);
 
   TVectArtEditorState = class
   private
@@ -17,6 +19,7 @@ type
     FLineStrokeColor: TColor;
     FLineMifStrokeStyle: TVectArtMifStrokeStyle;
     FLineStrokeWidth: Single;
+    FNextVertexKind: TScreenLayoutVertexKind;
     FOnChanged: TNotifyEvent;
     FRectangleFillColor: TColor;
     FRectangleOpacity: Single;
@@ -25,10 +28,13 @@ type
     procedure SetLineStrokeColor(const Value: TColor);
     procedure SetLineMifStrokeStyle(const Value: TVectArtMifStrokeStyle);
     procedure SetLineStrokeWidth(const Value: Single);
+    procedure SetNextVertexKind(const Value: TScreenLayoutVertexKind);
     procedure SetRectangleFillColor(const Value: TColor);
     procedure SetRectangleOpacity(const Value: Single);
   public
     constructor Create;
+    // ツールを選択し、選択済みの組み合わせツールでは線／図形または頂点種別を切り替える。
+    procedure ActivateTool(const Value: TVectArtEditorTool);
     property CurrentTool: TVectArtEditorTool read FCurrentTool
       write SetCurrentTool;
     property LineCap: TVectArtLineCap read FLineCap write SetLineCap;
@@ -38,6 +44,8 @@ type
       write SetLineMifStrokeStyle;
     property LineStrokeWidth: Single read FLineStrokeWidth
       write SetLineStrokeWidth;
+    property NextVertexKind: TScreenLayoutVertexKind read FNextVertexKind
+      write SetNextVertexKind;
     property OnChanged: TNotifyEvent read FOnChanged write FOnChanged;
     property RectangleFillColor: TColor read FRectangleFillColor
       write SetRectangleFillColor;
@@ -61,8 +69,64 @@ begin
   FLineStrokeColor := clBlack;
   FLineMifStrokeStyle := vssSolid;
   FLineStrokeWidth := 1.0;
+  FNextVertexKind := slvkSharp;
   FRectangleFillColor := DEFAULT_RECTANGLE_COLOR;
   FRectangleOpacity := 1.0;
+end;
+
+procedure TVectArtEditorState.ActivateTool(const Value: TVectArtEditorTool);
+begin
+  if (Value in [vetRectangleLine, vetRectangle]) and
+    (FCurrentTool in [vetRectangleLine, vetRectangle]) then
+  begin
+    if FCurrentTool = vetRectangleLine then
+      CurrentTool := vetRectangle
+    else
+      CurrentTool := vetRectangleLine;
+  end
+  else if (Value in [vetRoundedRectangleLine, vetRoundedRectangle]) and
+    (FCurrentTool in [vetRoundedRectangleLine, vetRoundedRectangle]) then
+  begin
+    if FCurrentTool = vetRoundedRectangleLine then
+      CurrentTool := vetRoundedRectangle
+    else
+      CurrentTool := vetRoundedRectangleLine;
+  end
+  else if (Value in [vetEllipseLine, vetEllipse]) and
+    (FCurrentTool in [vetEllipseLine, vetEllipse]) then
+  begin
+    if FCurrentTool = vetEllipseLine then
+      CurrentTool := vetEllipse
+    else
+      CurrentTool := vetEllipseLine;
+  end
+  else if (Value in [vetArc, vetArcShape]) and
+    (FCurrentTool in [vetArc, vetArcShape]) then
+  begin
+    if FCurrentTool = vetArc then
+      CurrentTool := vetArcShape
+    else
+      CurrentTool := vetArc;
+  end
+  else if (Value in [vetPath, vetShape]) and (FCurrentTool = Value) then
+  begin
+    if FNextVertexKind = slvkSharp then
+      NextVertexKind := slvkBezier
+    else
+      NextVertexKind := slvkSharp;
+  end
+  else
+    CurrentTool := Value;
+end;
+
+procedure TVectArtEditorState.SetNextVertexKind(
+  const Value: TScreenLayoutVertexKind);
+begin
+  if FNextVertexKind = Value then
+    Exit;
+  FNextVertexKind := Value;
+  if Assigned(FOnChanged) then
+    FOnChanged(Self);
 end;
 
 procedure TVectArtEditorState.SetLineCap(const Value: TVectArtLineCap);

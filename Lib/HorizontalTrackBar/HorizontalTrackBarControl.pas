@@ -1,4 +1,4 @@
-// Windows標準TRACKBARへ依存せず、任意の配色で描画できる汎用横型トラックバー。
+﻿// Windows標準TRACKBARへ依存せず、任意の配色で描画できる汎用横型トラックバー。
 unit HorizontalTrackBarControl;
 
 interface

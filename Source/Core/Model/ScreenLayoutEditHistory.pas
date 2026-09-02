@@ -1,4 +1,4 @@
-// 適用済み編集コマンドのUndo／Redo位置と破棄を管理する。
+﻿// 適用済み編集コマンドのUndo／Redo位置と破棄を管理する。
 unit ScreenLayoutEditHistory;
 
 interface

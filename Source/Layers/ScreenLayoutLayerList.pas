@@ -1,4 +1,4 @@
-// レイヤー一覧の描画方式切替、クリック判定、Document接続を担当する。
+﻿// レイヤー一覧の描画方式切替、クリック判定、Document接続を担当する。
 unit ScreenLayoutLayerList;
 
 interface

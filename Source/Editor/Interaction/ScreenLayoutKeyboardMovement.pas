@@ -1,4 +1,4 @@
-// 選択図形のキーボード微移動とUndo履歴への登録を担当する。
+﻿// 選択図形のキーボード微移動とUndo履歴への登録を担当する。
 unit ScreenLayoutKeyboardMovement;
 
 interface
@@ -6,7 +6,7 @@ interface
 uses
   System.Classes, ScreenLayoutDocument, ScreenLayoutEditHistory;
 
-// 矢印キーを選択Rectangleの移動として処理した場合にTrueを返す。
+// 矢印キーを選択Rectangleまたは楕円弧の移動として処理した場合にTrueを返す。
 function HandleSelectionNudge(ADocument: TVectArtDocument;
   AEditHistory: TVectArtEditHistory; Key: Word;
   Shift: TShiftState): Boolean;
@@ -58,7 +58,9 @@ begin
         // マウス移動と同様、ロックを含む選択全体は移動しない。
         if ADocument[I].Locked then
           Exit;
-        if ADocument[I] is TVectArtRectangleLayer then
+        if (ADocument[I] is TScreenLayoutRectangleLineLayer) or
+          (ADocument[I] is TVectArtRectangleLayer) or
+          (ADocument[I] is TScreenLayoutArcLayer) then
           Indices.Add(I);
       end;
     if Indices.Count = 0 then
@@ -68,10 +70,23 @@ begin
     SetLength(NewBounds, Indices.Count);
     for I := 0 to Indices.Count - 1 do
     begin
-      OldBounds[I] := TVectArtRectangleLayer(ADocument[Indices[I]]).Bounds;
+      if ADocument[Indices[I]] is TScreenLayoutRectangleLineLayer then
+        OldBounds[I] := TScreenLayoutRectangleLineLayer(
+          ADocument[Indices[I]]).Bounds
+      else if ADocument[Indices[I]] is TScreenLayoutArcLayer then
+        OldBounds[I] := TScreenLayoutArcLayer(
+          ADocument[Indices[I]]).Bounds
+      else
+        OldBounds[I] := TVectArtRectangleLayer(
+          ADocument[Indices[I]]).Bounds;
       NewBounds[I] := OldBounds[I];
       NewBounds[I].Offset(DX, DY);
-      ADocument.SetRectangleBounds(Indices[I], NewBounds[I]);
+      if ADocument[Indices[I]] is TScreenLayoutRectangleLineLayer then
+        ADocument.SetRectangleLineBounds(Indices[I], NewBounds[I])
+      else if ADocument[Indices[I]] is TScreenLayoutArcLayer then
+        ADocument.SetArcBounds(Indices[I], NewBounds[I])
+      else
+        ADocument.SetRectangleBounds(Indices[I], NewBounds[I]);
     end;
     AEditHistory.AddApplied(TVectArtBoundsCommand.Create(ADocument,
       Indices.ToArray, OldBounds, NewBounds));

@@ -104,6 +104,61 @@ begin
     Result[I + 1] := Char(CodePoints[I]);
 end;
 
+function ReadLineLayer(Layer: TVectArtLayer; out Color: TColor;
+  out Width: Single; out Style: TVectArtMifStrokeStyle;
+  out LineCap: TVectArtLineCap): Boolean;
+begin
+  Result := Layer is TScreenLayoutRectangleLineLayer;
+  if Result then
+  begin
+    Color := TScreenLayoutRectangleLineLayer(Layer).StrokeColor;
+    Width := TScreenLayoutRectangleLineLayer(Layer).StrokeWidth;
+    Style := TScreenLayoutRectangleLineLayer(Layer).StrokeStyle;
+    LineCap := vlcSquare;
+    Exit;
+  end;
+  Result := Layer is TScreenLayoutArcLayer;
+  if Result then
+  begin
+    Color := TScreenLayoutArcLayer(Layer).StrokeColor;
+    Width := TScreenLayoutArcLayer(Layer).StrokeWidth;
+    Style := TScreenLayoutArcLayer(Layer).StrokeStyle;
+    LineCap := TScreenLayoutArcLayer(Layer).LineCap;
+    Exit;
+  end;
+  Result := (Layer is TVectArtPathLayer) and
+    not TVectArtPathLayer(Layer).Closed;
+  if Result then
+  begin
+    Color := TVectArtPathLayer(Layer).StrokeColor;
+    Width := TVectArtPathLayer(Layer).StrokeWidth;
+    Style := TVectArtPathLayer(Layer).MifStrokeStyle;
+    LineCap := TVectArtPathLayer(Layer).LineCap;
+  end;
+end;
+
+procedure SetLineLayerStroke(Document: TVectArtDocument; Index: Integer;
+  Color: TColor; Width: Single; Style: TVectArtMifStrokeStyle);
+begin
+  if Document[Index] is TScreenLayoutRectangleLineLayer then
+    Document.SetRectangleLineStroke(Index, Color, Width, Style)
+  else if Document[Index] is TScreenLayoutArcLayer then
+    Document.SetArcStroke(Index, Color, Width, Style)
+  else
+    Document.SetPathStroke(Index, Color, Width, Style);
+end;
+
+procedure SetLineLayerCap(Document: TVectArtDocument; Index: Integer;
+  Value: TVectArtLineCap);
+begin
+  if Document[Index] is TScreenLayoutRectangleLineLayer then
+    Exit
+  else if Document[Index] is TScreenLayoutArcLayer then
+    Document.SetArcLineCap(Index, Value)
+  else
+    Document.SetPathLineCap(Index, Value);
+end;
+
 constructor TVectArtLineToolbarControl.CreateForHost(AOwner: TComponent;
   AHost: TWinControl);
 begin
@@ -250,9 +305,13 @@ end;
 procedure TVectArtLineToolbarControl.ApplyLineCap(Value: TVectArtLineCap);
 var
   Command: TVectArtCompoundCommand;
+  Color: TColor;
   I: Integer;
   Indices: TArray<Integer>;
-  Layer: TVectArtPathLayer;
+  Layer: TVectArtLayer;
+  OldLineCap: TVectArtLineCap;
+  Style: TVectArtMifStrokeStyle;
+  Width: Single;
 begin
   if FUpdating then
     Exit;
@@ -269,13 +328,16 @@ begin
     try
       for I := 0 to High(Indices) do
       begin
-        Layer := TVectArtPathLayer(FDocument[Indices[I]]);
-        if Layer.LineCap = Value then
+        Layer := FDocument[Indices[I]];
+        if Layer is TScreenLayoutRectangleLineLayer then
+          Continue;
+        ReadLineLayer(Layer, Color, Width, Style, OldLineCap);
+        if OldLineCap = Value then
           Continue;
         if Command <> nil then
           Command.Add(TVectArtPathLineCapCommand.Create(FDocument, Indices[I],
-            Layer.LineCap, Value));
-        FDocument.SetPathLineCap(Indices[I], Value);
+            OldLineCap, Value));
+        SetLineLayerCap(FDocument, Indices[I], Value);
       end;
     finally
       if FDocument <> nil then
@@ -297,9 +359,13 @@ procedure TVectArtLineToolbarControl.ApplyMifStrokeStyle(
   Value: TVectArtMifStrokeStyle);
 var
   Command: TVectArtCompoundCommand;
+  Color: TColor;
   I: Integer;
   Indices: TArray<Integer>;
-  Layer: TVectArtPathLayer;
+  Layer: TVectArtLayer;
+  LineCap: TVectArtLineCap;
+  OldStyle: TVectArtMifStrokeStyle;
+  Width: Single;
 begin
   if FUpdating then
     Exit;
@@ -313,15 +379,14 @@ begin
       Command := TVectArtCompoundCommand.Create;
     for I := 0 to High(Indices) do
     begin
-      Layer := TVectArtPathLayer(FDocument[Indices[I]]);
-      if Layer.MifStrokeStyle = Value then
+      Layer := FDocument[Indices[I]];
+      ReadLineLayer(Layer, Color, Width, OldStyle, LineCap);
+      if OldStyle = Value then
         Continue;
       if Command <> nil then
         Command.Add(TVectArtStrokeCommand.Create(FDocument, Indices[I],
-          Layer.StrokeColor, Layer.StrokeWidth, Layer.MifStrokeStyle,
-          Layer.StrokeColor, Layer.StrokeWidth, Value));
-      FDocument.SetPathStroke(Indices[I], Layer.StrokeColor,
-        Layer.StrokeWidth, Value);
+          Color, Width, OldStyle, Color, Width, Value));
+      SetLineLayerStroke(FDocument, Indices[I], Color, Width, Value);
     end;
     if (Command <> nil) and (Command.Count > 0) then
       FEditHistory.AddApplied(Command)
@@ -344,9 +409,13 @@ procedure TVectArtLineToolbarControl.ApplyStrokeWidthInternal(Value: Single;
   RecordHistory: Boolean);
 var
   Command: TVectArtCompoundCommand;
+  Color: TColor;
   I: Integer;
   Indices: TArray<Integer>;
-  Layer: TVectArtPathLayer;
+  Layer: TVectArtLayer;
+  LineCap: TVectArtLineCap;
+  Style: TVectArtMifStrokeStyle;
+  Width: Single;
 begin
   if FUpdating then
     Exit;
@@ -365,15 +434,14 @@ begin
     try
       for I := 0 to High(Indices) do
       begin
-        Layer := TVectArtPathLayer(FDocument[Indices[I]]);
-        if SameValue(Layer.StrokeWidth, Value) then
+        Layer := FDocument[Indices[I]];
+        ReadLineLayer(Layer, Color, Width, Style, LineCap);
+        if SameValue(Width, Value) then
           Continue;
         if Command <> nil then
           Command.Add(TVectArtStrokeCommand.Create(FDocument, Indices[I],
-            Layer.StrokeColor, Layer.StrokeWidth, Layer.MifStrokeStyle,
-            Layer.StrokeColor, Value, Layer.MifStrokeStyle));
-        FDocument.SetPathStroke(Indices[I], Layer.StrokeColor, Value,
-          Layer.MifStrokeStyle);
+            Color, Width, Style, Color, Value, Style));
+        SetLineLayerStroke(FDocument, Indices[I], Color, Value, Style);
       end;
     finally
       if FDocument <> nil then
@@ -394,13 +462,17 @@ end;
 
 procedure TVectArtLineToolbarControl.CommitTrackGesture;
 var
+  Color: TColor;
   Command: TVectArtCompoundCommand;
   FinalWidth: Single;
   HasFinalWidth: Boolean;
   I: Integer;
   Index: Integer;
   Indices: TArray<Integer>;
-  Layer: TVectArtPathLayer;
+  Layer: TVectArtLayer;
+  LineCap: TVectArtLineCap;
+  Style: TVectArtMifStrokeStyle;
+  Width: Single;
 begin
   if not FTrackGestureActive then
     Exit;
@@ -416,15 +488,17 @@ begin
       Index := FTrackStartIndices[I];
       if (FDocument = nil) or not InRange(Index, 0,
         FDocument.LayerCount - 1) or
-        not (FDocument[Index] is TVectArtPathLayer) or
-        TVectArtPathLayer(FDocument[Index]).Closed then
+        not ((FDocument[Index] is TScreenLayoutRectangleLineLayer) or
+          (FDocument[Index] is TScreenLayoutArcLayer) or
+          ((FDocument[Index] is TVectArtPathLayer) and
+           not TVectArtPathLayer(FDocument[Index]).Closed)) then
         Continue;
-      Layer := TVectArtPathLayer(FDocument[Index]);
-      if SameValue(FTrackStartWidths[I], Layer.StrokeWidth) then
+      Layer := FDocument[Index];
+      ReadLineLayer(Layer, Color, Width, Style, LineCap);
+      if SameValue(FTrackStartWidths[I], Width) then
         Continue;
       Command.Add(TVectArtStrokeCommand.Create(FDocument, Index,
-        Layer.StrokeColor, FTrackStartWidths[I], Layer.MifStrokeStyle,
-        Layer.StrokeColor, Layer.StrokeWidth, Layer.MifStrokeStyle));
+        Color, FTrackStartWidths[I], Style, Color, Width, Style));
     end;
   if (Command <> nil) and (Command.Count > 0) then
     FEditHistory.AddApplied(Command)
@@ -433,7 +507,7 @@ begin
   Indices := SelectedLineIndices;
   HasFinalWidth := (FDocument <> nil) and (Length(Indices) > 0);
   if HasFinalWidth then
-    FinalWidth := TVectArtPathLayer(FDocument[Indices[0]]).StrokeWidth;
+    ReadLineLayer(FDocument[Indices[0]], Color, FinalWidth, Style, LineCap);
   FTrackStartIndices := nil;
   FTrackStartWidths := nil;
   if FTrackDocumentUpdateActive then
@@ -529,16 +603,21 @@ end;
 
 procedure TVectArtLineToolbarControl.RefreshState;
 var
+  Color: TColor;
   CommonStyle: Boolean;
   CommonLineCap: Boolean;
   CommonWidth: Boolean;
   Cap: TVectArtLineCap;
+  CurrentLineCap: TVectArtLineCap;
+  CurrentStyle: TVectArtMifStrokeStyle;
+  CurrentWidth: Single;
   I: Integer;
   Indices: TArray<Integer>;
-  Layer: TVectArtPathLayer;
+  Layer: TVectArtLayer;
   LineCapValue: TVectArtLineCap;
   Locked: Boolean;
   StyleValue: TVectArtMifStrokeStyle;
+  SupportsLineCap: Boolean;
   WidthValue: Single;
 begin
   if FUpdating then
@@ -550,24 +629,36 @@ begin
     begin
       Visible := True;
       if Length(Indices) = 1 then
-        FContextText := 'Selected Line'
+        if FDocument[Indices[0]] is TScreenLayoutEllipseLineLayer then
+          FContextText := 'Selected Ellipse Line'
+        else if FDocument[Indices[0]] is
+          TScreenLayoutRoundedRectangleLineLayer then
+          FContextText := 'Selected Rounded Rectangle Line'
+        else if FDocument[Indices[0]] is TScreenLayoutRectangleLineLayer then
+          FContextText := 'Selected Rectangle Line'
+        else if FDocument[Indices[0]] is TScreenLayoutArcLayer then
+          FContextText := 'Selected Arc'
+        else
+          FContextText := 'Selected Line'
       else
         FContextText := Format('%d Lines', [Length(Indices)]);
-      Layer := TVectArtPathLayer(FDocument[Indices[0]]);
-      WidthValue := Layer.StrokeWidth;
-      LineCapValue := Layer.LineCap;
-      StyleValue := Layer.MifStrokeStyle;
+      Layer := FDocument[Indices[0]];
+      ReadLineLayer(Layer, Color, WidthValue, StyleValue, LineCapValue);
       CommonWidth := True;
       CommonStyle := True;
       CommonLineCap := True;
+      SupportsLineCap := not (Layer is TScreenLayoutRectangleLineLayer);
       for I := 1 to High(Indices) do
       begin
-        Layer := TVectArtPathLayer(FDocument[Indices[I]]);
-        CommonWidth := CommonWidth and SameValue(Layer.StrokeWidth,
-          WidthValue);
-        CommonStyle := CommonStyle and (Layer.MifStrokeStyle = StyleValue);
+        Layer := FDocument[Indices[I]];
+        SupportsLineCap := SupportsLineCap and
+          not (Layer is TScreenLayoutRectangleLineLayer);
+        ReadLineLayer(Layer, Color, CurrentWidth, CurrentStyle,
+          CurrentLineCap);
+        CommonWidth := CommonWidth and SameValue(CurrentWidth, WidthValue);
+        CommonStyle := CommonStyle and (CurrentStyle = StyleValue);
         CommonLineCap := CommonLineCap and
-          (Layer.LineCap = LineCapValue);
+          (CurrentLineCap = LineCapValue);
       end;
       if CommonWidth then
       begin
@@ -593,15 +684,26 @@ begin
       FStrokeWidthTrackBar.Enabled := not Locked;
       FMifStrokeStyleCombo.Enabled := not Locked;
       for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
-        FLineCapButtons[Cap].Enabled := not Locked;
+        FLineCapButtons[Cap].Enabled := not Locked and SupportsLineCap;
     end
     else if (FDocument <> nil) and (FDocument.SelectionCount = 0) and
       (FEditorState <> nil) and
-      (FEditorState.CurrentTool in [vetLine, vetPath]) then
+      (FEditorState.CurrentTool in [vetRectangleLine,
+        vetRoundedRectangleLine, vetArc, vetLine,
+        vetEllipseLine,
+        vetPath]) then
     begin
       Visible := True;
       if FEditorState.CurrentTool = vetPath then
         FContextText := 'Next Path'
+      else if FEditorState.CurrentTool = vetRectangleLine then
+        FContextText := 'Next Rectangle Line'
+      else if FEditorState.CurrentTool = vetRoundedRectangleLine then
+        FContextText := 'Next Rounded Rectangle Line'
+      else if FEditorState.CurrentTool = vetEllipseLine then
+        FContextText := 'Next Ellipse Line'
+      else if FEditorState.CurrentTool = vetArc then
+        FContextText := 'Next Arc'
       else
         FContextText := 'Next Line';
       FStrokeWidthEdit.Text := FormatFloat('0.##',
@@ -614,7 +716,9 @@ begin
       for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
       begin
         FLineCapButtons[Cap].Selected := Cap = FEditorState.LineCap;
-        FLineCapButtons[Cap].Enabled := True;
+        FLineCapButtons[Cap].Enabled :=
+          not (FEditorState.CurrentTool in [vetRectangleLine,
+            vetRoundedRectangleLine, vetEllipseLine]);
       end;
       FStrokeWidthEdit.Enabled := True;
       FStrokeWidthTrackBar.Enabled := True;
@@ -648,8 +752,10 @@ begin
     Exit;
   Selection := FDocument.GetSelectedLayerIndices;
   for I := 0 to High(Selection) do
-    if not (FDocument[Selection[I]] is TVectArtPathLayer) or
-      TVectArtPathLayer(FDocument[Selection[I]]).Closed then
+    if not ((FDocument[Selection[I]] is TScreenLayoutRectangleLineLayer) or
+      (FDocument[Selection[I]] is TScreenLayoutArcLayer) or
+      ((FDocument[Selection[I]] is TVectArtPathLayer) and
+       not TVectArtPathLayer(FDocument[Selection[I]]).Closed)) then
       Exit;
   Result := Selection;
 end;
@@ -685,7 +791,10 @@ end;
 procedure TVectArtLineToolbarControl.TrackBarMouseDown(Sender: TObject;
   Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 var
+  Color: TColor;
   I: Integer;
+  LineCap: TVectArtLineCap;
+  Style: TVectArtMifStrokeStyle;
 begin
   if FUpdating or (Button <> mbLeft) or not FStrokeWidthTrackBar.Enabled then
     Exit;
@@ -693,8 +802,8 @@ begin
   FTrackStartIndices := SelectedLineIndices;
   SetLength(FTrackStartWidths, Length(FTrackStartIndices));
   for I := 0 to High(FTrackStartIndices) do
-    FTrackStartWidths[I] := TVectArtPathLayer(
-      FDocument[FTrackStartIndices[I]]).StrokeWidth;
+    ReadLineLayer(FDocument[FTrackStartIndices[I]], Color,
+      FTrackStartWidths[I], Style, LineCap);
   if (Length(FTrackStartIndices) > 0) and (FDocument <> nil) then
   begin
     FDocument.BeginInteractiveUpdate;

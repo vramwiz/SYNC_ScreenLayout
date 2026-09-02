@@ -1,4 +1,5 @@
-﻿unit TextRendererTypes;
+﻿// テキスト描画要求、出力画像、計測値のバックエンド共通データ型を定義する。
+unit TextRendererTypes;
 
 interface
 
@@ -14,54 +15,57 @@ type
   TTextRenderAlignment = (Leading, Center, Trailing);
 
   TTextRenderOutline = record
-    BlurRadius: Single;
-    Color: TAlphaColor;
-    Width: Single;
+    BlurRadius: Single;  // 輪郭端へ適用するぼかし半径。
+    Color: TAlphaColor;  // 輪郭のARGB色。
+    Width: Single;       // 文字輪郭から外側へ広げる幅。
+    // ぼかしなしの輪郭設定を生成する。
     class function Create(const AWidth: Single;
       const AColor: TAlphaColor): TTextRenderOutline; overload; static;
+    // 幅とぼかし半径を指定した輪郭設定を生成する。
     class function Create(const AWidth, ABlurRadius: Single;
       const AColor: TAlphaColor): TTextRenderOutline; overload; static;
   end;
 
   TTextRenderShadow = record
-    BlurRadius: Single;
-    Color: TAlphaColor;
-    Offset: TPointF;
-    SpreadRadius: Single;
+    BlurRadius: Single;   // 影のぼかし半径。
+    Color: TAlphaColor;   // 影のARGB色。
+    Offset: TPointF;      // 本文から影をずらす描画座標量。
+    SpreadRadius: Single; // ぼかす前に影を外側へ広げる半径。
   end;
 
   TTextRenderRequest = record
-    Alignment: TTextRenderAlignment;
-    CaptureTextUnits: Boolean;
-    Direction: TTextRenderDirection;
-    FillColor: TAlphaColor;
-    FontFamilies: TArray<string>;
-    FontSize: Single;
-    FontStyle: TTextRenderFontStyle;
-    LetterSpacing: Single;
-    LineSpacing: Single;
-    MaxHeight: Single;
-    MaxWidth: Single;
-    Outlines: TArray<TTextRenderOutline>;
-    Shadows: TArray<TTextRenderShadow>;
-    Text: string;
-    TrimTransparentBounds: Boolean;
+    Alignment: TTextRenderAlignment;     // 行送りと直交する方向の揃え方。
+    CaptureTextUnits: Boolean;           // 文字・グリフ単位の画像も生成するか。
+    Direction: TTextRenderDirection;     // 横書きまたは縦書き。
+    FillColor: TAlphaColor;              // 本文のARGB色。
+    FontFamilies: TArray<string>;        // 優先順のフォント候補。
+    FontSize: Single;                    // 描画座標単位のフォントサイズ。
+    FontStyle: TTextRenderFontStyle;     // 太字・斜体の指定。
+    LetterSpacing: Single;               // 文字間へ加える距離。
+    LineSpacing: Single;                 // 行間へ加える距離。
+    MaxHeight: Single;                   // 配置領域の最大高。0は無制限。
+    MaxWidth: Single;                    // 配置領域の最大幅。0は無制限。
+    Outlines: TArray<TTextRenderOutline>; // 内側から順に描く輪郭群。
+    Shadows: TArray<TTextRenderShadow>;  // 本文より先に描く影群。
+    Text: string;                        // 描画対象のUnicode文字列。
+    TrimTransparentBounds: Boolean;      // 透明な外周を出力から除くか。
+    // 通常の横書きに適した初期値を返す。
     class function Default: TTextRenderRequest; static;
   end;
 
   TTextRenderPixel = packed record
-    R: Byte;
-    G: Byte;
-    B: Byte;
-    A: Byte;
+    R: Byte; // 赤成分。
+    G: Byte; // 緑成分。
+    B: Byte; // 青成分。
+    A: Byte; // アルファ成分。
   end;
   PTextRenderPixel = ^TTextRenderPixel;
 
   TTextRenderMetrics = record
-    DrawMilliseconds: Double;
-    LayoutMilliseconds: Double;
-    NonTransparentPixelCount: NativeUInt;
-    TotalMilliseconds: Double;
+    DrawMilliseconds: Double;                // ラスター描画に要した時間。
+    LayoutMilliseconds: Double;              // 文字配置に要した時間。
+    NonTransparentPixelCount: NativeUInt;    // アルファが0でない画素数。
+    TotalMilliseconds: Double;               // Render全体に要した時間。
   end;
 
   TTextRenderImage = class
@@ -76,13 +80,20 @@ type
     function GetStride: NativeInt;
     function GetWidth: Integer;
   public
+    // 描画範囲と配置範囲が同じ空画像を生成する。
     constructor Create(const ABounds: TRect); overload;
+    // 描画範囲と元の配置範囲を分けて保持する空画像を生成する。
     constructor Create(const ABounds, ALayoutBounds: TRect); overload;
     destructor Destroy; override;
+    // 画素と文字単位の付随データを透明な初期状態へ戻す。
     procedure Clear;
+    // 連続した先頭画素へのポインタを返す。空画像ではnilを返す。
     function Data: PTextRenderPixel;
+    // 幅または高さが0ならTrueを返す。
     function IsEmpty: Boolean;
+    // 確保されている画素数を返す。
     function PixelCount: NativeInt;
+    // 文字単位画像の所有権をこの画像へ移す。
     procedure SetTextUnitImages(const AImages: TArray<TTextRenderImage>);
     property Bounds: TRect read FBounds;
     property Height: Integer read GetHeight;

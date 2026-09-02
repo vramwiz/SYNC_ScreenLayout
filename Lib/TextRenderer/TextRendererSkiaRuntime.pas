@@ -1,3 +1,4 @@
+﻿// Skia APIの動的結合とプロセス内参照カウントを管理する。
 unit TextRendererSkiaRuntime;
 
 interface
@@ -5,8 +6,11 @@ interface
 type
   TTextRendererSkiaRuntime = class sealed
   public
+    // 指定DLLを初期化する。同じパスへの複数取得は参照数として保持する。
     class procedure Acquire(const ALibraryFileName: string); static;
+    // この管理クラスを通してSkiaが取得済みならTrueを返す。
     class function IsAcquired: Boolean; static;
+    // 参照数を減らし、最後の利用者が解放した時点でSkiaを終了する。
     class procedure Release; static;
   end;
 

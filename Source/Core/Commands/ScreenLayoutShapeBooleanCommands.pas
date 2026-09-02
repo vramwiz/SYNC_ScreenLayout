@@ -8,10 +8,11 @@ uses
 
 type
   TScreenLayoutShapeBooleanOriginalKind = (slsbokRectangle,
-    slsbokRoundedRectangle, slsbokShape);
+    slsbokRoundedRectangle, slsbokEllipse, slsbokShape);
 
   TScreenLayoutShapeBooleanOriginal = record
     Kind: TScreenLayoutShapeBooleanOriginalKind;             // Undoで復元するレイヤー型。
+    EllipseData: TScreenLayoutEllipseData;                   // 楕円だった場合の全属性。
     RectangleData: TVectArtRectangleData;                    // 四角だった場合の全属性。
     RoundedRectangleData: TScreenLayoutRoundedRectangleData; // 角丸四角だった場合の全属性。
     ShapeData: TScreenLayoutShapeData;                        // Shapeだった場合の全属性と輪郭群。
@@ -31,7 +32,7 @@ type
       out Original: TScreenLayoutShapeBooleanOriginal);
     procedure RemoveOriginals;
   public
-    // 選択したShape／四角群と結果を独立して保持し、置換全体を1つの履歴項目にする。
+    // 選択したShape／基本図形群と結果を独立して保持し、置換全体を1つの履歴項目にする。
     constructor Create(ADocument: TVectArtDocument;
       const SelectedIndices, BeforeSelection: TArray<Integer>;
       ResultOriginalIndex: Integer; const ResultData: TScreenLayoutShapeData;
@@ -57,11 +58,25 @@ end;
 procedure TScreenLayoutShapeBooleanCommand.CaptureOriginal(Index: Integer;
   out Original: TScreenLayoutShapeBooleanOriginal);
 var
+  EllipseLayer: TScreenLayoutEllipseLayer;
   RectangleLayer: TVectArtRectangleLayer;
   RoundedLayer: TScreenLayoutRoundedRectangleLayer;
   ShapeLayer: TScreenLayoutShapeLayer;
 begin
   Original := Default(TScreenLayoutShapeBooleanOriginal);
+  if FDocument[Index] is TScreenLayoutEllipseLayer then
+  begin
+    Original.Kind := slsbokEllipse;
+    EllipseLayer := TScreenLayoutEllipseLayer(FDocument[Index]);
+    Original.EllipseData.Bounds := EllipseLayer.Bounds;
+    Original.EllipseData.FillColor := EllipseLayer.FillColor;
+    Original.EllipseData.Locked := EllipseLayer.Locked;
+    Original.EllipseData.Name := EllipseLayer.Name;
+    Original.EllipseData.Opacity := EllipseLayer.Opacity;
+    Original.EllipseData.RotationDegrees := EllipseLayer.RotationDegrees;
+    Original.EllipseData.Visible := EllipseLayer.Visible;
+    Exit;
+  end;
   if FDocument[Index] is TScreenLayoutRoundedRectangleLayer then
   begin
     Original.Kind := slsbokRoundedRectangle;
@@ -151,6 +166,7 @@ end;
 
 procedure TScreenLayoutShapeBooleanCommand.RemoveOriginals;
 var
+  EllipseData: TScreenLayoutEllipseData;
   I: Integer;
   RectangleData: TVectArtRectangleData;
   RemovedData: TScreenLayoutShapeData;
@@ -164,6 +180,8 @@ begin
       slsbokRoundedRectangle:
         FDocument.RemoveRoundedRectangle(FOriginalIndices[I],
           RoundedRectangleData);
+      slsbokEllipse:
+        FDocument.RemoveEllipse(FOriginalIndices[I], EllipseData);
       slsbokShape:
         FDocument.RemoveShape(FOriginalIndices[I], RemovedData);
     end;
@@ -189,6 +207,9 @@ begin
         slsbokRoundedRectangle:
           FOriginalIndices[I] := FDocument.InsertRoundedRectangle(
             FOriginalIndices[I], FOriginalData[I].RoundedRectangleData);
+        slsbokEllipse:
+          FOriginalIndices[I] := FDocument.InsertEllipse(
+            FOriginalIndices[I], FOriginalData[I].EllipseData);
         slsbokShape:
           FOriginalIndices[I] := FDocument.InsertShape(
             FOriginalIndices[I], FOriginalData[I].ShapeData);

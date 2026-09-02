@@ -37,6 +37,96 @@ type
     procedure Undo; override;
   end;
 
+  TScreenLayoutInsertEllipseCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutEllipseData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutEllipseData; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutInsertArcCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutArcData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutArcData; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutInsertEllipseArcShapeCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutEllipseArcShapeData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutEllipseArcShapeData; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutInsertRectangleLineCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutRectangleLineData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutRectangleLineData; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutInsertRoundedRectangleLineCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutRoundedRectangleLineData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutRoundedRectangleLineData;
+      const BeforeSelection, AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutInsertEllipseLineCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutEllipseLineData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutEllipseLineData; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
   TVectArtInsertPathCommand = class(TVectArtEditCommand)
   private
     FAfterSelection: TArray<Integer>;
@@ -93,6 +183,96 @@ type
   public
     constructor Create(ADocument: TVectArtDocument; Index: Integer;
       const Data: TScreenLayoutRoundedRectangleData; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutDeleteEllipseCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutEllipseData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutEllipseData; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutDeleteArcCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutArcData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutArcData; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutDeleteEllipseArcShapeCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutEllipseArcShapeData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutEllipseArcShapeData; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutDeleteRectangleLineCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutRectangleLineData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutRectangleLineData; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutDeleteRoundedRectangleLineCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutRoundedRectangleLineData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutRoundedRectangleLineData;
+      const BeforeSelection, AfterSelection: TArray<Integer>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TScreenLayoutDeleteEllipseLineCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FData: TScreenLayoutEllipseLineData;
+    FDocument: TVectArtDocument;
+    FIndex: Integer;
+  public
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      const Data: TScreenLayoutEllipseLineData; const BeforeSelection,
       AfterSelection: TArray<Integer>);
     procedure Execute; override;
     procedure Undo; override;
@@ -337,6 +517,203 @@ begin
   FDocument.SetSelectedLayers(FBeforeSelection);
 end;
 
+{ TScreenLayoutInsertEllipseCommand }
+
+constructor TScreenLayoutInsertEllipseCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  const Data: TScreenLayoutEllipseData; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutInsertEllipseCommand.Execute;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertEllipse(FIndex, FData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutInsertEllipseCommand.Undo;
+var
+  RemovedData: TScreenLayoutEllipseData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveEllipse(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
+{ TScreenLayoutInsertArcCommand }
+
+constructor TScreenLayoutInsertArcCommand.Create(ADocument: TVectArtDocument;
+  Index: Integer; const Data: TScreenLayoutArcData; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutInsertArcCommand.Execute;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertArc(FIndex, FData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutInsertArcCommand.Undo;
+var
+  RemovedData: TScreenLayoutArcData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveArc(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
+{ TScreenLayoutInsertEllipseArcShapeCommand }
+
+constructor TScreenLayoutInsertEllipseArcShapeCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  const Data: TScreenLayoutEllipseArcShapeData; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutInsertEllipseArcShapeCommand.Execute;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertEllipseArcShape(FIndex, FData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutInsertEllipseArcShapeCommand.Undo;
+var
+  RemovedData: TScreenLayoutEllipseArcShapeData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveEllipseArcShape(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
+{ TScreenLayoutInsertRectangleLineCommand }
+
+constructor TScreenLayoutInsertRectangleLineCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  const Data: TScreenLayoutRectangleLineData; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutInsertRectangleLineCommand.Execute;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertRectangleLine(FIndex, FData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutInsertRectangleLineCommand.Undo;
+var
+  RemovedData: TScreenLayoutRectangleLineData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveRectangleLine(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
+{ TScreenLayoutInsertRoundedRectangleLineCommand }
+
+constructor TScreenLayoutInsertRoundedRectangleLineCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  const Data: TScreenLayoutRoundedRectangleLineData;
+  const BeforeSelection, AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutInsertRoundedRectangleLineCommand.Execute;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertRoundedRectangleLine(FIndex, FData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutInsertRoundedRectangleLineCommand.Undo;
+var
+  RemovedData: TScreenLayoutRoundedRectangleLineData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveRoundedRectangleLine(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
+{ TScreenLayoutInsertEllipseLineCommand }
+
+constructor TScreenLayoutInsertEllipseLineCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  const Data: TScreenLayoutEllipseLineData; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutInsertEllipseLineCommand.Execute;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertEllipseLine(FIndex, FData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutInsertEllipseLineCommand.Undo;
+var
+  RemovedData: TScreenLayoutEllipseLineData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveEllipseLine(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
 { TVectArtDeleteRectangleCommand }
 
 constructor TVectArtDeletePathCommand.Create(ADocument: TVectArtDocument;
@@ -464,6 +841,203 @@ begin
   if FDocument = nil then
     Exit;
   FIndex := FDocument.InsertRoundedRectangle(FIndex, FData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
+{ TScreenLayoutDeleteEllipseCommand }
+
+constructor TScreenLayoutDeleteEllipseCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  const Data: TScreenLayoutEllipseData; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutDeleteEllipseCommand.Execute;
+var
+  RemovedData: TScreenLayoutEllipseData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveEllipse(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutDeleteEllipseCommand.Undo;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertEllipse(FIndex, FData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
+{ TScreenLayoutDeleteArcCommand }
+
+constructor TScreenLayoutDeleteArcCommand.Create(ADocument: TVectArtDocument;
+  Index: Integer; const Data: TScreenLayoutArcData; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutDeleteArcCommand.Execute;
+var
+  RemovedData: TScreenLayoutArcData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveArc(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutDeleteArcCommand.Undo;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertArc(FIndex, FData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
+{ TScreenLayoutDeleteEllipseArcShapeCommand }
+
+constructor TScreenLayoutDeleteEllipseArcShapeCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  const Data: TScreenLayoutEllipseArcShapeData; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutDeleteEllipseArcShapeCommand.Execute;
+var
+  RemovedData: TScreenLayoutEllipseArcShapeData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveEllipseArcShape(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutDeleteEllipseArcShapeCommand.Undo;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertEllipseArcShape(FIndex, FData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
+{ TScreenLayoutDeleteRectangleLineCommand }
+
+constructor TScreenLayoutDeleteRectangleLineCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  const Data: TScreenLayoutRectangleLineData; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutDeleteRectangleLineCommand.Execute;
+var
+  RemovedData: TScreenLayoutRectangleLineData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveRectangleLine(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutDeleteRectangleLineCommand.Undo;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertRectangleLine(FIndex, FData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
+{ TScreenLayoutDeleteRoundedRectangleLineCommand }
+
+constructor TScreenLayoutDeleteRoundedRectangleLineCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  const Data: TScreenLayoutRoundedRectangleLineData;
+  const BeforeSelection, AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutDeleteRoundedRectangleLineCommand.Execute;
+var
+  RemovedData: TScreenLayoutRoundedRectangleLineData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveRoundedRectangleLine(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutDeleteRoundedRectangleLineCommand.Undo;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertRoundedRectangleLine(FIndex, FData);
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
+
+{ TScreenLayoutDeleteEllipseLineCommand }
+
+constructor TScreenLayoutDeleteEllipseLineCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  const Data: TScreenLayoutEllipseLineData; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FData := Data;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+end;
+
+procedure TScreenLayoutDeleteEllipseLineCommand.Execute;
+var
+  RemovedData: TScreenLayoutEllipseLineData;
+begin
+  if FDocument = nil then
+    Exit;
+  FDocument.RemoveEllipseLine(FIndex, RemovedData);
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutDeleteEllipseLineCommand.Undo;
+begin
+  if FDocument = nil then
+    Exit;
+  FIndex := FDocument.InsertEllipseLine(FIndex, FData);
   FDocument.SetSelectedLayers(FBeforeSelection);
 end;
 

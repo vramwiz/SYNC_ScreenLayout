@@ -1,3 +1,4 @@
+﻿// KeyDown／KeyPressと実行条件を対応付ける、フォーム共通のショートカット表を提供する。
 unit ShortcutAction;
 
 interface
@@ -33,14 +34,19 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+    // 修飾キーを含むKeyDown操作を登録する。同じ組み合わせの重複登録は例外にする。
     procedure Add(Key: Word; Shift: TShiftState; AProc: TProc); overload;
     procedure Add(Key: Word; Shift: TShiftState; AProc: TProc;
       ACanExecute: TShortcutItemCanExecute); overload;
+    // 文字入力として受け取るKeyPress操作を登録する。
     procedure Add(Key: Char; AProc: TProc); overload;
     procedure Add(Key: Char; AProc: TProc;
       ACanExecute: TShortcutItemCanExecute); overload;
+    // 登録済みの操作と保持している匿名メソッドをすべて解放する。
     procedure Clear;
+    // 一致するKeyDown操作を実行し、処理したキーを0へ変更する。
     function KeyDown(var Key: Word; Shift: TShiftState): Boolean;
+    // 一致するKeyPress操作を実行し、処理した文字を#0へ変更する。
     function ProcessKeyPress(var Key: Char): Boolean;
     property Enabled: Boolean read FEnabled write FEnabled;
     property OnCanExecute: TShortcutActionCanExecuteEvent read FOnCanExecute

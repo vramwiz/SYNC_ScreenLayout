@@ -1,4 +1,5 @@
-﻿unit TextRendererSkiaBootstrap;
+﻿// EXE／DLLと同じ配布単位にあるSkiaランタイムを起動前に読み込む。
+unit TextRendererSkiaBootstrap;
 
 interface
 

@@ -24,16 +24,17 @@ type
     FStartPoint: TPoint;
     FZoom: Single;
     function ClampToCanvas(const Point: TPoint): TPoint;
+    procedure CreateArc;
+    procedure CreateArcShape;
+    procedure CreateEllipse;
+    procedure CreateEllipseLine;
     procedure CreateLine;
     procedure CreatePath(Closed: Boolean);
     procedure CreateRectangle;
+    procedure CreateRectangleLine;
     procedure CreateRoundedRectangle;
+    procedure CreateRoundedRectangleLine;
     procedure CreateShape;
-    function NextLineName: string;
-    function NextPathName: string;
-    function NextRectangleName: string;
-    function NextRoundedRectangleName: string;
-    function NextShapeName: string;
     function BuildOpenPathPreview(out Points: TArray<TPoint>): Boolean;
     function BuildShapePreview(out Points: TArray<TPoint>): Boolean;
   public
@@ -57,6 +58,8 @@ type
     function PreviewPath(out Points: TArray<TPoint>): Boolean;
     // ドラッグ作成中の矩形プレビュー範囲を返す。
     function PreviewRect: TRect;
+    // 配置中の既定上半円を画面座標の折れ線として返す。
+    function PreviewArc(out Points: TArray<TPoint>): Boolean;
     // ドラッグ作成中の直線プレビュー端点を返す。
     function PreviewLine(out StartPoint, EndPoint: TPoint): Boolean;
     // V／Bキーを次に確定するPath／Shape頂点の種別として受け付ける。
@@ -67,9 +70,10 @@ type
 implementation
 
 uses
-  System.Math, System.SysUtils,
+  System.Math,
   ScreenLayoutGeometry, ScreenLayoutLayerStructureCommands,
-  ScreenLayoutPathOperations, ScreenLayoutShapeOperations;
+  ScreenLayoutLayerNaming, ScreenLayoutPathOperations,
+  ScreenLayoutShapeOperations;
 
 const
   MIN_DRAG_SIZE = 3;
@@ -147,7 +151,7 @@ begin
   Data.FillColor := FEditorState.RectangleFillColor;
   Data.FillRule := slfrEvenOdd;
   Data.Locked := False;
-  Data.Name := NextShapeName;
+  Data.Name := NextScreenLayoutLayerName(FDocument, 'Shape');
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.StrokeColor := FEditorState.LineStrokeColor;
   Data.StrokeStyle := FEditorState.LineMifStrokeStyle;
@@ -190,7 +194,7 @@ begin
   Data.Closed := False;
   Data.Locked := False;
   Data.LineCap := FEditorState.LineCap;
-  Data.Name := NextLineName;
+  Data.Name := NextScreenLayoutLayerName(FDocument, 'Line');
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.StrokeColor := FEditorState.LineStrokeColor;
   Data.MifStrokeStyle := FEditorState.LineMifStrokeStyle;
@@ -234,7 +238,7 @@ begin
   Data.Closed := Closed;
   Data.LineCap := FEditorState.LineCap;
   Data.Locked := False;
-  Data.Name := NextPathName;
+  Data.Name := NextScreenLayoutLayerName(FDocument, 'Path');
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.StrokeColor := FEditorState.LineStrokeColor;
   Data.MifStrokeStyle := FEditorState.LineMifStrokeStyle;
@@ -267,6 +271,8 @@ begin
   FDocument := ADocument;
   FEditHistory := AEditHistory;
   FEditorState := AEditorState;
+  if FEditorState <> nil then
+    FNextVertexKind := FEditorState.NextVertexKind;
   FCanvasBounds := ACanvasBounds;
   FZoom := AZoom;
 end;
@@ -299,7 +305,7 @@ begin
     LogicalBottom);
   Data.FillColor := FEditorState.RectangleFillColor;
   Data.Locked := False;
-  Data.Name := NextRectangleName;
+  Data.Name := NextScreenLayoutLayerName(FDocument, 'Rectangle');
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.RotationDegrees := 0.0;
   Data.Visible := True;
@@ -310,6 +316,202 @@ begin
   if FEditHistory <> nil then
     FEditHistory.AddApplied(TVectArtInsertRectangleCommand.Create(FDocument,
       Index, Data, BeforeSelection, AfterSelection));
+end;
+
+procedure TVectArtShapeCreation.CreateRectangleLine;
+var
+  AfterSelection: TArray<Integer>;
+  BeforeSelection: TArray<Integer>;
+  Data: TScreenLayoutRectangleLineData;
+  Index: Integer;
+  ScreenBounds: TRect;
+begin
+  ScreenBounds := PreviewRect;
+  if (ScreenBounds.Width < MIN_DRAG_SIZE) or
+    (ScreenBounds.Height < MIN_DRAG_SIZE) then
+    Exit;
+  Data.Bounds := TRectF.Create(
+    ScreenToLogicalX(ScreenBounds.Left, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(ScreenBounds.Top, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height),
+    ScreenToLogicalX(ScreenBounds.Right, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(ScreenBounds.Bottom, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height));
+  Data.Locked := False;
+  Data.Name := NextScreenLayoutLayerName(FDocument, 'Rectangle Line');
+  Data.Opacity := FEditorState.RectangleOpacity;
+  Data.RotationDegrees := 0.0;
+  Data.StrokeColor := FEditorState.LineStrokeColor;
+  Data.StrokeStyle := FEditorState.LineMifStrokeStyle;
+  Data.StrokeWidth := FEditorState.LineStrokeWidth;
+  Data.Visible := True;
+  BeforeSelection := FDocument.GetSelectedLayerIndices;
+  Index := FDocument.InsertRectangleLine(FDocument.LayerCount, Data);
+  FDocument.SetSelectedLayers([Index]);
+  AfterSelection := FDocument.GetSelectedLayerIndices;
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutInsertRectangleLineCommand.Create(
+      FDocument, Index, Data, BeforeSelection, AfterSelection));
+end;
+
+procedure TVectArtShapeCreation.CreateArc;
+var
+  AfterSelection: TArray<Integer>;
+  BeforeSelection: TArray<Integer>;
+  Data: TScreenLayoutArcData;
+  Index: Integer;
+  ScreenBounds: TRect;
+begin
+  ScreenBounds := PreviewRect;
+  if (ScreenBounds.Width < MIN_DRAG_SIZE) or
+    (ScreenBounds.Height < MIN_DRAG_SIZE) then
+    Exit;
+  Data.Bounds := TRectF.Create(
+    ScreenToLogicalX(ScreenBounds.Left, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(ScreenBounds.Top, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height),
+    ScreenToLogicalX(ScreenBounds.Right, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(ScreenBounds.Bottom, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height));
+  Data.LineCap := FEditorState.LineCap;
+  Data.Locked := False;
+  Data.Name := NextScreenLayoutLayerName(FDocument, 'Arc');
+  Data.Opacity := FEditorState.RectangleOpacity;
+  Data.RotationDegrees := 0.0;
+  Data.StartAngleDegrees := 180.0;
+  Data.StrokeColor := FEditorState.LineStrokeColor;
+  Data.StrokeStyle := FEditorState.LineMifStrokeStyle;
+  Data.StrokeWidth := FEditorState.LineStrokeWidth;
+  Data.SweepAngleDegrees := 180.0;
+  Data.Visible := True;
+  BeforeSelection := FDocument.GetSelectedLayerIndices;
+  Index := FDocument.InsertArc(FDocument.LayerCount, Data);
+  FDocument.SetSelectedLayers([Index]);
+  AfterSelection := FDocument.GetSelectedLayerIndices;
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutInsertArcCommand.Create(FDocument,
+      Index, Data, BeforeSelection, AfterSelection));
+end;
+
+procedure TVectArtShapeCreation.CreateArcShape;
+var
+  AfterSelection: TArray<Integer>;
+  BeforeSelection: TArray<Integer>;
+  Data: TScreenLayoutEllipseArcShapeData;
+  Index: Integer;
+  ScreenBounds: TRect;
+begin
+  ScreenBounds := PreviewRect;
+  if (ScreenBounds.Width < MIN_DRAG_SIZE) or
+    (ScreenBounds.Height < MIN_DRAG_SIZE) then
+    Exit;
+  Data.Bounds := TRectF.Create(
+    ScreenToLogicalX(ScreenBounds.Left, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(ScreenBounds.Top, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height),
+    ScreenToLogicalX(ScreenBounds.Right, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(ScreenBounds.Bottom, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height));
+  Data.FillColor := FEditorState.RectangleFillColor;
+  Data.Locked := False;
+  Data.Name := NextScreenLayoutLayerName(FDocument, 'Arc Shape');
+  Data.Opacity := FEditorState.RectangleOpacity;
+  Data.RotationDegrees := 0.0;
+  Data.StartAngleDegrees := 180.0;
+  Data.SweepAngleDegrees := 180.0;
+  Data.Visible := True;
+  BeforeSelection := FDocument.GetSelectedLayerIndices;
+  Index := FDocument.InsertEllipseArcShape(FDocument.LayerCount, Data);
+  FDocument.SetSelectedLayers([Index]);
+  AfterSelection := FDocument.GetSelectedLayerIndices;
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutInsertEllipseArcShapeCommand.Create(
+      FDocument, Index, Data, BeforeSelection, AfterSelection));
+end;
+
+procedure TVectArtShapeCreation.CreateEllipse;
+var
+  AfterSelection: TArray<Integer>;
+  BeforeSelection: TArray<Integer>;
+  Data: TScreenLayoutEllipseData;
+  Index: Integer;
+  LogicalBottom: Single;
+  LogicalLeft: Single;
+  LogicalRight: Single;
+  LogicalTop: Single;
+  ScreenBounds: TRect;
+begin
+  ScreenBounds := PreviewRect;
+  if (ScreenBounds.Width < MIN_DRAG_SIZE) or
+    (ScreenBounds.Height < MIN_DRAG_SIZE) then
+    Exit;
+  LogicalLeft := ScreenToLogicalX(ScreenBounds.Left, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Width);
+  LogicalTop := ScreenToLogicalY(ScreenBounds.Top, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Height);
+  LogicalRight := ScreenToLogicalX(ScreenBounds.Right, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Width);
+  LogicalBottom := ScreenToLogicalY(ScreenBounds.Bottom, FCanvasBounds, FZoom,
+    FDocument.CanvasLayer.Height);
+  Data.Bounds := TRectF.Create(LogicalLeft, LogicalTop, LogicalRight,
+    LogicalBottom);
+  Data.FillColor := FEditorState.RectangleFillColor;
+  Data.Locked := False;
+  Data.Name := NextScreenLayoutLayerName(FDocument, 'Ellipse');
+  Data.Opacity := FEditorState.RectangleOpacity;
+  Data.RotationDegrees := 0.0;
+  Data.Visible := True;
+  BeforeSelection := FDocument.GetSelectedLayerIndices;
+  Index := FDocument.InsertEllipse(FDocument.LayerCount, Data);
+  FDocument.SetSelectedLayers([Index]);
+  AfterSelection := FDocument.GetSelectedLayerIndices;
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutInsertEllipseCommand.Create(
+      FDocument, Index, Data, BeforeSelection, AfterSelection));
+end;
+
+procedure TVectArtShapeCreation.CreateEllipseLine;
+var
+  AfterSelection: TArray<Integer>;
+  BeforeSelection: TArray<Integer>;
+  Data: TScreenLayoutEllipseLineData;
+  Index: Integer;
+  ScreenBounds: TRect;
+begin
+  ScreenBounds := PreviewRect;
+  if (ScreenBounds.Width < MIN_DRAG_SIZE) or
+    (ScreenBounds.Height < MIN_DRAG_SIZE) then
+    Exit;
+  Data.Bounds := TRectF.Create(
+    ScreenToLogicalX(ScreenBounds.Left, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(ScreenBounds.Top, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height),
+    ScreenToLogicalX(ScreenBounds.Right, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(ScreenBounds.Bottom, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height));
+  Data.Locked := False;
+  Data.Name := NextScreenLayoutLayerName(FDocument, 'Ellipse Line');
+  Data.Opacity := FEditorState.RectangleOpacity;
+  Data.RotationDegrees := 0.0;
+  Data.StrokeColor := FEditorState.LineStrokeColor;
+  Data.StrokeStyle := FEditorState.LineMifStrokeStyle;
+  Data.StrokeWidth := FEditorState.LineStrokeWidth;
+  Data.Visible := True;
+  BeforeSelection := FDocument.GetSelectedLayerIndices;
+  Index := FDocument.InsertEllipseLine(FDocument.LayerCount, Data);
+  FDocument.SetSelectedLayers([Index]);
+  AfterSelection := FDocument.GetSelectedLayerIndices;
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutInsertEllipseLineCommand.Create(
+      FDocument, Index, Data, BeforeSelection, AfterSelection));
 end;
 
 procedure TVectArtShapeCreation.CreateRoundedRectangle;
@@ -343,7 +545,7 @@ begin
   Data.CornerRadii := UniformScreenLayoutCornerRadii(Radius);
   Data.FillColor := FEditorState.RectangleFillColor;
   Data.Locked := False;
-  Data.Name := NextRoundedRectangleName;
+  Data.Name := NextScreenLayoutLayerName(FDocument, 'Rounded Rectangle');
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.RotationDegrees := 0.0;
   Data.Visible := True;
@@ -356,6 +558,49 @@ begin
       FDocument, Index, Data, BeforeSelection, AfterSelection));
 end;
 
+procedure TVectArtShapeCreation.CreateRoundedRectangleLine;
+var
+  AfterSelection: TArray<Integer>;
+  BeforeSelection: TArray<Integer>;
+  Data: TScreenLayoutRoundedRectangleLineData;
+  Index: Integer;
+  Radius: Single;
+  ScreenBounds: TRect;
+begin
+  ScreenBounds := PreviewRect;
+  if (ScreenBounds.Width < MIN_DRAG_SIZE) or
+    (ScreenBounds.Height < MIN_DRAG_SIZE) then
+    Exit;
+  Data.Bounds := TRectF.Create(
+    ScreenToLogicalX(ScreenBounds.Left, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(ScreenBounds.Top, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height),
+    ScreenToLogicalX(ScreenBounds.Right, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(ScreenBounds.Bottom, FCanvasBounds, FZoom,
+      FDocument.CanvasLayer.Height));
+  Radius := Min(Data.Bounds.Width, Data.Bounds.Height) * 0.2;
+  Data.CornerRadii := UniformScreenLayoutCornerRadii(Radius);
+  Data.Locked := False;
+  Data.Name := NextScreenLayoutLayerName(FDocument,
+    'Rounded Rectangle Line');
+  Data.Opacity := FEditorState.RectangleOpacity;
+  Data.RotationDegrees := 0.0;
+  Data.StrokeColor := FEditorState.LineStrokeColor;
+  Data.StrokeStyle := FEditorState.LineMifStrokeStyle;
+  Data.StrokeWidth := FEditorState.LineStrokeWidth;
+  Data.Visible := True;
+  BeforeSelection := FDocument.GetSelectedLayerIndices;
+  Index := FDocument.InsertRoundedRectangleLine(FDocument.LayerCount, Data);
+  FDocument.SetSelectedLayers([Index]);
+  AfterSelection := FDocument.GetSelectedLayerIndices;
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(
+      TScreenLayoutInsertRoundedRectangleLineCommand.Create(FDocument,
+        Index, Data, BeforeSelection, AfterSelection));
+end;
+
 function TVectArtShapeCreation.MouseDown(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer): Boolean;
 var
@@ -363,8 +608,10 @@ var
 begin
   Result := (Button = mbLeft) and (FDocument <> nil) and
     (FEditorState <> nil) and
-    (FEditorState.CurrentTool in [vetRectangle, vetRoundedRectangle, vetLine,
-      vetPath, vetShape]) and
+    (FEditorState.CurrentTool in [vetRectangleLine, vetRectangle,
+      vetRoundedRectangleLine,
+      vetRoundedRectangle, vetEllipseLine,
+      vetEllipse, vetArc, vetArcShape, vetLine, vetPath, vetShape]) and
     (FZoom > 0) and
     PtInRect(FCanvasBounds, Point(X, Y));
   if not Result then
@@ -419,9 +666,15 @@ begin
     ((Shift * [ssCtrl, ssAlt]) <> []) then
     Exit;
   if Key = Ord('V') then
-    FNextVertexKind := slvkSharp
+  begin
+    FNextVertexKind := slvkSharp;
+    FEditorState.NextVertexKind := slvkSharp;
+  end
   else if Key = Ord('B') then
-    FNextVertexKind := slvkBezier
+  begin
+    FNextVertexKind := slvkBezier;
+    FEditorState.NextVertexKind := slvkBezier;
+  end
   else
     Exit;
   Result := True;
@@ -461,6 +714,18 @@ begin
   FModifiers := Shift;
   if FEditorState.CurrentTool = vetLine then
     CreateLine
+  else if FEditorState.CurrentTool = vetArc then
+    CreateArc
+  else if FEditorState.CurrentTool = vetArcShape then
+    CreateArcShape
+  else if FEditorState.CurrentTool = vetEllipse then
+    CreateEllipse
+  else if FEditorState.CurrentTool = vetEllipseLine then
+    CreateEllipseLine
+  else if FEditorState.CurrentTool = vetRectangleLine then
+    CreateRectangleLine
+  else if FEditorState.CurrentTool = vetRoundedRectangleLine then
+    CreateRoundedRectangleLine
   else if FEditorState.CurrentTool = vetRoundedRectangle then
     CreateRoundedRectangle
   else
@@ -486,71 +751,6 @@ begin
   CancelPath;
 end;
 
-function TVectArtShapeCreation.NextLineName: string;
-var
-  Candidate: string;
-  Found: Boolean;
-  I: Integer;
-  Number: Integer;
-begin
-  Number := 1;
-  repeat
-    Candidate := 'Line ' + Number.ToString;
-    Found := False;
-    for I := 1 to FDocument.LayerCount - 1 do
-      if SameText(FDocument[I].Name, Candidate) then
-      begin
-        Found := True;
-        Break;
-      end;
-    Inc(Number);
-  until not Found;
-  Result := Candidate;
-end;
-
-function TVectArtShapeCreation.NextPathName: string;
-var
-  Candidate: string;
-  Found: Boolean;
-  I: Integer;
-  Number: Integer;
-begin
-  Number := 1;
-  repeat
-    Candidate := 'Path ' + Number.ToString;
-    Found := False;
-    for I := 1 to FDocument.LayerCount - 1 do
-      if SameText(FDocument[I].Name, Candidate) then
-      begin
-        Found := True;
-        Break;
-      end;
-    Inc(Number);
-  until not Found;
-  Result := Candidate;
-end;
-
-function TVectArtShapeCreation.NextShapeName: string;
-var
-  Candidate: string;
-  Found: Boolean;
-  I: Integer;
-  Number: Integer;
-begin
-  Number := 1;
-  repeat
-    Candidate := 'Shape ' + Number.ToString;
-    Found := False;
-    for I := 1 to FDocument.LayerCount - 1 do
-      if SameText(FDocument[I].Name, Candidate) then
-      begin
-        Found := True;
-        Break;
-      end;
-    Inc(Number);
-  until not Found;
-  Result := Candidate;
-end;
 
 function TVectArtShapeCreation.PreviewPath(
   out Points: TArray<TPoint>): Boolean;
@@ -716,49 +916,40 @@ begin
   EndPoint := FCurrentPoint;
 end;
 
-function TVectArtShapeCreation.NextRectangleName: string;
+function TVectArtShapeCreation.PreviewArc(
+  out Points: TArray<TPoint>): Boolean;
+const
+  PREVIEW_SEGMENTS = 24;
 var
-  Candidate: string;
-  Found: Boolean;
+  Angle: Single;
+  Bounds: TRect;
+  CenterX: Single;
+  CenterY: Single;
   I: Integer;
-  Number: Integer;
+  RadiusX: Single;
+  RadiusY: Single;
 begin
-  Number := 1;
-  repeat
-    Candidate := 'Rectangle ' + Number.ToString;
-    Found := False;
-    for I := 1 to FDocument.LayerCount - 1 do
-      if SameText(FDocument[I].Name, Candidate) then
-      begin
-        Found := True;
-        Break;
-      end;
-    Inc(Number);
-  until not Found;
-  Result := Candidate;
+  Result := FActive and (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetArc);
+  if not Result then
+  begin
+    Points := nil;
+    Exit;
+  end;
+  Bounds := PreviewRect;
+  CenterX := (Bounds.Left + Bounds.Right) * 0.5;
+  CenterY := (Bounds.Top + Bounds.Bottom) * 0.5;
+  RadiusX := Bounds.Width * 0.5;
+  RadiusY := Bounds.Height * 0.5;
+  SetLength(Points, PREVIEW_SEGMENTS + 1);
+  for I := 0 to PREVIEW_SEGMENTS do
+  begin
+    Angle := DegToRad(180.0 + 180.0 * I / PREVIEW_SEGMENTS);
+    Points[I] := Point(Round(CenterX + RadiusX * Cos(Angle)),
+      Round(CenterY + RadiusY * Sin(Angle)));
+  end;
 end;
 
-function TVectArtShapeCreation.NextRoundedRectangleName: string;
-var
-  Candidate: string;
-  Found: Boolean;
-  I: Integer;
-  Number: Integer;
-begin
-  Number := 1;
-  repeat
-    Candidate := 'Rounded Rectangle ' + Number.ToString;
-    Found := False;
-    for I := 1 to FDocument.LayerCount - 1 do
-      if SameText(FDocument[I].Name, Candidate) then
-      begin
-        Found := True;
-        Break;
-      end;
-    Inc(Number);
-  until not Found;
-  Result := Candidate;
-end;
 
 function TVectArtShapeCreation.PreviewRect: TRect;
 var
@@ -773,8 +964,10 @@ var
   TargetY: Integer;
 begin
   if not FActive or (FEditorState = nil) or
-    not (FEditorState.CurrentTool in [vetRectangle,
-      vetRoundedRectangle]) then
+    not (FEditorState.CurrentTool in [vetRectangleLine, vetRectangle,
+      vetRoundedRectangleLine,
+      vetRoundedRectangle, vetEllipseLine, vetEllipse, vetArc,
+      vetArcShape]) then
     Exit(TRect.Empty);
   DeltaX := FCurrentPoint.X - FStartPoint.X;
   DeltaY := FCurrentPoint.Y - FStartPoint.Y;

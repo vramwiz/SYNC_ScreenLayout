@@ -11,7 +11,7 @@ type
   TScreenLayoutShapeBooleanOperation = (slsboUnion, slsboSubtract,
     slsboIntersect, slsboXor);
 
-// 未ロックのShape／Rectangle／角丸Rectangleが2個以上選択されている場合にTrueを返す。
+// 未ロックのShape／Rectangle／角丸Rectangle／楕円が2個以上選択されている場合にTrueを返す。
 function CanExecuteScreenLayoutShapeBoolean(
   Document: TVectArtDocument): Boolean;
 // 減算はアクティブ図形、それ以外は最背面図形を基準に選択図形を結果Shapeへ置換する。

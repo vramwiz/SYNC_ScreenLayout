@@ -77,7 +77,7 @@ implementation
 
 uses
   System.Math, Winapi.D2D1, Winapi.Windows, Vcl.Direct2D,
-  ScreenLayoutGeometry, ScreenLayoutPathOperations,
+  ScreenLayoutEllipseGeometry, ScreenLayoutGeometry, ScreenLayoutPathOperations,
   ScreenLayoutShapeOperations;
 
 const
@@ -629,8 +629,10 @@ begin
       Exit;
     end;
     if (FEditorState <> nil) and
-      (FEditorState.CurrentTool in [vetRectangle, vetRoundedRectangle,
-        vetLine, vetPath, vetShape]) then
+      (FEditorState.CurrentTool in [vetRectangleLine, vetRectangle,
+        vetRoundedRectangleLine, vetRoundedRectangle,
+        vetEllipseLine, vetEllipse, vetArc, vetArcShape, vetLine, vetPath,
+        vetShape]) then
     begin
       Cursor := crCross;
       Exit;
@@ -676,8 +678,10 @@ begin
     Exit;
   end;
   if (FEditorState <> nil) and
-    (FEditorState.CurrentTool in [vetRectangle, vetRoundedRectangle,
-      vetLine, vetPath, vetShape]) then
+    (FEditorState.CurrentTool in [vetRectangleLine, vetRectangle,
+      vetRoundedRectangleLine, vetRoundedRectangle,
+      vetEllipseLine, vetEllipse, vetArc, vetArcShape, vetLine, vetPath,
+      vetShape]) then
   begin
     Cursor := crCross;
     Exit;
@@ -794,6 +798,9 @@ end;
 
 procedure TVectArtCanvasControl.PaintDirect2D;
 var
+  ArcHandles: TScreenLayoutArcAngleHandles;
+  ArcLayer: TScreenLayoutArcLayer;
+  ArcPreview: TArray<TPoint>;
   BezierHandles: TScreenLayoutBezierHandles;
   CanvasLayer: TVectArtCanvasLayer;
   CellRect: TRect;
@@ -814,6 +821,7 @@ var
   I: Integer;
   ImageLayer: TVectArtImageLayer;
   Layer: TVectArtLayer;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
   LayerRect: TRect;
   LineEnd: TPoint;
   LineStart: TPoint;
@@ -927,12 +935,30 @@ begin
         begin
           Layer := FDocument[I];
           if not Layer.Visible or
-            not ((Layer is TVectArtRectangleLayer) or
+            not ((Layer is TScreenLayoutRectangleLineLayer) or
+              (Layer is TVectArtRectangleLayer) or
+              (Layer is TScreenLayoutArcLayer) or
               (Layer is TVectArtPathLayer) or
               (Layer is TScreenLayoutShapeLayer) or
               (Layer is TVectArtImageLayer)) then
             Continue;
-          if Layer is TVectArtRectangleLayer then
+          if Layer is TScreenLayoutRectangleLineLayer then
+          begin
+            RectangleLine := TScreenLayoutRectangleLineLayer(Layer);
+            RotatedBounds := QuadBounds(RectangleCorners(
+              RectangleLine.Bounds, RectangleLine.RotationDegrees));
+            SelectionFrameOffsetPixels := Max(SelectionFrameOffsetPixels,
+              SelectionFrameOffset(RectangleLine.StrokeWidth, FZoom));
+          end
+          else if Layer is TScreenLayoutArcLayer then
+          begin
+            ArcLayer := TScreenLayoutArcLayer(Layer);
+            RotatedBounds := ScreenLayoutEllipseBounds(ArcLayer.Bounds,
+              ArcLayer.RotationDegrees);
+            SelectionFrameOffsetPixels := Max(SelectionFrameOffsetPixels,
+              SelectionFrameOffset(ArcLayer.StrokeWidth, FZoom));
+          end
+          else if Layer is TVectArtRectangleLayer then
           begin
             RectangleLayer := TVectArtRectangleLayer(Layer);
             RotatedBounds := QuadBounds(RectangleCorners(
@@ -1034,6 +1060,37 @@ begin
         else if not FInteraction.AxisAlignedSelection and
           (FDocument.SelectionCount = 1) and
           (FDocument.SelectedIndex > 0) and
+          (FDocument[FDocument.SelectedIndex] is
+            TScreenLayoutRectangleLineLayer) then
+        begin
+          RectangleLine := TScreenLayoutRectangleLineLayer(
+            FDocument[FDocument.SelectedIndex]);
+          LogicalQuad := RectangleCorners(RectangleLine.Bounds,
+            RectangleLine.RotationDegrees);
+          for I := 0 to High(ScreenQuad) do
+            ScreenQuad[I] := Point(ToScreenX(LogicalQuad[I].X),
+              ToScreenY(LogicalQuad[I].Y));
+          SelectionGeometry := BuildRotatedSelectionGeometry(ScreenQuad,
+            SelectionFrameOffsetPixels);
+        end
+        else if not FInteraction.AxisAlignedSelection and
+          (FDocument.SelectionCount = 1) and
+          (FDocument.SelectedIndex > 0) and
+          (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) then
+        begin
+          ArcLayer := TScreenLayoutArcLayer(
+            FDocument[FDocument.SelectedIndex]);
+          LogicalQuad := RectangleCorners(ArcLayer.Bounds,
+            ArcLayer.RotationDegrees);
+          for I := 0 to High(ScreenQuad) do
+            ScreenQuad[I] := Point(ToScreenX(LogicalQuad[I].X),
+              ToScreenY(LogicalQuad[I].Y));
+          SelectionGeometry := BuildRotatedSelectionGeometry(ScreenQuad,
+            SelectionFrameOffsetPixels);
+        end
+        else if not FInteraction.AxisAlignedSelection and
+          (FDocument.SelectionCount = 1) and
+          (FDocument.SelectedIndex > 0) and
           (FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) then
         begin
           RectangleLayer := TVectArtRectangleLayer(
@@ -1065,7 +1122,9 @@ begin
               Direct2DCanvas.FrameRect(SelectionGeometry.Handles[Handle]);
             end;
           if (FDocument.SelectionCount = 1) and
-            ((FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
+            ((FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
+             (FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
+             (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) or
              (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) or
              (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) or
              (FDocument[FDocument.SelectedIndex] is
@@ -1109,6 +1168,18 @@ begin
             Direct2DCanvas.Brush.Color := TColor($0048A8F8);
             Direct2DCanvas.Pen.Color := COLOR_SELECTION;
             Direct2DCanvas.Polygon(RadiusHandlePoints);
+          end;
+          if FInteraction.SelectedArcAngleHandles(ArcHandles) then
+          begin
+            Direct2DCanvas.Pen.Color := COLOR_SELECTION;
+            Direct2DCanvas.Brush.Color := TColor($0060C060);
+            Direct2DCanvas.Ellipse(ArcHandles.StartHandle.Left,
+              ArcHandles.StartHandle.Top, ArcHandles.StartHandle.Right,
+              ArcHandles.StartHandle.Bottom);
+            Direct2DCanvas.Brush.Color := TColor($0048A8F8);
+            Direct2DCanvas.Ellipse(ArcHandles.EndHandle.Left,
+              ArcHandles.EndHandle.Top, ArcHandles.EndHandle.Right,
+              ArcHandles.EndHandle.Bottom);
           end;
         end;
       end;
@@ -1176,15 +1247,63 @@ begin
       if not CreationRect.IsEmpty then
       begin
         if (FEditorState <> nil) and
-          (FEditorState.CurrentTool = vetRoundedRectangle) then
+          (FEditorState.CurrentTool = vetArcShape) then
+        begin
+          Direct2DCanvas.Brush.Style := bsSolid;
+          Direct2DCanvas.Brush.Color := COLOR_SELECTION;
+          Direct2DCanvas.Pie(CreationRect.Left, CreationRect.Top,
+            CreationRect.Right, CreationRect.Bottom, CreationRect.Right,
+            (CreationRect.Top + CreationRect.Bottom) div 2,
+            CreationRect.Left,
+            (CreationRect.Top + CreationRect.Bottom) div 2);
+        end
+        else if (FEditorState <> nil) and
+          (FEditorState.CurrentTool = vetArc) then
+          Direct2DCanvas.Brush.Style := bsClear
+        else if (FEditorState <> nil) and
+          (FEditorState.CurrentTool = vetRectangleLine) then
+        begin
+          Direct2DCanvas.Brush.Style := bsClear;
+          Direct2DCanvas.Pen.Color := FEditorState.LineStrokeColor;
+          Direct2DCanvas.Pen.Width := Max(
+            Round(FEditorState.LineStrokeWidth * FZoom), 1);
+          Direct2DCanvas.Rectangle(CreationRect);
+          Direct2DCanvas.Pen.Width := 1;
+        end
+        else if (FEditorState <> nil) and
+          (FEditorState.CurrentTool in [vetEllipseLine, vetEllipse]) then
+        begin
+          Direct2DCanvas.Brush.Style := bsClear;
+          if FEditorState.CurrentTool = vetEllipseLine then
+          begin
+            Direct2DCanvas.Pen.Color := FEditorState.LineStrokeColor;
+            Direct2DCanvas.Pen.Width := Max(
+              Round(FEditorState.LineStrokeWidth * FZoom), 1);
+          end
+          else
+            Direct2DCanvas.Pen.Color := COLOR_SELECTION;
+          Direct2DCanvas.Ellipse(CreationRect);
+          Direct2DCanvas.Pen.Width := 1;
+        end
+        else if (FEditorState <> nil) and
+          (FEditorState.CurrentTool in [vetRoundedRectangleLine,
+            vetRoundedRectangle]) then
         begin
           PreviewRadius := Round(Min(CreationRect.Width,
             CreationRect.Height) * 0.2);
           Direct2DCanvas.Brush.Style := bsClear;
-          Direct2DCanvas.Pen.Color := COLOR_SELECTION;
+          if FEditorState.CurrentTool = vetRoundedRectangleLine then
+          begin
+            Direct2DCanvas.Pen.Color := FEditorState.LineStrokeColor;
+            Direct2DCanvas.Pen.Width := Max(
+              Round(FEditorState.LineStrokeWidth * FZoom), 1);
+          end
+          else
+            Direct2DCanvas.Pen.Color := COLOR_SELECTION;
           Direct2DCanvas.RoundRect(CreationRect.Left, CreationRect.Top,
             CreationRect.Right, CreationRect.Bottom, PreviewRadius * 2,
             PreviewRadius * 2);
+          Direct2DCanvas.Pen.Width := 1;
         end
         else
         begin
@@ -1192,6 +1311,15 @@ begin
           Direct2DCanvas.Brush.Color := COLOR_SELECTION;
           Direct2DCanvas.FrameRect(CreationRect);
         end;
+      end;
+      if FShapeCreation.PreviewArc(ArcPreview) then
+      begin
+        Direct2DCanvas.Brush.Style := bsClear;
+        Direct2DCanvas.Pen.Color := FEditorState.LineStrokeColor;
+        Direct2DCanvas.Pen.Width := Max(
+          Round(FEditorState.LineStrokeWidth * FZoom), 1);
+        Direct2DCanvas.Polyline(ArcPreview);
+        Direct2DCanvas.Pen.Width := 1;
       end;
       if FShapeCreation.PreviewLine(LineStart, LineEnd) then
         DrawStyledPreviewLine(Direct2DCanvas, LineStart, LineEnd,
@@ -1213,6 +1341,9 @@ end;
 
 procedure TVectArtCanvasControl.PaintGDI;
 var
+  ArcHandles: TScreenLayoutArcAngleHandles;
+  ArcLayer: TScreenLayoutArcLayer;
+  ArcPreview: TArray<TPoint>;
   BezierHandles: TScreenLayoutBezierHandles;
   CanvasLayer: TVectArtCanvasLayer;
   CreationRect: TRect;
@@ -1229,6 +1360,7 @@ var
   I: Integer;
   ImageLayer: TVectArtImageLayer;
   Layer: TVectArtLayer;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
   LayerRect: TRect;
   LineEnd: TPoint;
   LineStart: TPoint;
@@ -1321,12 +1453,30 @@ begin
     begin
       Layer := FDocument[I];
       if not Layer.Visible or
-        not ((Layer is TVectArtRectangleLayer) or
+        not ((Layer is TScreenLayoutRectangleLineLayer) or
+          (Layer is TVectArtRectangleLayer) or
+          (Layer is TScreenLayoutArcLayer) or
           (Layer is TVectArtPathLayer) or
           (Layer is TScreenLayoutShapeLayer) or
           (Layer is TVectArtImageLayer)) then
         Continue;
-      if Layer is TVectArtRectangleLayer then
+      if Layer is TScreenLayoutRectangleLineLayer then
+      begin
+        RectangleLine := TScreenLayoutRectangleLineLayer(Layer);
+        RotatedBounds := QuadBounds(RectangleCorners(RectangleLine.Bounds,
+          RectangleLine.RotationDegrees));
+        SelectionFrameOffsetPixels := Max(SelectionFrameOffsetPixels,
+          SelectionFrameOffset(RectangleLine.StrokeWidth, FZoom));
+      end
+      else if Layer is TScreenLayoutArcLayer then
+      begin
+        ArcLayer := TScreenLayoutArcLayer(Layer);
+        RotatedBounds := ScreenLayoutEllipseBounds(ArcLayer.Bounds,
+          ArcLayer.RotationDegrees);
+        SelectionFrameOffsetPixels := Max(SelectionFrameOffsetPixels,
+          SelectionFrameOffset(ArcLayer.StrokeWidth, FZoom));
+      end
+      else if Layer is TVectArtRectangleLayer then
       begin
         RectangleLayer := TVectArtRectangleLayer(Layer);
         RotatedBounds := QuadBounds(RectangleCorners(RectangleLayer.Bounds,
@@ -1423,6 +1573,36 @@ begin
     else if not FInteraction.AxisAlignedSelection and
       (FDocument.SelectionCount = 1) and
       (FDocument.SelectedIndex > 0) and
+      (FDocument[FDocument.SelectedIndex] is
+        TScreenLayoutRectangleLineLayer) then
+    begin
+      RectangleLine := TScreenLayoutRectangleLineLayer(
+        FDocument[FDocument.SelectedIndex]);
+      LogicalQuad := RectangleCorners(RectangleLine.Bounds,
+        RectangleLine.RotationDegrees);
+      for I := 0 to High(ScreenQuad) do
+        ScreenQuad[I] := Point(ToScreenX(LogicalQuad[I].X),
+          ToScreenY(LogicalQuad[I].Y));
+      SelectionGeometry := BuildRotatedSelectionGeometry(ScreenQuad,
+        SelectionFrameOffsetPixels);
+    end
+    else if not FInteraction.AxisAlignedSelection and
+      (FDocument.SelectionCount = 1) and
+      (FDocument.SelectedIndex > 0) and
+      (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) then
+    begin
+      ArcLayer := TScreenLayoutArcLayer(FDocument[FDocument.SelectedIndex]);
+      LogicalQuad := RectangleCorners(ArcLayer.Bounds,
+        ArcLayer.RotationDegrees);
+      for I := 0 to High(ScreenQuad) do
+        ScreenQuad[I] := Point(ToScreenX(LogicalQuad[I].X),
+          ToScreenY(LogicalQuad[I].Y));
+      SelectionGeometry := BuildRotatedSelectionGeometry(ScreenQuad,
+        SelectionFrameOffsetPixels);
+    end
+    else if not FInteraction.AxisAlignedSelection and
+      (FDocument.SelectionCount = 1) and
+      (FDocument.SelectedIndex > 0) and
       (FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) then
     begin
       RectangleLayer := TVectArtRectangleLayer(
@@ -1454,7 +1634,9 @@ begin
           Canvas.FrameRect(SelectionGeometry.Handles[Handle]);
         end;
       if (FDocument.SelectionCount = 1) and
-        ((FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
+        ((FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
+         (FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
+         (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) or
          (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) or
          (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) or
          (FDocument[FDocument.SelectedIndex] is
@@ -1491,6 +1673,14 @@ begin
         Canvas.Brush.Color := TColor($0048A8F8);
         Canvas.Pen.Color := COLOR_SELECTION;
         Canvas.Polygon(RadiusHandlePoints);
+      end;
+      if FInteraction.SelectedArcAngleHandles(ArcHandles) then
+      begin
+        Canvas.Pen.Color := COLOR_SELECTION;
+        Canvas.Brush.Color := TColor($0060C060);
+        Canvas.Ellipse(ArcHandles.StartHandle);
+        Canvas.Brush.Color := TColor($0048A8F8);
+        Canvas.Ellipse(ArcHandles.EndHandle);
       end;
     end;
   end;
@@ -1558,15 +1748,61 @@ begin
   if not CreationRect.IsEmpty then
   begin
     if (FEditorState <> nil) and
-      (FEditorState.CurrentTool = vetRoundedRectangle) then
+      (FEditorState.CurrentTool = vetArcShape) then
+    begin
+      Canvas.Brush.Style := bsSolid;
+      Canvas.Brush.Color := COLOR_SELECTION;
+      Canvas.Pie(CreationRect.Left, CreationRect.Top,
+        CreationRect.Right, CreationRect.Bottom, CreationRect.Right,
+        (CreationRect.Top + CreationRect.Bottom) div 2,
+        CreationRect.Left, (CreationRect.Top + CreationRect.Bottom) div 2);
+    end
+    else if (FEditorState <> nil) and
+      (FEditorState.CurrentTool = vetArc) then
+      Canvas.Brush.Style := bsClear
+    else if (FEditorState <> nil) and
+      (FEditorState.CurrentTool = vetRectangleLine) then
+    begin
+      Canvas.Brush.Style := bsClear;
+      Canvas.Pen.Color := FEditorState.LineStrokeColor;
+      Canvas.Pen.Width := Max(Round(FEditorState.LineStrokeWidth * FZoom), 1);
+      Canvas.Rectangle(CreationRect);
+      Canvas.Pen.Width := 1;
+    end
+    else if (FEditorState <> nil) and
+      (FEditorState.CurrentTool in [vetEllipseLine, vetEllipse]) then
+    begin
+      Canvas.Brush.Style := bsClear;
+      if FEditorState.CurrentTool = vetEllipseLine then
+      begin
+        Canvas.Pen.Color := FEditorState.LineStrokeColor;
+        Canvas.Pen.Width := Max(
+          Round(FEditorState.LineStrokeWidth * FZoom), 1);
+      end
+      else
+        Canvas.Pen.Color := COLOR_SELECTION;
+      Canvas.Ellipse(CreationRect);
+      Canvas.Pen.Width := 1;
+    end
+    else if (FEditorState <> nil) and
+      (FEditorState.CurrentTool in [vetRoundedRectangleLine,
+        vetRoundedRectangle]) then
     begin
       PreviewRadius := Round(Min(CreationRect.Width,
         CreationRect.Height) * 0.2);
       Canvas.Brush.Style := bsClear;
-      Canvas.Pen.Color := COLOR_SELECTION;
+      if FEditorState.CurrentTool = vetRoundedRectangleLine then
+      begin
+        Canvas.Pen.Color := FEditorState.LineStrokeColor;
+        Canvas.Pen.Width := Max(
+          Round(FEditorState.LineStrokeWidth * FZoom), 1);
+      end
+      else
+        Canvas.Pen.Color := COLOR_SELECTION;
       Canvas.RoundRect(CreationRect.Left, CreationRect.Top,
         CreationRect.Right, CreationRect.Bottom, PreviewRadius * 2,
         PreviewRadius * 2);
+      Canvas.Pen.Width := 1;
     end
     else
     begin
@@ -1574,6 +1810,14 @@ begin
       Canvas.Brush.Color := COLOR_SELECTION;
       Canvas.FrameRect(CreationRect);
     end;
+  end;
+  if FShapeCreation.PreviewArc(ArcPreview) then
+  begin
+    Canvas.Brush.Style := bsClear;
+    Canvas.Pen.Color := FEditorState.LineStrokeColor;
+    Canvas.Pen.Width := Max(Round(FEditorState.LineStrokeWidth * FZoom), 1);
+    Canvas.Polyline(ArcPreview);
+    Canvas.Pen.Width := 1;
   end;
   if FShapeCreation.PreviewLine(LineStart, LineEnd) then
     DrawStyledPreviewLine(Canvas, LineStart, LineEnd,

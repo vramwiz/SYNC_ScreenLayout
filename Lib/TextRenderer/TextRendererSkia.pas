@@ -1,4 +1,5 @@
-﻿unit TextRendererSkia;
+﻿// Skiaを使って横書き・縦書きテキストをラスター画像へ描画する。
+unit TextRendererSkia;
 
 interface
 
@@ -14,8 +15,12 @@ type
     function CreateTypeface(const AFontFamilies: TArray<string>;
       const AFontStyle: TTextRenderFontStyle): ISkTypeface;
   public
-    class function IsFontFamilyAvailable(const AFontFamily: string): Boolean; static;
+    // 指定フォントファミリーをSkiaが解決できる場合にTrueを返す。
+    class function IsFontFamilyAvailable(
+      const AFontFamily: string): Boolean; static;
+    // この実装を識別するバックエンド名を返す。
     function BackendName: string; override;
+    // 配置・装飾・文字単位画像の要求を反映したBGRA画像を生成する。
     function Render(const ARequest: TTextRenderRequest;
       out AMetrics: TTextRenderMetrics): TTextRenderImage; override;
   end;

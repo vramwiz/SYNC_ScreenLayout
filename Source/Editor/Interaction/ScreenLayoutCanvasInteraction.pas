@@ -13,8 +13,14 @@ uses
 type
   TVectArtCanvasDragMode = (vcdmNone, vcdmMove, vcdmResize, vcdmRotate,
     vcdmRangeSelect, vcdmRoundedRadius, vcdmRoundedCornerRadius,
+    vcdmArcStartAngle, vcdmArcEndAngle,
     vcdmPathVertex, vcdmPathBezierHandle, vcdmShapeVertex,
     vcdmShapeBezierHandle);
+
+  TScreenLayoutArcAngleHandles = record
+    StartHandle: TRect; // 開始角を変更する画面座標上のハンドル。
+    EndHandle: TRect;   // 終了角を変更する画面座標上のハンドル。
+  end;
 
   TScreenLayoutRoundedCorner = (slrcNone, slrcTopLeft, slrcTopRight,
     slrcBottomRight, slrcBottomLeft);
@@ -52,6 +58,8 @@ type
     FMoveShapeLayerIndices: TArray<Integer>; // 複数選択中のShapeレイヤー番号。
     FMoveStartShapeContours: TArray<TArray<TScreenLayoutContour>>; // ドラッグ開始時の輪郭群。
     FDragStartBounds: TRectF;
+    FArcStartAngle: Single;
+    FArcStartSweep: Single;
     FDragStartImagePoints: TVectArtImagePoints;
     FDragStartPathVertices: TArray<TScreenLayoutVertex>;
     FDragStartShapeContours: TArray<TScreenLayoutContour>; // 単一Shapeの変更前輪郭。
@@ -75,6 +83,7 @@ type
     procedure ApplyImageResize(X, Y: Integer);
     procedure CaptureMoveSelection;
     procedure CommitBoundsCommand;
+    procedure CommitArcAnglesCommand;
     procedure CommitRotationCommand;
     procedure CommitRoundedRadiusCommand;
     procedure CommitImagePointsCommand;
@@ -95,6 +104,8 @@ type
       out Geometry: TVectArtSelectionGeometry): Boolean;
     function SelectedLayersLogicalRect: TRectF;
     function SelectedLayersScreenRect: TRect;
+    function SelectedArcAngleHandlesCore(
+      out Handles: TScreenLayoutArcAngleHandles): Boolean;
     function SelectedRoundedRectangleCornerHandles:
       TArray<TScreenLayoutRoundedCornerHandle>;
     function SelectedRoundedRectangleRadiusHandle(
@@ -133,6 +144,9 @@ type
     // 選択中のベジェ頂点について、接線と両側の制御ハンドルを返す。
     function SelectedShapeBezierHandles(
       out Handles: TScreenLayoutBezierHandles): Boolean;
+    // 単一選択中の楕円弧について、開始角と終了角の編集ハンドルを返す。
+    function SelectedArcAngleHandles(
+      out Handles: TScreenLayoutArcAngleHandles): Boolean;
     // 単一選択中の角丸四角について、4隅共通の半径ハンドルを返す。
     function RoundedRectangleRadiusHandle(out HandleRect: TRect): Boolean;
     // 4隅の個別半径を選択・調整するハンドルを返す。
@@ -149,7 +163,8 @@ type
 implementation
 
 uses
-  System.Math, System.Skia, ScreenLayoutGeometry,
+  System.Math, System.Skia, ScreenLayoutEllipseGeometry,
+  ScreenLayoutGeometry, ScreenLayoutInteractionGeometry,
   ScreenLayoutShapeEditCommands, ScreenLayoutPathOperations,
   ScreenLayoutShapeOperations,
   ScreenLayoutShapePath;
@@ -161,6 +176,7 @@ const
   ROUNDED_RADIUS_HANDLE_MIN_OFFSET = 12;
   ROUNDED_CORNER_HANDLE_SIZE = 8;
   ROUNDED_CORNER_HANDLE_MIN_OFFSET = 22;
+  ARC_ANGLE_HANDLE_SIZE = 12;
 
 function RoundedCornerCursor(
   Corner: TScreenLayoutRoundedCorner): TCursor;
@@ -171,61 +187,6 @@ begin
     Result := crSizeNWSE;
 end;
 
-function ImagePointsBounds(const Points: TVectArtImagePoints): TRectF;
-var
-  I: Integer;
-begin
-  Result := TRectF.Create(Points[0], Points[0]);
-  for I := 1 to High(Points) do
-  begin
-    Result.Left := Min(Result.Left, Points[I].X);
-    Result.Top := Min(Result.Top, Points[I].Y);
-    Result.Right := Max(Result.Right, Points[I].X);
-    Result.Bottom := Max(Result.Bottom, Points[I].Y);
-  end;
-end;
-
-function ClampImageDimension(Value, OriginalValue: Single): Single;
-begin
-  if Abs(Value) >= MIN_RECTANGLE_SIZE then
-    Exit(Value);
-  if not SameValue(Value, 0.0) then
-    Result := Sign(Value) * MIN_RECTANGLE_SIZE
-  else if OriginalValue < 0 then
-    Result := -MIN_RECTANGLE_SIZE
-  else
-    Result := MIN_RECTANGLE_SIZE;
-end;
-
-function DistanceToSegmentParameter(const PointValue, StartPoint,
-  EndPoint: TPointF; out Parameter: Single): Single;
-var
-  DX: Single;
-  DY: Single;
-  Projection: Single;
-  SegmentLengthSquared: Single;
-begin
-  DX := EndPoint.X - StartPoint.X;
-  DY := EndPoint.Y - StartPoint.Y;
-  SegmentLengthSquared := DX * DX + DY * DY;
-  if SegmentLengthSquared > 0 then
-    Projection := EnsureRange(((PointValue.X - StartPoint.X) * DX +
-      (PointValue.Y - StartPoint.Y) * DY) / SegmentLengthSquared, 0.0, 1.0)
-  else
-    Projection := 0;
-  Result := Hypot(PointValue.X - (StartPoint.X + Projection * DX),
-    PointValue.Y - (StartPoint.Y + Projection * DY));
-  Parameter := Projection;
-end;
-
-function DistanceToSegment(const PointValue, StartPoint,
-  EndPoint: TPointF): Single;
-var
-  Parameter: Single;
-begin
-  Result := DistanceToSegmentParameter(PointValue, StartPoint, EndPoint,
-    Parameter);
-end;
 
 constructor TVectArtCanvasInteraction.Create;
 begin
@@ -296,30 +257,90 @@ begin
     FDocument.CanvasLayer.Height);
 end;
 
+function TVectArtCanvasInteraction.SelectedArcAngleHandlesCore(
+  out Handles: TScreenLayoutArcAngleHandles): Boolean;
+var
+  ArcLayer: TScreenLayoutArcLayer;
+  Bounds: TRectF;
+  EndPoint: TPointF;
+  HalfSize: Integer;
+  RotationDegrees: Single;
+  ShapeLayer: TScreenLayoutEllipseArcShapeLayer;
+  StartAngleDegrees: Single;
+  StartPoint: TPointF;
+  SweepAngleDegrees: Single;
+begin
+  Handles.StartHandle := TRect.Empty;
+  Handles.EndHandle := TRect.Empty;
+  Result := (FDocument <> nil) and (FZoom > 0) and
+    (FDocument.SelectionCount = 1) and (FDocument.SelectedIndex > 0) and
+    ((FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) or
+     (FDocument[FDocument.SelectedIndex] is
+       TScreenLayoutEllipseArcShapeLayer));
+  if not Result then
+    Exit;
+  if FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer then
+  begin
+    ArcLayer := TScreenLayoutArcLayer(FDocument[FDocument.SelectedIndex]);
+    Bounds := ArcLayer.Bounds;
+    RotationDegrees := ArcLayer.RotationDegrees;
+    StartAngleDegrees := ArcLayer.StartAngleDegrees;
+    SweepAngleDegrees := ArcLayer.SweepAngleDegrees;
+  end
+  else
+  begin
+    ShapeLayer := TScreenLayoutEllipseArcShapeLayer(
+      FDocument[FDocument.SelectedIndex]);
+    Bounds := ShapeLayer.Bounds;
+    RotationDegrees := ShapeLayer.RotationDegrees;
+    StartAngleDegrees := ShapeLayer.StartAngleDegrees;
+    SweepAngleDegrees := ShapeLayer.SweepAngleDegrees;
+  end;
+  StartPoint := ScreenLayoutEllipsePoint(Bounds, RotationDegrees,
+    StartAngleDegrees);
+  EndPoint := ScreenLayoutArcEndPoint(Bounds, RotationDegrees,
+    StartAngleDegrees, SweepAngleDegrees);
+  HalfSize := ARC_ANGLE_HANDLE_SIZE div 2;
+  Handles.StartHandle := Rect(ToScreenX(StartPoint.X) - HalfSize,
+    ToScreenY(StartPoint.Y) - HalfSize,
+    ToScreenX(StartPoint.X) - HalfSize + ARC_ANGLE_HANDLE_SIZE,
+    ToScreenY(StartPoint.Y) - HalfSize + ARC_ANGLE_HANDLE_SIZE);
+  Handles.EndHandle := Rect(ToScreenX(EndPoint.X) - HalfSize,
+    ToScreenY(EndPoint.Y) - HalfSize,
+    ToScreenX(EndPoint.X) - HalfSize + ARC_ANGLE_HANDLE_SIZE,
+    ToScreenY(EndPoint.Y) - HalfSize + ARC_ANGLE_HANDLE_SIZE);
+end;
+
+function TVectArtCanvasInteraction.SelectedArcAngleHandles(
+  out Handles: TScreenLayoutArcAngleHandles): Boolean;
+begin
+  Result := SelectedArcAngleHandlesCore(Handles);
+end;
+
 function TVectArtCanvasInteraction.SelectedRoundedRectangleRadiusHandle(
   out HandleRect: TRect): Boolean;
 var
+  Bounds: TRectF;
   Center: TPointF;
   HandlePoint: TPointF;
   HalfSize: Integer;
   Inset: Single;
-  Layer: TScreenLayoutRoundedRectangleLayer;
+  Radii: TScreenLayoutCornerRadii;
+  RotationDegrees: Single;
 begin
   HandleRect := TRect.Empty;
   Result := (FDocument <> nil) and (FZoom > 0) and
     (FDocument.SelectionCount = 1) and (FDocument.SelectedIndex > 0) and
-    (FDocument[FDocument.SelectedIndex] is
-      TScreenLayoutRoundedRectangleLayer);
+    RoundedRectangleValues(FDocument[FDocument.SelectedIndex], Bounds,
+      Radii, RotationDegrees);
   if not Result then
     Exit;
-  Layer := TScreenLayoutRoundedRectangleLayer(
-    FDocument[FDocument.SelectedIndex]);
   Inset := ROUNDED_RADIUS_HANDLE_MIN_OFFSET / FZoom;
-  Inset := Min(Inset, Layer.Bounds.Height * 0.5);
-  Center := TPointF.Create((Layer.Bounds.Left + Layer.Bounds.Right) * 0.5,
-    (Layer.Bounds.Top + Layer.Bounds.Bottom) * 0.5);
+  Inset := Min(Inset, Bounds.Height * 0.5);
+  Center := TPointF.Create((Bounds.Left + Bounds.Right) * 0.5,
+    (Bounds.Top + Bounds.Bottom) * 0.5);
   HandlePoint := RotatePointAround(TPointF.Create(Center.X,
-    Layer.Bounds.Top + Inset), Center, Layer.RotationDegrees);
+    Bounds.Top + Inset), Center, RotationDegrees);
   HalfSize := ROUNDED_RADIUS_HANDLE_SIZE div 2;
   HandleRect := Rect(ToScreenX(HandlePoint.X) - HalfSize,
     ToScreenY(HandlePoint.Y) - HalfSize,
@@ -330,55 +351,55 @@ end;
 function TVectArtCanvasInteraction.SelectedRoundedRectangleCornerHandles:
   TArray<TScreenLayoutRoundedCornerHandle>;
 var
+  Bounds: TRectF;
   Center: TPointF;
   Corner: TScreenLayoutRoundedCorner;
   DisplayRadius: Single;
   HandlePoint: TPointF;
   HalfSize: Integer;
-  Layer: TScreenLayoutRoundedRectangleLayer;
+  Radii: TScreenLayoutCornerRadii;
   Radius: Single;
+  RotationDegrees: Single;
 begin
   SetLength(Result, 0);
   if (FDocument = nil) or (FZoom <= 0) or
     (FDocument.SelectionCount <> 1) or (FDocument.SelectedIndex <= 0) or
-    not (FDocument[FDocument.SelectedIndex] is
-      TScreenLayoutRoundedRectangleLayer) then
+    not RoundedRectangleValues(FDocument[FDocument.SelectedIndex], Bounds,
+      Radii, RotationDegrees) then
     Exit;
-  Layer := TScreenLayoutRoundedRectangleLayer(
-    FDocument[FDocument.SelectedIndex]);
-  Center := TPointF.Create((Layer.Bounds.Left + Layer.Bounds.Right) * 0.5,
-    (Layer.Bounds.Top + Layer.Bounds.Bottom) * 0.5);
+  Center := TPointF.Create((Bounds.Left + Bounds.Right) * 0.5,
+    (Bounds.Top + Bounds.Bottom) * 0.5);
   HalfSize := ROUNDED_CORNER_HANDLE_SIZE div 2;
   SetLength(Result, 4);
   for Corner := slrcTopLeft to slrcBottomLeft do
   begin
     case Corner of
-      slrcTopLeft: Radius := Layer.CornerRadii.TopLeft;
-      slrcTopRight: Radius := Layer.CornerRadii.TopRight;
-      slrcBottomRight: Radius := Layer.CornerRadii.BottomRight;
+      slrcTopLeft: Radius := Radii.TopLeft;
+      slrcTopRight: Radius := Radii.TopRight;
+      slrcBottomRight: Radius := Radii.BottomRight;
     else
-      Radius := Layer.CornerRadii.BottomLeft;
+      Radius := Radii.BottomLeft;
     end;
     DisplayRadius := Max(Radius,
       ROUNDED_CORNER_HANDLE_MIN_OFFSET / FZoom);
     DisplayRadius := Min(DisplayRadius,
-      Min(Layer.Bounds.Width, Layer.Bounds.Height));
+      Min(Bounds.Width, Bounds.Height));
     case Corner of
       slrcTopLeft:
-        HandlePoint := TPointF.Create(Layer.Bounds.Left + DisplayRadius,
-          Layer.Bounds.Top + DisplayRadius);
+        HandlePoint := TPointF.Create(Bounds.Left + DisplayRadius,
+          Bounds.Top + DisplayRadius);
       slrcTopRight:
-        HandlePoint := TPointF.Create(Layer.Bounds.Right - DisplayRadius,
-          Layer.Bounds.Top + DisplayRadius);
+        HandlePoint := TPointF.Create(Bounds.Right - DisplayRadius,
+          Bounds.Top + DisplayRadius);
       slrcBottomRight:
-        HandlePoint := TPointF.Create(Layer.Bounds.Right - DisplayRadius,
-          Layer.Bounds.Bottom - DisplayRadius);
+        HandlePoint := TPointF.Create(Bounds.Right - DisplayRadius,
+          Bounds.Bottom - DisplayRadius);
     else
-      HandlePoint := TPointF.Create(Layer.Bounds.Left + DisplayRadius,
-        Layer.Bounds.Bottom - DisplayRadius);
+      HandlePoint := TPointF.Create(Bounds.Left + DisplayRadius,
+        Bounds.Bottom - DisplayRadius);
     end;
     HandlePoint := RotatePointAround(HandlePoint, Center,
-      Layer.RotationDegrees);
+      RotationDegrees);
     Result[Ord(Corner) - 1].Bounds := Rect(
       ToScreenX(HandlePoint.X) - HalfSize,
       ToScreenY(HandlePoint.Y) - HalfSize,
@@ -392,6 +413,7 @@ end;
 
 function TVectArtCanvasInteraction.CursorAt(X, Y: Integer): TCursor;
 var
+  ArcHandles: TScreenLayoutArcAngleHandles;
   CornerHandle: TScreenLayoutRoundedCornerHandle;
   CornerHandles: TArray<TScreenLayoutRoundedCornerHandle>;
   Geometry: TVectArtSelectionGeometry;
@@ -411,6 +433,8 @@ begin
     Exit(crSizeWE);
   if FDragMode = vcdmRoundedCornerRadius then
     Exit(RoundedCornerCursor(FSelectedRoundedCorner));
+  if FDragMode in [vcdmArcStartAngle, vcdmArcEndAngle] then
+    Exit(crCross);
   if FDragMode = vcdmRangeSelect then
     Exit(crCross);
   if FDragMode in [vcdmPathVertex, vcdmPathBezierHandle, vcdmShapeVertex,
@@ -422,6 +446,11 @@ begin
     Exit(VertexCursor);
   if FShapeInteraction.CursorAt(X, Y, VertexCursor) then
     Exit(VertexCursor);
+  if SelectedArcAngleHandlesCore(ArcHandles) and
+    not FDocument[FDocument.SelectedIndex].Locked and
+    (PtInRect(ArcHandles.StartHandle, Point(X, Y)) or
+     PtInRect(ArcHandles.EndHandle, Point(X, Y))) then
+    Exit(crCross);
   if SelectedRoundedRectangleRadiusHandle(SelectionRect) and
     not FDocument[FDocument.SelectedIndex].Locked and
     PtInRect(SelectionRect, Point(X, Y)) then
@@ -438,7 +467,9 @@ begin
       Geometry := BuildSelectionGeometry(SelectionRect,
         SelectedLayersFrameOffset);
     if not FAxisAlignedSelection and (FDocument.SelectionCount = 1) and
-      ((FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
+      ((FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
+       (FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
+       (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) or
        (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) or
        (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) or
        (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer)) and
@@ -456,32 +487,76 @@ end;
 
 procedure TVectArtCanvasInteraction.CommitRotationCommand;
 var
+  ArcLayer: TScreenLayoutArcLayer;
   NewValue: Single;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
 begin
   if (FEditHistory = nil) or (FDocument = nil) or
-    (FDragLayerIndex <= 0) or
-    not (FDocument[FDragLayerIndex] is TVectArtRectangleLayer) then
+    (FDragLayerIndex <= 0) then
     Exit;
-  NewValue := TVectArtRectangleLayer(
-    FDocument[FDragLayerIndex]).RotationDegrees;
+  if FDocument[FDragLayerIndex] is TScreenLayoutRectangleLineLayer then
+  begin
+    RectangleLine := TScreenLayoutRectangleLineLayer(
+      FDocument[FDragLayerIndex]);
+    NewValue := RectangleLine.RotationDegrees;
+  end
+  else if FDocument[FDragLayerIndex] is TScreenLayoutArcLayer then
+  begin
+    ArcLayer := TScreenLayoutArcLayer(FDocument[FDragLayerIndex]);
+    NewValue := ArcLayer.RotationDegrees;
+  end
+  else if FDocument[FDragLayerIndex] is TVectArtRectangleLayer then
+    NewValue := TVectArtRectangleLayer(
+      FDocument[FDragLayerIndex]).RotationDegrees
+  else
+    Exit;
   if not SameValue(FRotationStartValue, NewValue) then
     FEditHistory.AddApplied(TVectArtRotationCommand.Create(FDocument,
       FDragLayerIndex, FRotationStartValue, NewValue));
 end;
 
-procedure TVectArtCanvasInteraction.CommitRoundedRadiusCommand;
+procedure TVectArtCanvasInteraction.CommitArcAnglesCommand;
 var
-  NewValue: TScreenLayoutCornerRadii;
-  RoundedLayer: TScreenLayoutRoundedRectangleLayer;
+  ArcLayer: TScreenLayoutArcLayer;
+  NewStartAngle: Single;
+  NewSweepAngle: Single;
+  ShapeLayer: TScreenLayoutEllipseArcShapeLayer;
 begin
   if (FEditHistory = nil) or (FDocument = nil) or
     (FDragLayerIndex <= 0) or
-    not (FDocument[FDragLayerIndex] is
-      TScreenLayoutRoundedRectangleLayer) then
+    not ((FDocument[FDragLayerIndex] is TScreenLayoutArcLayer) or
+      (FDocument[FDragLayerIndex] is TScreenLayoutEllipseArcShapeLayer)) then
     Exit;
-  RoundedLayer := TScreenLayoutRoundedRectangleLayer(
-    FDocument[FDragLayerIndex]);
-  NewValue := RoundedLayer.CornerRadii;
+  if FDocument[FDragLayerIndex] is TScreenLayoutArcLayer then
+  begin
+    ArcLayer := TScreenLayoutArcLayer(FDocument[FDragLayerIndex]);
+    NewStartAngle := ArcLayer.StartAngleDegrees;
+    NewSweepAngle := ArcLayer.SweepAngleDegrees;
+  end
+  else
+  begin
+    ShapeLayer := TScreenLayoutEllipseArcShapeLayer(
+      FDocument[FDragLayerIndex]);
+    NewStartAngle := ShapeLayer.StartAngleDegrees;
+    NewSweepAngle := ShapeLayer.SweepAngleDegrees;
+  end;
+  if not SameValue(FArcStartAngle, NewStartAngle) or
+    not SameValue(FArcStartSweep, NewSweepAngle) then
+    FEditHistory.AddApplied(TScreenLayoutArcAnglesCommand.Create(FDocument,
+      FDragLayerIndex, FArcStartAngle, FArcStartSweep,
+      NewStartAngle, NewSweepAngle));
+end;
+
+procedure TVectArtCanvasInteraction.CommitRoundedRadiusCommand;
+var
+  Bounds: TRectF;
+  NewValue: TScreenLayoutCornerRadii;
+  RotationDegrees: Single;
+begin
+  if (FEditHistory = nil) or (FDocument = nil) or
+    (FDragLayerIndex <= 0) or not RoundedRectangleValues(
+      FDocument[FDragLayerIndex], Bounds, NewValue, RotationDegrees) then
+    Exit;
   if not SameValue(FRoundedRadiusStartValue.TopLeft, NewValue.TopLeft) or
     not SameValue(FRoundedRadiusStartValue.TopRight, NewValue.TopRight) or
     not SameValue(FRoundedRadiusStartValue.BottomRight,
@@ -651,7 +726,12 @@ begin
       (StartBounds.Top - FDragStartBounds.Top) * ScaleY;
     NewBounds.Bottom := NewSelectionBounds.Top +
       (StartBounds.Bottom - FDragStartBounds.Top) * ScaleY;
-    FDocument.SetRectangleBounds(FMoveLayerIndices[I], NewBounds);
+    if FDocument[FMoveLayerIndices[I]] is TScreenLayoutRectangleLineLayer then
+      FDocument.SetRectangleLineBounds(FMoveLayerIndices[I], NewBounds)
+    else if FDocument[FMoveLayerIndices[I]] is TScreenLayoutArcLayer then
+      FDocument.SetArcBounds(FMoveLayerIndices[I], NewBounds)
+    else
+      FDocument.SetRectangleBounds(FMoveLayerIndices[I], NewBounds);
   end;
   for I := 0 to High(FMoveImageLayerIndices) do
   begin
@@ -712,7 +792,9 @@ begin
   try
     for I := 1 to FDocument.LayerCount - 1 do
       if FDocument[I].Visible and
-        ((FDocument[I] is TVectArtRectangleLayer) or
+        ((FDocument[I] is TScreenLayoutRectangleLineLayer) or
+         (FDocument[I] is TVectArtRectangleLayer) or
+         (FDocument[I] is TScreenLayoutArcLayer) or
          (FDocument[I] is TVectArtPathLayer) or
          (FDocument[I] is TScreenLayoutShapeLayer) or
          (FDocument[I] is TVectArtImageLayer)) then
@@ -750,11 +832,20 @@ begin
   for I := 1 to FDocument.LayerCount - 1 do
     if FDocument.IsLayerSelected(I) then
     begin
-      if FDocument[I] is TVectArtRectangleLayer then
+      if (FDocument[I] is TScreenLayoutRectangleLineLayer) or
+        (FDocument[I] is TVectArtRectangleLayer) or
+        (FDocument[I] is TScreenLayoutArcLayer) then
       begin
         FMoveLayerIndices[MoveIndex] := I;
-        FMoveStartBounds[MoveIndex] :=
-          TVectArtRectangleLayer(FDocument[I]).Bounds;
+        if FDocument[I] is TScreenLayoutRectangleLineLayer then
+          FMoveStartBounds[MoveIndex] :=
+            TScreenLayoutRectangleLineLayer(FDocument[I]).Bounds
+        else if FDocument[I] is TScreenLayoutArcLayer then
+          FMoveStartBounds[MoveIndex] :=
+            TScreenLayoutArcLayer(FDocument[I]).Bounds
+        else
+          FMoveStartBounds[MoveIndex] :=
+            TVectArtRectangleLayer(FDocument[I]).Bounds;
         Inc(MoveIndex);
       end
       else if FDocument[I] is TVectArtImageLayer then
@@ -813,8 +904,15 @@ begin
   BoundsChanged := False;
   for I := 0 to High(FMoveLayerIndices) do
   begin
-    NewBounds[I] := TVectArtRectangleLayer(
-      FDocument[FMoveLayerIndices[I]]).Bounds;
+    if FDocument[FMoveLayerIndices[I]] is TScreenLayoutRectangleLineLayer then
+      NewBounds[I] := TScreenLayoutRectangleLineLayer(
+        FDocument[FMoveLayerIndices[I]]).Bounds
+    else if FDocument[FMoveLayerIndices[I]] is TScreenLayoutArcLayer then
+      NewBounds[I] := TScreenLayoutArcLayer(
+        FDocument[FMoveLayerIndices[I]]).Bounds
+    else
+      NewBounds[I] := TVectArtRectangleLayer(
+        FDocument[FMoveLayerIndices[I]]).Bounds;
     BoundsChanged := BoundsChanged or
       not SameValue(NewBounds[I].Left, FMoveStartBounds[I].Left) or
       not SameValue(NewBounds[I].Top, FMoveStartBounds[I].Top) or
@@ -908,6 +1006,7 @@ end;
 
 function TVectArtCanvasInteraction.HitTestLayer(X, Y: Integer): Integer;
 var
+  ArcLayer: TScreenLayoutArcLayer;
   I: Integer;
   J: Integer;
   Layer: TVectArtLayer;
@@ -917,6 +1016,10 @@ var
   PathVertices: TArray<TScreenLayoutVertex>;
   ImageLayer: TVectArtImageLayer;
   ImagePolygon: TArray<TPointF>;
+  EllipseLayer: TScreenLayoutEllipseLayer;
+  EllipseArcShape: TScreenLayoutEllipseArcShapeLayer;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
+  RectangleLineCorners: TVectArtQuad;
   RectangleLayer: TVectArtRectangleLayer;
   ShapeLayer: TScreenLayoutShapeLayer;
   ShapePath: ISkPath;
@@ -966,6 +1069,57 @@ begin
         Exit(I);
       Continue;
     end;
+    if Layer is TScreenLayoutEllipseLayer then
+    begin
+      EllipseLayer := TScreenLayoutEllipseLayer(Layer);
+      if PointInScreenLayoutEllipse(TPointF.Create(LogicalX, LogicalY),
+        EllipseLayer.Bounds, EllipseLayer.RotationDegrees) then
+        Exit(I);
+      Continue;
+    end;
+    if Layer is TScreenLayoutEllipseArcShapeLayer then
+    begin
+      EllipseArcShape := TScreenLayoutEllipseArcShapeLayer(Layer);
+      ShapePath := BuildScreenLayoutEllipseArcShapePath(EllipseArcShape);
+      if ShapePath.Contains(LogicalX, LogicalY) then
+        Exit(I);
+      Continue;
+    end;
+    if Layer is TScreenLayoutArcLayer then
+    begin
+      ArcLayer := TScreenLayoutArcLayer(Layer);
+      if ArcDistanceToPoint(ArcLayer, TPointF.Create(LogicalX, LogicalY)) <=
+        Max(ArcLayer.StrokeWidth * 0.5, 6 / FZoom) then
+        Exit(I);
+      Continue;
+    end;
+    if Layer is TScreenLayoutRectangleLineLayer then
+    begin
+      RectangleLine := TScreenLayoutRectangleLineLayer(Layer);
+      if (Layer is TScreenLayoutEllipseLineLayer) and
+        (EllipseLineDistanceToPoint(TScreenLayoutEllipseLineLayer(Layer),
+          TPointF.Create(LogicalX, LogicalY)) <=
+          Max(RectangleLine.StrokeWidth * 0.5, 6 / FZoom)) then
+        Exit(I);
+      if Layer is TScreenLayoutEllipseLineLayer then
+        Continue;
+      if (Layer is TScreenLayoutRoundedRectangleLineLayer) and
+        (RoundedRectangleLineDistanceToPoint(
+          TScreenLayoutRoundedRectangleLineLayer(Layer),
+          TPointF.Create(LogicalX, LogicalY)) <=
+          Max(RectangleLine.StrokeWidth * 0.5, 6 / FZoom)) then
+        Exit(I);
+      if Layer is TScreenLayoutRoundedRectangleLineLayer then
+        Continue;
+      RectangleLineCorners := RectangleCorners(RectangleLine.Bounds,
+        RectangleLine.RotationDegrees);
+      for J := 0 to High(RectangleLineCorners) do
+        if DistanceToSegment(TPointF.Create(LogicalX, LogicalY),
+          RectangleLineCorners[J], RectangleLineCorners[(J + 1) mod 4]) <=
+          Max(RectangleLine.StrokeWidth * 0.5, 6 / FZoom) then
+          Exit(I);
+      Continue;
+    end;
     if Layer is TVectArtRectangleLayer then
     begin
       RectangleLayer := TVectArtRectangleLayer(Layer);
@@ -978,16 +1132,20 @@ end;
 
 function TVectArtCanvasInteraction.LayerScreenRect(Index: Integer): TRect;
 var
+  ArcLayer: TScreenLayoutArcLayer;
   Bounds: TRectF;
   ImageLayer: TVectArtImageLayer;
   PathLayer: TVectArtPathLayer;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
   RectangleLayer: TVectArtRectangleLayer;
   ShapeLayer: TScreenLayoutShapeLayer;
 begin
   Result := TRect.Empty;
   if (FDocument = nil) or (Index <= 0) or
     (Index >= FDocument.LayerCount) or
-    not ((FDocument[Index] is TVectArtRectangleLayer) or
+    not ((FDocument[Index] is TScreenLayoutRectangleLineLayer) or
+      (FDocument[Index] is TVectArtRectangleLayer) or
+      (FDocument[Index] is TScreenLayoutArcLayer) or
       (FDocument[Index] is TVectArtPathLayer) or
       (FDocument[Index] is TScreenLayoutShapeLayer) or
       (FDocument[Index] is TVectArtImageLayer)) then
@@ -1024,6 +1182,24 @@ begin
       Inc(Result.Bottom);
     Exit;
   end;
+  if FDocument[Index] is TScreenLayoutRectangleLineLayer then
+  begin
+    RectangleLine := TScreenLayoutRectangleLineLayer(FDocument[Index]);
+    Bounds := QuadBounds(RectangleCorners(RectangleLine.Bounds,
+      RectangleLine.RotationDegrees));
+    Result := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
+      ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
+    Exit;
+  end;
+  if FDocument[Index] is TScreenLayoutArcLayer then
+  begin
+    ArcLayer := TScreenLayoutArcLayer(FDocument[Index]);
+    Bounds := ScreenLayoutEllipseBounds(ArcLayer.Bounds,
+      ArcLayer.RotationDegrees);
+    Result := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
+      ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
+    Exit;
+  end;
   RectangleLayer := TVectArtRectangleLayer(FDocument[Index]);
   Bounds := QuadBounds(RectangleCorners(RectangleLayer.Bounds,
     RectangleLayer.RotationDegrees));
@@ -1033,11 +1209,13 @@ end;
 
 function TVectArtCanvasInteraction.SelectedLayersLogicalRect: TRectF;
 var
+  ArcLayer: TScreenLayoutArcLayer;
   Bounds: TRectF;
   Found: Boolean;
   I: Integer;
   ImageLayer: TVectArtImageLayer;
   PathLayer: TVectArtPathLayer;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
   RectangleLayer: TVectArtRectangleLayer;
   ShapeLayer: TScreenLayoutShapeLayer;
 begin
@@ -1047,12 +1225,26 @@ begin
     Exit;
   for I := 1 to FDocument.LayerCount - 1 do
     if FDocument.IsLayerSelected(I) and FDocument[I].Visible and
-      ((FDocument[I] is TVectArtRectangleLayer) or
+      ((FDocument[I] is TScreenLayoutRectangleLineLayer) or
+       (FDocument[I] is TVectArtRectangleLayer) or
+       (FDocument[I] is TScreenLayoutArcLayer) or
        (FDocument[I] is TVectArtPathLayer) or
        (FDocument[I] is TScreenLayoutShapeLayer) or
        (FDocument[I] is TVectArtImageLayer)) then
     begin
-      if FDocument[I] is TVectArtRectangleLayer then
+      if FDocument[I] is TScreenLayoutRectangleLineLayer then
+      begin
+        RectangleLine := TScreenLayoutRectangleLineLayer(FDocument[I]);
+        Bounds := QuadBounds(RectangleCorners(RectangleLine.Bounds,
+          RectangleLine.RotationDegrees));
+      end
+      else if FDocument[I] is TScreenLayoutArcLayer then
+      begin
+        ArcLayer := TScreenLayoutArcLayer(FDocument[I]);
+        Bounds := ScreenLayoutEllipseBounds(ArcLayer.Bounds,
+          ArcLayer.RotationDegrees);
+      end
+      else if FDocument[I] is TVectArtRectangleLayer then
       begin
         RectangleLayer := TVectArtRectangleLayer(FDocument[I]);
         Bounds := QuadBounds(RectangleCorners(RectangleLayer.Bounds,
@@ -1102,8 +1294,10 @@ end;
 
 function TVectArtCanvasInteraction.SelectedLayersFrameOffset: Integer;
 var
+  ArcLayer: TScreenLayoutArcLayer;
   I: Integer;
   PathLayer: TVectArtPathLayer;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
   ShapeLayer: TScreenLayoutShapeLayer;
 begin
   Result := SelectionFrameOffset(0, FZoom);
@@ -1111,6 +1305,20 @@ begin
     Exit;
   for I := 1 to FDocument.LayerCount - 1 do
     if FDocument.IsLayerSelected(I) and
+      (FDocument[I] is TScreenLayoutRectangleLineLayer) then
+    begin
+      RectangleLine := TScreenLayoutRectangleLineLayer(FDocument[I]);
+      Result := Max(Result, SelectionFrameOffset(RectangleLine.StrokeWidth,
+        FZoom));
+    end
+    else if FDocument.IsLayerSelected(I) and
+      (FDocument[I] is TScreenLayoutArcLayer) then
+    begin
+      ArcLayer := TScreenLayoutArcLayer(FDocument[I]);
+      Result := Max(Result, SelectionFrameOffset(ArcLayer.StrokeWidth,
+        FZoom));
+    end
+    else if FDocument.IsLayerSelected(I) and
       (FDocument[I] is TVectArtPathLayer) then
     begin
       PathLayer := TVectArtPathLayer(FDocument[I]);
@@ -1130,14 +1338,46 @@ end;
 function TVectArtCanvasInteraction.SelectedLayerSelectionGeometry(
   out Geometry: TVectArtSelectionGeometry): Boolean;
 var
+  ArcLayer: TScreenLayoutArcLayer;
   I: Integer;
   ImageLayer: TVectArtImageLayer;
   LogicalQuad: TVectArtQuad;
   PathLayer: TVectArtPathLayer;
   PathVertices: TArray<TScreenLayoutVertex>;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
   RectangleLayer: TVectArtRectangleLayer;
   ScreenQuad: TVectArtScreenQuad;
 begin
+  if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
+    (FDocument.SelectedIndex > 0) and
+    (FDocument[FDocument.SelectedIndex] is
+      TScreenLayoutRectangleLineLayer) then
+  begin
+    RectangleLine := TScreenLayoutRectangleLineLayer(
+      FDocument[FDocument.SelectedIndex]);
+    LogicalQuad := RectangleCorners(RectangleLine.Bounds,
+      RectangleLine.RotationDegrees);
+    for I := 0 to High(ScreenQuad) do
+      ScreenQuad[I] := Point(ToScreenX(LogicalQuad[I].X),
+        ToScreenY(LogicalQuad[I].Y));
+    Geometry := BuildRotatedSelectionGeometry(ScreenQuad,
+      SelectionFrameOffset(RectangleLine.StrokeWidth, FZoom));
+    Exit(True);
+  end;
+  if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
+    (FDocument.SelectedIndex > 0) and
+    (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) then
+  begin
+    ArcLayer := TScreenLayoutArcLayer(FDocument[FDocument.SelectedIndex]);
+    LogicalQuad := RectangleCorners(ArcLayer.Bounds,
+      ArcLayer.RotationDegrees);
+    for I := 0 to High(ScreenQuad) do
+      ScreenQuad[I] := Point(ToScreenX(LogicalQuad[I].X),
+        ToScreenY(LogicalQuad[I].Y));
+    Geometry := BuildRotatedSelectionGeometry(ScreenQuad,
+      SelectionFrameOffset(ArcLayer.StrokeWidth, FZoom));
+    Exit(True);
+  end;
   if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
     (FDocument.SelectedIndex > 0) and
     (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) then
@@ -1224,6 +1464,9 @@ end;
 function TVectArtCanvasInteraction.MouseDown(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer): Boolean;
 var
+  ArcHandles: TScreenLayoutArcAngleHandles;
+  ArcLayer: TScreenLayoutArcLayer;
+  ArcShapeLayer: TScreenLayoutEllipseArcShapeLayer;
   CenterX: Single;
   CenterY: Single;
   CornerHandle: TScreenLayoutRoundedCornerHandle;
@@ -1233,8 +1476,11 @@ var
   ImageLayer: TVectArtImageLayer;
   PathBounds: TRectF;
   PathLayer: TVectArtPathLayer;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
   RectangleLayer: TVectArtRectangleLayer;
   RadiusHandleRect: TRect;
+  RoundedBounds: TRectF;
+  RoundedRotation: Single;
   SelectionRect: TRect;
   ShapeBounds: TRectF;
   ShapeLayer: TScreenLayoutShapeLayer;
@@ -1297,14 +1543,41 @@ begin
   FPathInteraction.ClearSelection;
   FShapeInteraction.ClearSelection;
   if not SelectionContainsLockedLayer and
+    SelectedArcAngleHandlesCore(ArcHandles) then
+  begin
+    if PtInRect(ArcHandles.StartHandle, Point(X, Y)) then
+      FDragMode := vcdmArcStartAngle
+    else if PtInRect(ArcHandles.EndHandle, Point(X, Y)) then
+      FDragMode := vcdmArcEndAngle;
+    if FDragMode in [vcdmArcStartAngle, vcdmArcEndAngle] then
+    begin
+      FDragLayerIndex := FDocument.SelectedIndex;
+      if FDocument[FDragLayerIndex] is TScreenLayoutArcLayer then
+      begin
+        ArcLayer := TScreenLayoutArcLayer(FDocument[FDragLayerIndex]);
+        FArcStartAngle := ArcLayer.StartAngleDegrees;
+        FArcStartSweep := ArcLayer.SweepAngleDegrees;
+      end
+      else
+      begin
+        ArcShapeLayer := TScreenLayoutEllipseArcShapeLayer(
+          FDocument[FDragLayerIndex]);
+        FArcStartAngle := ArcShapeLayer.StartAngleDegrees;
+        FArcStartSweep := ArcShapeLayer.SweepAngleDegrees;
+      end;
+      FDragStartMouse := Point(X, Y);
+      Exit(True);
+    end;
+  end;
+  if not SelectionContainsLockedLayer and
     SelectedRoundedRectangleRadiusHandle(RadiusHandleRect) and
     PtInRect(RadiusHandleRect, Point(X, Y)) then
   begin
     FSelectedRoundedCorner := slrcNone;
     FDragMode := vcdmRoundedRadius;
     FDragLayerIndex := FDocument.SelectedIndex;
-    FRoundedRadiusStartValue := TScreenLayoutRoundedRectangleLayer(
-      FDocument[FDragLayerIndex]).CornerRadii;
+    RoundedRectangleValues(FDocument[FDragLayerIndex], RoundedBounds,
+      FRoundedRadiusStartValue, RoundedRotation);
     FDragStartMouse := Point(X, Y);
     Exit(True);
   end;
@@ -1316,8 +1589,8 @@ begin
       FSelectedRoundedCorner := CornerHandle.Corner;
       FDragMode := vcdmRoundedCornerRadius;
       FDragLayerIndex := FDocument.SelectedIndex;
-      FRoundedRadiusStartValue := TScreenLayoutRoundedRectangleLayer(
-        FDocument[FDragLayerIndex]).CornerRadii;
+      RoundedRectangleValues(FDocument[FDragLayerIndex], RoundedBounds,
+        FRoundedRadiusStartValue, RoundedRotation);
       FDragStartMouse := Point(X, Y);
       Exit(True);
     end;
@@ -1330,7 +1603,9 @@ begin
         SelectedLayersFrameOffset);
     if not FAxisAlignedSelection and (FDocument.SelectionCount = 1) and
       HitTestRotationHandle(Point(X, Y), Geometry) and
-      ((FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
+      ((FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
+       (FDocument[FDocument.SelectedIndex] is TVectArtRectangleLayer) or
+       (FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) or
        (FDocument[FDocument.SelectedIndex] is TVectArtImageLayer) or
        (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) or
        (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer)) then
@@ -1373,13 +1648,35 @@ begin
       end
       else
       begin
-        RectangleLayer := TVectArtRectangleLayer(
-          FDocument[FDragLayerIndex]);
-        FRotationStartValue := RectangleLayer.RotationDegrees;
-        CenterX := ToScreenX((RectangleLayer.Bounds.Left +
-          RectangleLayer.Bounds.Right) * 0.5);
-        CenterY := ToScreenY((RectangleLayer.Bounds.Top +
-          RectangleLayer.Bounds.Bottom) * 0.5);
+        if FDocument[FDragLayerIndex] is TScreenLayoutRectangleLineLayer then
+        begin
+          RectangleLine := TScreenLayoutRectangleLineLayer(
+            FDocument[FDragLayerIndex]);
+          FRotationStartValue := RectangleLine.RotationDegrees;
+          CenterX := ToScreenX((RectangleLine.Bounds.Left +
+            RectangleLine.Bounds.Right) * 0.5);
+          CenterY := ToScreenY((RectangleLine.Bounds.Top +
+            RectangleLine.Bounds.Bottom) * 0.5);
+        end
+        else if FDocument[FDragLayerIndex] is TScreenLayoutArcLayer then
+        begin
+          ArcLayer := TScreenLayoutArcLayer(FDocument[FDragLayerIndex]);
+          FRotationStartValue := ArcLayer.RotationDegrees;
+          CenterX := ToScreenX((ArcLayer.Bounds.Left +
+            ArcLayer.Bounds.Right) * 0.5);
+          CenterY := ToScreenY((ArcLayer.Bounds.Top +
+            ArcLayer.Bounds.Bottom) * 0.5);
+        end
+        else
+        begin
+          RectangleLayer := TVectArtRectangleLayer(
+            FDocument[FDragLayerIndex]);
+          FRotationStartValue := RectangleLayer.RotationDegrees;
+          CenterX := ToScreenX((RectangleLayer.Bounds.Left +
+            RectangleLayer.Bounds.Right) * 0.5);
+          CenterY := ToScreenY((RectangleLayer.Bounds.Top +
+            RectangleLayer.Bounds.Bottom) * 0.5);
+        end;
       end;
       FRotationStartMouseAngle := RadToDeg(ArcTan2(Y - CenterY,
         X - CenterX));
@@ -1410,6 +1707,14 @@ begin
         else
           CaptureMoveSelection;
         if (FDocument.SelectionCount = 1) and
+          (FDocument[FDragLayerIndex] is TScreenLayoutRectangleLineLayer) then
+          FDragStartBounds := TScreenLayoutRectangleLineLayer(
+            FDocument[FDragLayerIndex]).Bounds
+        else if (FDocument.SelectionCount = 1) and
+          (FDocument[FDragLayerIndex] is TScreenLayoutArcLayer) then
+          FDragStartBounds := TScreenLayoutArcLayer(
+            FDocument[FDragLayerIndex]).Bounds
+        else if (FDocument.SelectionCount = 1) and
           (FDocument[FDragLayerIndex] is TVectArtRectangleLayer) then
           FDragStartBounds := TVectArtRectangleLayer(
             FDocument[FDragLayerIndex]).Bounds
@@ -1437,7 +1742,9 @@ begin
       FToggleSelectionModeOnClick := WasSelected and
         (FDocument.SelectionCount = 1) and
         (FDocument.SelectedIndex = FDragLayerIndex) and
-        (FDocument[FDragLayerIndex] is TVectArtRectangleLayer);
+        ((FDocument[FDragLayerIndex] is TScreenLayoutRectangleLineLayer) or
+         (FDocument[FDragLayerIndex] is TVectArtRectangleLayer) or
+         (FDocument[FDragLayerIndex] is TScreenLayoutArcLayer));
       // 選択済みの図形をつかんだ場合は複数選択を維持する。
       if not FDocument.IsLayerSelected(FDragLayerIndex) then
         FDocument.SelectedIndex := FDragLayerIndex;
@@ -1474,6 +1781,8 @@ end;
 function TVectArtCanvasInteraction.MouseMove(Shift: TShiftState;
   X, Y: Integer): Boolean;
 var
+  ArcLayer: TScreenLayoutArcLayer;
+  ArcShapeLayer: TScreenLayoutEllipseArcShapeLayer;
   CenterX: Single;
   CenterY: Single;
   CurrentMouseAngle: Single;
@@ -1487,13 +1796,15 @@ var
   NewShapeContours: TArray<TScreenLayoutContour>;
   ImageBounds: TRectF;
   PathBounds: TRectF;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
   RectangleLayer: TVectArtRectangleLayer;
   LocalPoint: TPointF;
   LocalStartPoint: TPointF;
   MaximumRadius: Single;
   NewRadii: TScreenLayoutCornerRadii;
   Radius: Single;
-  RoundedLayer: TScreenLayoutRoundedRectangleLayer;
+  RoundedBounds: TRectF;
+  RoundedRotation: Single;
   ShapeBounds: TRectF;
 begin
   Result := False;
@@ -1519,87 +1830,130 @@ begin
     FShapeInteraction.DragTo(Shift, X, Y);
     Exit(True);
   end;
-  if FDragMode = vcdmRoundedRadius then
+  if FDragMode in [vcdmArcStartAngle, vcdmArcEndAngle] then
   begin
     if (FDragLayerIndex <= 0) or
-      not (FDocument[FDragLayerIndex] is
-        TScreenLayoutRoundedRectangleLayer) then
+      not ((FDocument[FDragLayerIndex] is TScreenLayoutArcLayer) or
+        (FDocument[FDragLayerIndex] is TScreenLayoutEllipseArcShapeLayer)) then
       Exit(True);
-    RoundedLayer := TScreenLayoutRoundedRectangleLayer(
-      FDocument[FDragLayerIndex]);
-    CenterX := (RoundedLayer.Bounds.Left + RoundedLayer.Bounds.Right) * 0.5;
-    CenterY := (RoundedLayer.Bounds.Top + RoundedLayer.Bounds.Bottom) * 0.5;
+    if FDocument[FDragLayerIndex] is TScreenLayoutArcLayer then
+    begin
+      ArcLayer := TScreenLayoutArcLayer(FDocument[FDragLayerIndex]);
+      CurrentMouseAngle := ScreenLayoutEllipseAngleAtPoint(ArcLayer.Bounds,
+        ArcLayer.RotationDegrees,
+        TPointF.Create(ToLogicalX(X), ToLogicalY(Y)));
+    end
+    else
+    begin
+      ArcShapeLayer := TScreenLayoutEllipseArcShapeLayer(
+        FDocument[FDragLayerIndex]);
+      CurrentMouseAngle := ScreenLayoutEllipseAngleAtPoint(
+        ArcShapeLayer.Bounds, ArcShapeLayer.RotationDegrees,
+        TPointF.Create(ToLogicalX(X), ToLogicalY(Y)));
+    end;
+    if FDragMode = vcdmArcStartAngle then
+      if FDocument[FDragLayerIndex] is TScreenLayoutArcLayer then
+        FDocument.SetArcAngles(FDragLayerIndex, CurrentMouseAngle,
+          ClockwiseAngleDelta(CurrentMouseAngle,
+            FArcStartAngle + FArcStartSweep))
+      else
+        FDocument.SetEllipseArcShapeAngles(FDragLayerIndex,
+          CurrentMouseAngle, ClockwiseAngleDelta(CurrentMouseAngle,
+            FArcStartAngle + FArcStartSweep))
+    else
+      if FDocument[FDragLayerIndex] is TScreenLayoutArcLayer then
+        FDocument.SetArcAngles(FDragLayerIndex, FArcStartAngle,
+          ClockwiseAngleDelta(FArcStartAngle, CurrentMouseAngle))
+      else
+        FDocument.SetEllipseArcShapeAngles(FDragLayerIndex, FArcStartAngle,
+          ClockwiseAngleDelta(FArcStartAngle, CurrentMouseAngle));
+    Exit(True);
+  end;
+  if FDragMode = vcdmRoundedRadius then
+  begin
+    if (FDragLayerIndex <= 0) or not RoundedRectangleValues(
+      FDocument[FDragLayerIndex], RoundedBounds, NewRadii,
+      RoundedRotation) then
+      Exit(True);
+    CenterX := (RoundedBounds.Left + RoundedBounds.Right) * 0.5;
+    CenterY := (RoundedBounds.Top + RoundedBounds.Bottom) * 0.5;
     LocalPoint := RotatePointAround(TPointF.Create(ToLogicalX(X),
       ToLogicalY(Y)), TPointF.Create(CenterX, CenterY),
-      -RoundedLayer.RotationDegrees);
+      -RoundedRotation);
     LocalStartPoint := RotatePointAround(TPointF.Create(
       ToLogicalX(FDragStartMouse.X), ToLogicalY(FDragStartMouse.Y)),
-      TPointF.Create(CenterX, CenterY), -RoundedLayer.RotationDegrees);
+      TPointF.Create(CenterX, CenterY), -RoundedRotation);
     Radius := EnsureRange(FRoundedRadiusStartValue.TopLeft +
       LocalPoint.X - LocalStartPoint.X, 0.0,
-      Min(RoundedLayer.Bounds.Width, RoundedLayer.Bounds.Height) * 0.5);
-    FDocument.SetRoundedRectangleCornerRadii(FDragLayerIndex,
-      UniformScreenLayoutCornerRadii(Radius));
+      Min(RoundedBounds.Width, RoundedBounds.Height) * 0.5);
+    if FDocument[FDragLayerIndex] is
+      TScreenLayoutRoundedRectangleLineLayer then
+      FDocument.SetRoundedRectangleLineCornerRadii(FDragLayerIndex,
+        UniformScreenLayoutCornerRadii(Radius))
+    else
+      FDocument.SetRoundedRectangleCornerRadii(FDragLayerIndex,
+        UniformScreenLayoutCornerRadii(Radius));
     Exit(True);
   end;
   if FDragMode = vcdmRoundedCornerRadius then
   begin
-    if (FDragLayerIndex <= 0) or
-      not (FDocument[FDragLayerIndex] is
-        TScreenLayoutRoundedRectangleLayer) or
+    if (FDragLayerIndex <= 0) or not RoundedRectangleValues(
+      FDocument[FDragLayerIndex], RoundedBounds, NewRadii,
+      RoundedRotation) or
       (FSelectedRoundedCorner = slrcNone) then
       Exit(True);
-    RoundedLayer := TScreenLayoutRoundedRectangleLayer(
-      FDocument[FDragLayerIndex]);
-    CenterX := (RoundedLayer.Bounds.Left + RoundedLayer.Bounds.Right) * 0.5;
-    CenterY := (RoundedLayer.Bounds.Top + RoundedLayer.Bounds.Bottom) * 0.5;
+    CenterX := (RoundedBounds.Left + RoundedBounds.Right) * 0.5;
+    CenterY := (RoundedBounds.Top + RoundedBounds.Bottom) * 0.5;
     LocalPoint := RotatePointAround(TPointF.Create(ToLogicalX(X),
       ToLogicalY(Y)), TPointF.Create(CenterX, CenterY),
-      -RoundedLayer.RotationDegrees);
-    NewRadii := RoundedLayer.CornerRadii;
+      -RoundedRotation);
     case FSelectedRoundedCorner of
       slrcTopLeft:
         begin
-          Radius := ((LocalPoint.X - RoundedLayer.Bounds.Left) +
-            (LocalPoint.Y - RoundedLayer.Bounds.Top)) * 0.5;
+          Radius := ((LocalPoint.X - RoundedBounds.Left) +
+            (LocalPoint.Y - RoundedBounds.Top)) * 0.5;
           MaximumRadius := Min(
-            RoundedLayer.Bounds.Width - NewRadii.TopRight,
-            RoundedLayer.Bounds.Height - NewRadii.BottomLeft);
+            RoundedBounds.Width - NewRadii.TopRight,
+            RoundedBounds.Height - NewRadii.BottomLeft);
           NewRadii.TopLeft := EnsureRange(Radius, 0.0,
             Max(MaximumRadius, 0.0));
         end;
       slrcTopRight:
         begin
-          Radius := ((RoundedLayer.Bounds.Right - LocalPoint.X) +
-            (LocalPoint.Y - RoundedLayer.Bounds.Top)) * 0.5;
+          Radius := ((RoundedBounds.Right - LocalPoint.X) +
+            (LocalPoint.Y - RoundedBounds.Top)) * 0.5;
           MaximumRadius := Min(
-            RoundedLayer.Bounds.Width - NewRadii.TopLeft,
-            RoundedLayer.Bounds.Height - NewRadii.BottomRight);
+            RoundedBounds.Width - NewRadii.TopLeft,
+            RoundedBounds.Height - NewRadii.BottomRight);
           NewRadii.TopRight := EnsureRange(Radius, 0.0,
             Max(MaximumRadius, 0.0));
         end;
       slrcBottomRight:
         begin
-          Radius := ((RoundedLayer.Bounds.Right - LocalPoint.X) +
-            (RoundedLayer.Bounds.Bottom - LocalPoint.Y)) * 0.5;
+          Radius := ((RoundedBounds.Right - LocalPoint.X) +
+            (RoundedBounds.Bottom - LocalPoint.Y)) * 0.5;
           MaximumRadius := Min(
-            RoundedLayer.Bounds.Width - NewRadii.BottomLeft,
-            RoundedLayer.Bounds.Height - NewRadii.TopRight);
+            RoundedBounds.Width - NewRadii.BottomLeft,
+            RoundedBounds.Height - NewRadii.TopRight);
           NewRadii.BottomRight := EnsureRange(Radius, 0.0,
             Max(MaximumRadius, 0.0));
         end;
       slrcBottomLeft:
         begin
-          Radius := ((LocalPoint.X - RoundedLayer.Bounds.Left) +
-            (RoundedLayer.Bounds.Bottom - LocalPoint.Y)) * 0.5;
+          Radius := ((LocalPoint.X - RoundedBounds.Left) +
+            (RoundedBounds.Bottom - LocalPoint.Y)) * 0.5;
           MaximumRadius := Min(
-            RoundedLayer.Bounds.Width - NewRadii.BottomRight,
-            RoundedLayer.Bounds.Height - NewRadii.TopLeft);
+            RoundedBounds.Width - NewRadii.BottomRight,
+            RoundedBounds.Height - NewRadii.TopLeft);
           NewRadii.BottomLeft := EnsureRange(Radius, 0.0,
             Max(MaximumRadius, 0.0));
         end;
     end;
-    FDocument.SetRoundedRectangleCornerRadii(FDragLayerIndex, NewRadii);
+    if FDocument[FDragLayerIndex] is
+      TScreenLayoutRoundedRectangleLineLayer then
+      FDocument.SetRoundedRectangleLineCornerRadii(FDragLayerIndex, NewRadii)
+    else
+      FDocument.SetRoundedRectangleCornerRadii(FDragLayerIndex, NewRadii);
     Exit(True);
   end;
   if FDragMode = vcdmMove then
@@ -1637,7 +1991,12 @@ begin
     begin
       NewBounds := FMoveStartBounds[I];
       NewBounds.Offset(DX, DY);
-      FDocument.SetRectangleBounds(FMoveLayerIndices[I], NewBounds);
+      if FDocument[FMoveLayerIndices[I]] is TScreenLayoutRectangleLineLayer then
+        FDocument.SetRectangleLineBounds(FMoveLayerIndices[I], NewBounds)
+      else if FDocument[FMoveLayerIndices[I]] is TScreenLayoutArcLayer then
+        FDocument.SetArcBounds(FMoveLayerIndices[I], NewBounds)
+      else
+        FDocument.SetRectangleBounds(FMoveLayerIndices[I], NewBounds);
     end;
     for I := 0 to High(FMoveImageLayerIndices) do
     begin
@@ -1712,6 +2071,31 @@ begin
       FDocument.SetShapeContours(FDragLayerIndex, NewShapeContours);
       Exit(True);
     end;
+    if FDocument[FDragLayerIndex] is TScreenLayoutRectangleLineLayer then
+    begin
+      RectangleLine := TScreenLayoutRectangleLineLayer(
+        FDocument[FDragLayerIndex]);
+      CenterX := ToScreenX((RectangleLine.Bounds.Left +
+        RectangleLine.Bounds.Right) * 0.5);
+      CenterY := ToScreenY((RectangleLine.Bounds.Top +
+        RectangleLine.Bounds.Bottom) * 0.5);
+      CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
+      FDocument.SetRectangleLineRotation(FDragLayerIndex,
+        FRotationStartValue + CurrentMouseAngle - FRotationStartMouseAngle);
+      Exit(True);
+    end;
+    if FDocument[FDragLayerIndex] is TScreenLayoutArcLayer then
+    begin
+      ArcLayer := TScreenLayoutArcLayer(FDocument[FDragLayerIndex]);
+      CenterX := ToScreenX((ArcLayer.Bounds.Left +
+        ArcLayer.Bounds.Right) * 0.5);
+      CenterY := ToScreenY((ArcLayer.Bounds.Top +
+        ArcLayer.Bounds.Bottom) * 0.5);
+      CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
+      FDocument.SetArcRotation(FDragLayerIndex,
+        FRotationStartValue + CurrentMouseAngle - FRotationStartMouseAngle);
+      Exit(True);
+    end;
     if not (FDocument[FDragLayerIndex] is TVectArtRectangleLayer) then
       Exit(True);
     RectangleLayer := TVectArtRectangleLayer(FDocument[FDragLayerIndex]);
@@ -1762,6 +2146,8 @@ begin
         CommitRotationCommand;
     if FDragMode in [vcdmRoundedRadius, vcdmRoundedCornerRadius] then
       CommitRoundedRadiusCommand;
+    if FDragMode in [vcdmArcStartAngle, vcdmArcEndAngle] then
+      CommitArcAnglesCommand;
     if FToggleSelectionModeOnClick and not FMoveOccurred then
       FAxisAlignedSelection := not FAxisAlignedSelection;
     EndDrag;
@@ -1896,6 +2282,7 @@ end;
 function TVectArtCanvasInteraction.ResizedBounds(X, Y: Integer): TRectF;
 var
   Anchor: TPointF;
+  ArcLayer: TScreenLayoutArcLayer;
   Center: TPointF;
   CurrentLogical: TPointF;
   DX: Single;
@@ -1904,6 +2291,7 @@ var
   LocalStart: TPointF;
   NewAnchor: TPointF;
   NewCenter: TPointF;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
   RectangleLayer: TVectArtRectangleLayer;
   RotationDegrees: Single;
   StartAnchor: TPointF;
@@ -1912,6 +2300,21 @@ begin
   Result := FDragStartBounds;
   RotationDegrees := 0.0;
   if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
+    (FDragLayerIndex > 0) and
+    (FDocument[FDragLayerIndex] is TScreenLayoutRectangleLineLayer) then
+  begin
+    RectangleLine := TScreenLayoutRectangleLineLayer(
+      FDocument[FDragLayerIndex]);
+    RotationDegrees := RectangleLine.RotationDegrees;
+  end
+  else if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
+    (FDragLayerIndex > 0) and
+    (FDocument[FDragLayerIndex] is TScreenLayoutArcLayer) then
+  begin
+    ArcLayer := TScreenLayoutArcLayer(FDocument[FDragLayerIndex]);
+    RotationDegrees := ArcLayer.RotationDegrees;
+  end
+  else if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
     (FDragLayerIndex > 0) and
     (FDocument[FDragLayerIndex] is TVectArtRectangleLayer) then
   begin

@@ -10,7 +10,8 @@ uses
 
 type
   TVectArtLayerKind = (vlkCanvas, vlkRectangle, vlkRoundedRectangle,
-    vlkPath, vlkImage, vlkShape);
+    vlkPath, vlkImage, vlkShape, vlkEllipse, vlkArc, vlkRectangleLine,
+    vlkRoundedRectangleLine, vlkEllipseLine, vlkEllipseArcShape);
   TVectArtImageSourceKind = (visImage, visLogo);
   TVectArtImagePoints = array[0..3] of TPointF;
   // WebArt Designerの線種コンボとMIF vector stroke style 0..8を同順で保持する。
@@ -124,6 +125,156 @@ type
     Opacity: Single;                        // 0.0..1.0のレイヤー不透明度。
     RotationDegrees: Single;                // 中心回りの時計回り角度。
     Visible: Boolean;                       // 描画対象に含める状態。
+  end;
+
+  TScreenLayoutEllipseLayer = class(TVectArtRectangleLayer)
+  public
+    constructor Create(const AName: string; const ABounds: TRectF;
+      AFillColor: TColor);
+  end;
+
+  TScreenLayoutEllipseData = record
+    Bounds: TRectF;          // 回転前の楕円へ外接する基本矩形。
+    FillColor: TColor;       // 楕円内部の塗り色。
+    Locked: Boolean;         // 編集を禁止する状態。
+    Name: string;            // レイヤー一覧の表示名。
+    Opacity: Single;         // 0.0..1.0のレイヤー不透明度。
+    RotationDegrees: Single; // 楕円中心回りの時計回り角度。
+    Visible: Boolean;        // 描画対象に含める状態。
+  end;
+
+  TScreenLayoutRectangleLineLayer = class(TVectArtLayer)
+  private
+    FBounds: TRectF;
+    FRotationDegrees: Single;
+    FStrokeColor: TColor;
+    FStrokeStyle: TVectArtMifStrokeStyle;
+    FStrokeWidth: Single;
+  protected
+    constructor CreateWithKind(AKind: TVectArtLayerKind;
+      const AName: string; const ABounds: TRectF);
+  public
+    constructor Create(const AName: string; const ABounds: TRectF);
+    property Bounds: TRectF read FBounds write FBounds;
+    property RotationDegrees: Single read FRotationDegrees write FRotationDegrees;
+    property StrokeColor: TColor read FStrokeColor write FStrokeColor;
+    property StrokeStyle: TVectArtMifStrokeStyle read FStrokeStyle write FStrokeStyle;
+    property StrokeWidth: Single read FStrokeWidth write FStrokeWidth;
+  end;
+
+  TScreenLayoutRectangleLineData = record
+    Bounds: TRectF;          // 回転前の四角線へ外接する基本矩形。
+    Locked: Boolean;         // 編集を禁止する状態。
+    Name: string;            // レイヤー一覧の表示名。
+    Opacity: Single;         // 0.0..1.0のレイヤー不透明度。
+    RotationDegrees: Single; // 中心回りの時計回り角度。
+    StrokeColor: TColor;     // 四辺へ適用する線色。
+    StrokeStyle: TVectArtMifStrokeStyle; // 四辺へ適用する線パターン。
+    StrokeWidth: Single;     // 四辺へ適用する線幅。
+    Visible: Boolean;        // 描画対象に含める状態。
+  end;
+
+  TScreenLayoutRoundedRectangleLineLayer = class(
+    TScreenLayoutRectangleLineLayer)
+  private
+    FCornerRadii: TScreenLayoutCornerRadii;
+  public
+    constructor Create(const AName: string; const ABounds: TRectF;
+      const ACornerRadii: TScreenLayoutCornerRadii);
+    property CornerRadii: TScreenLayoutCornerRadii read FCornerRadii
+      write FCornerRadii;
+  end;
+
+  TScreenLayoutRoundedRectangleLineData = record
+    Bounds: TRectF;
+    CornerRadii: TScreenLayoutCornerRadii;
+    Locked: Boolean;
+    Name: string;
+    Opacity: Single;
+    RotationDegrees: Single;
+    StrokeColor: TColor;
+    StrokeStyle: TVectArtMifStrokeStyle;
+    StrokeWidth: Single;
+    Visible: Boolean;
+  end;
+
+  TScreenLayoutEllipseLineLayer = class(TScreenLayoutRectangleLineLayer)
+  public
+    constructor Create(const AName: string; const ABounds: TRectF);
+  end;
+
+  TScreenLayoutEllipseLineData = record
+    Bounds: TRectF;
+    Locked: Boolean;
+    Name: string;
+    Opacity: Single;
+    RotationDegrees: Single;
+    StrokeColor: TColor;
+    StrokeStyle: TVectArtMifStrokeStyle;
+    StrokeWidth: Single;
+    Visible: Boolean;
+  end;
+
+  TScreenLayoutArcLayer = class(TVectArtLayer)
+  private
+    FBounds: TRectF;
+    FLineCap: TVectArtLineCap;
+    FRotationDegrees: Single;
+    FStartAngleDegrees: Single;
+    FStrokeColor: TColor;
+    FStrokeStyle: TVectArtMifStrokeStyle;
+    FStrokeWidth: Single;
+    FSweepAngleDegrees: Single;
+  public
+    constructor Create(const AName: string; const ABounds: TRectF);
+    property Bounds: TRectF read FBounds write FBounds;
+    property LineCap: TVectArtLineCap read FLineCap write FLineCap;
+    property RotationDegrees: Single read FRotationDegrees write FRotationDegrees;
+    property StartAngleDegrees: Single read FStartAngleDegrees write FStartAngleDegrees;
+    property StrokeColor: TColor read FStrokeColor write FStrokeColor;
+    property StrokeStyle: TVectArtMifStrokeStyle read FStrokeStyle write FStrokeStyle;
+    property StrokeWidth: Single read FStrokeWidth write FStrokeWidth;
+    property SweepAngleDegrees: Single read FSweepAngleDegrees write FSweepAngleDegrees;
+  end;
+
+  TScreenLayoutArcData = record
+    Bounds: TRectF;            // 回転前の基礎楕円へ外接する基本矩形。
+    LineCap: TVectArtLineCap;  // 開いた円弧の両端形状。
+    Locked: Boolean;           // 編集を禁止する状態。
+    Name: string;              // レイヤー一覧の表示名。
+    Opacity: Single;           // 0.0..1.0のレイヤー不透明度。
+    RotationDegrees: Single;   // 基礎楕円中心回りの時計回り角度。
+    StartAngleDegrees: Single; // 基礎楕円の右向きを0度とする開始角。
+    StrokeColor: TColor;       // 円弧の線色。
+    StrokeStyle: TVectArtMifStrokeStyle; // 円弧の線パターン。
+    StrokeWidth: Single;       // 円弧の線幅。
+    SweepAngleDegrees: Single; // 開始角から時計回りへ進む角度。
+    Visible: Boolean;          // 描画対象に含める状態。
+  end;
+
+  TScreenLayoutEllipseArcShapeLayer = class(TVectArtRectangleLayer)
+  private
+    FStartAngleDegrees: Single;
+    FSweepAngleDegrees: Single;
+  public
+    constructor Create(const AName: string; const ABounds: TRectF;
+      AFillColor: TColor);
+    property StartAngleDegrees: Single read FStartAngleDegrees
+      write FStartAngleDegrees;
+    property SweepAngleDegrees: Single read FSweepAngleDegrees
+      write FSweepAngleDegrees;
+  end;
+
+  TScreenLayoutEllipseArcShapeData = record
+    Bounds: TRectF;
+    FillColor: TColor;
+    Locked: Boolean;
+    Name: string;
+    Opacity: Single;
+    RotationDegrees: Single;
+    StartAngleDegrees: Single;
+    SweepAngleDegrees: Single;
+    Visible: Boolean;
   end;
 
   TVectArtPathLayer = class(TVectArtLayer)
@@ -261,6 +412,20 @@ type
     // 角丸半径と回転を含む角丸四角を指定位置へ挿入し、実際のレイヤー番号を返す。
     function InsertRoundedRectangle(Index: Integer;
       const Data: TScreenLayoutRoundedRectangleData): Integer;
+    // 塗りと回転を持つ楕円を指定位置へ挿入し、実際のレイヤー番号を返す。
+    function InsertEllipse(Index: Integer;
+      const Data: TScreenLayoutEllipseData): Integer;
+    function InsertRectangleLine(Index: Integer;
+      const Data: TScreenLayoutRectangleLineData): Integer;
+    function InsertRoundedRectangleLine(Index: Integer;
+      const Data: TScreenLayoutRoundedRectangleLineData): Integer;
+    function InsertEllipseLine(Index: Integer;
+      const Data: TScreenLayoutEllipseLineData): Integer;
+    // 基礎楕円と角度、線属性を持つ円弧を指定位置へ挿入する。
+    function InsertArc(Index: Integer;
+      const Data: TScreenLayoutArcData): Integer;
+    function InsertEllipseArcShape(Index: Integer;
+      const Data: TScreenLayoutEllipseArcShapeData): Integer;
     function InsertPath(Index: Integer; const Data: TVectArtPathData): Integer;
     // 複数の閉輪郭を持つShapeを指定位置へ挿入し、実際のレイヤー番号を返す。
     function InsertShape(Index: Integer;
@@ -271,6 +436,21 @@ type
     procedure SetRectangleBounds(Index: Integer; const Value: TRectF);
     procedure SetRectangleFillColor(Index: Integer; Value: TColor);
     procedure SetRectangleRotation(Index: Integer; Value: Single);
+    procedure SetRectangleLineBounds(Index: Integer; const Value: TRectF);
+    procedure SetRectangleLineRotation(Index: Integer; Value: Single);
+    procedure SetRectangleLineStroke(Index: Integer; Color: TColor;
+      Width: Single; Style: TVectArtMifStrokeStyle);
+    procedure SetRoundedRectangleLineCornerRadii(Index: Integer;
+      const Value: TScreenLayoutCornerRadii);
+    procedure SetArcBounds(Index: Integer; const Value: TRectF);
+    procedure SetArcAngles(Index: Integer; StartAngleDegrees,
+      SweepAngleDegrees: Single);
+    procedure SetArcLineCap(Index: Integer; Value: TVectArtLineCap);
+    procedure SetArcRotation(Index: Integer; Value: Single);
+    procedure SetArcStroke(Index: Integer; Color: TColor; Width: Single;
+      Style: TVectArtMifStrokeStyle);
+    procedure SetEllipseArcShapeAngles(Index: Integer; StartAngleDegrees,
+      SweepAngleDegrees: Single);
     // 角丸四角の各隅半径を辺内へ収まる値に制限して更新する。
     procedure SetRoundedRectangleCornerRadii(Index: Integer;
       const Value: TScreenLayoutCornerRadii);
@@ -286,6 +466,17 @@ type
     // 角丸四角を削除し、Undoで型と全属性を復元できるデータを返す。
     function RemoveRoundedRectangle(Index: Integer;
       out Data: TScreenLayoutRoundedRectangleData): Boolean;
+    function RemoveEllipse(Index: Integer;
+      out Data: TScreenLayoutEllipseData): Boolean;
+    function RemoveRectangleLine(Index: Integer;
+      out Data: TScreenLayoutRectangleLineData): Boolean;
+    function RemoveRoundedRectangleLine(Index: Integer;
+      out Data: TScreenLayoutRoundedRectangleLineData): Boolean;
+    function RemoveEllipseLine(Index: Integer;
+      out Data: TScreenLayoutEllipseLineData): Boolean;
+    function RemoveArc(Index: Integer; out Data: TScreenLayoutArcData): Boolean;
+    function RemoveEllipseArcShape(Index: Integer;
+      out Data: TScreenLayoutEllipseArcShapeData): Boolean;
     function RemovePath(Index: Integer; out Data: TVectArtPathData): Boolean;
     // Shapeを削除し、Undo用の独立したデータをDataへ返す。
     function RemoveShape(Index: Integer;
@@ -337,7 +528,7 @@ function ClampScreenLayoutCornerRadii(const Bounds: TRectF;
 implementation
 
 uses
-  System.Math, ScreenLayoutGeometry;
+  System.Math, ScreenLayoutEllipseGeometry, ScreenLayoutGeometry;
 
 function UniformScreenLayoutCornerRadii(
   Radius: Single): TScreenLayoutCornerRadii;
@@ -540,6 +731,77 @@ begin
   FCornerRadii := ClampScreenLayoutCornerRadii(ABounds, ACornerRadii);
 end;
 
+{ TScreenLayoutEllipseLayer }
+
+constructor TScreenLayoutEllipseLayer.Create(const AName: string;
+  const ABounds: TRectF; AFillColor: TColor);
+begin
+  inherited CreateWithKind(vlkEllipse, AName, ABounds, AFillColor);
+end;
+
+{ TScreenLayoutRectangleLineLayer }
+
+constructor TScreenLayoutRectangleLineLayer.Create(const AName: string;
+  const ABounds: TRectF);
+begin
+  CreateWithKind(vlkRectangleLine, AName, ABounds);
+end;
+
+constructor TScreenLayoutRectangleLineLayer.CreateWithKind(
+  AKind: TVectArtLayerKind; const AName: string; const ABounds: TRectF);
+begin
+  inherited Create(AKind, AName);
+  FBounds := ABounds;
+  FRotationDegrees := 0.0;
+  FStrokeColor := clBlack;
+  FStrokeStyle := vssSolid;
+  FStrokeWidth := 1.0;
+end;
+
+{ TScreenLayoutRoundedRectangleLineLayer }
+
+constructor TScreenLayoutRoundedRectangleLineLayer.Create(
+  const AName: string; const ABounds: TRectF;
+  const ACornerRadii: TScreenLayoutCornerRadii);
+begin
+  inherited CreateWithKind(vlkRoundedRectangleLine, AName, ABounds);
+  FCornerRadii := ClampScreenLayoutCornerRadii(ABounds, ACornerRadii);
+end;
+
+{ TScreenLayoutEllipseLineLayer }
+
+constructor TScreenLayoutEllipseLineLayer.Create(const AName: string;
+  const ABounds: TRectF);
+begin
+  inherited CreateWithKind(vlkEllipseLine, AName, ABounds);
+end;
+
+{ TScreenLayoutArcLayer }
+
+constructor TScreenLayoutArcLayer.Create(const AName: string;
+  const ABounds: TRectF);
+begin
+  inherited Create(vlkArc, AName);
+  FBounds := ABounds;
+  FLineCap := vlcSquare;
+  FRotationDegrees := 0.0;
+  FStartAngleDegrees := 180.0;
+  FStrokeColor := clBlack;
+  FStrokeStyle := vssSolid;
+  FStrokeWidth := 1.0;
+  FSweepAngleDegrees := 180.0;
+end;
+
+{ TScreenLayoutEllipseArcShapeLayer }
+
+constructor TScreenLayoutEllipseArcShapeLayer.Create(const AName: string;
+  const ABounds: TRectF; AFillColor: TColor);
+begin
+  inherited CreateWithKind(vlkEllipseArcShape, AName, ABounds, AFillColor);
+  FStartAngleDegrees := 180.0;
+  FSweepAngleDegrees := 180.0;
+end;
+
 { TVectArtPathLayer }
 
 constructor TVectArtPathLayer.Create(const AName: string;
@@ -739,6 +1001,157 @@ begin
   Changed;
 end;
 
+function TVectArtDocument.InsertEllipse(Index: Integer;
+  const Data: TScreenLayoutEllipseData): Integer;
+var
+  EllipseLayer: TScreenLayoutEllipseLayer;
+  I: Integer;
+begin
+  Result := EnsureRange(Index, 1, FLayers.Count);
+  EllipseLayer := TScreenLayoutEllipseLayer.Create(Data.Name, Data.Bounds,
+    Data.FillColor);
+  EllipseLayer.Locked := Data.Locked;
+  EllipseLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  EllipseLayer.RotationDegrees := NormalizeAngleDegrees(
+    Data.RotationDegrees);
+  EllipseLayer.Visible := Data.Visible;
+  FLayers.Insert(Result, EllipseLayer);
+  for I := 0 to FSelectedLayers.Count - 1 do
+    if FSelectedLayers[I] >= Result then
+      FSelectedLayers[I] := FSelectedLayers[I] + 1;
+  if FSelectedIndex >= Result then
+    Inc(FSelectedIndex);
+  Changed;
+end;
+
+function TVectArtDocument.InsertArc(Index: Integer;
+  const Data: TScreenLayoutArcData): Integer;
+var
+  ArcLayer: TScreenLayoutArcLayer;
+  I: Integer;
+begin
+  Result := EnsureRange(Index, 1, FLayers.Count);
+  ArcLayer := TScreenLayoutArcLayer.Create(Data.Name, Data.Bounds);
+  ArcLayer.LineCap := Data.LineCap;
+  ArcLayer.Locked := Data.Locked;
+  ArcLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  ArcLayer.RotationDegrees := NormalizeAngleDegrees(Data.RotationDegrees);
+  ArcLayer.StartAngleDegrees := NormalizeScreenLayoutEllipseAngleDegrees(
+    Data.StartAngleDegrees);
+  ArcLayer.StrokeColor := Data.StrokeColor;
+  ArcLayer.StrokeStyle := Data.StrokeStyle;
+  ArcLayer.StrokeWidth := Max(Data.StrokeWidth, 0.1);
+  ArcLayer.SweepAngleDegrees := EnsureRange(Data.SweepAngleDegrees,
+    0.0, 360.0);
+  ArcLayer.Visible := Data.Visible;
+  FLayers.Insert(Result, ArcLayer);
+  for I := 0 to FSelectedLayers.Count - 1 do
+    if FSelectedLayers[I] >= Result then
+      FSelectedLayers[I] := FSelectedLayers[I] + 1;
+  if FSelectedIndex >= Result then
+    Inc(FSelectedIndex);
+  Changed;
+end;
+
+function TVectArtDocument.InsertEllipseArcShape(Index: Integer;
+  const Data: TScreenLayoutEllipseArcShapeData): Integer;
+var
+  I: Integer;
+  ShapeLayer: TScreenLayoutEllipseArcShapeLayer;
+begin
+  Result := EnsureRange(Index, 1, FLayers.Count);
+  ShapeLayer := TScreenLayoutEllipseArcShapeLayer.Create(Data.Name,
+    Data.Bounds, Data.FillColor);
+  ShapeLayer.Locked := Data.Locked;
+  ShapeLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  ShapeLayer.RotationDegrees := NormalizeAngleDegrees(Data.RotationDegrees);
+  ShapeLayer.StartAngleDegrees :=
+    NormalizeScreenLayoutEllipseAngleDegrees(Data.StartAngleDegrees);
+  ShapeLayer.SweepAngleDegrees := EnsureRange(Data.SweepAngleDegrees,
+    0.0, 360.0);
+  ShapeLayer.Visible := Data.Visible;
+  FLayers.Insert(Result, ShapeLayer);
+  for I := 0 to FSelectedLayers.Count - 1 do
+    if FSelectedLayers[I] >= Result then
+      FSelectedLayers[I] := FSelectedLayers[I] + 1;
+  if FSelectedIndex >= Result then
+    Inc(FSelectedIndex);
+  Changed;
+end;
+
+function TVectArtDocument.InsertRectangleLine(Index: Integer;
+  const Data: TScreenLayoutRectangleLineData): Integer;
+var
+  I: Integer;
+  LineLayer: TScreenLayoutRectangleLineLayer;
+begin
+  Result := EnsureRange(Index, 1, FLayers.Count);
+  LineLayer := TScreenLayoutRectangleLineLayer.Create(Data.Name, Data.Bounds);
+  LineLayer.Locked := Data.Locked;
+  LineLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  LineLayer.RotationDegrees := NormalizeAngleDegrees(Data.RotationDegrees);
+  LineLayer.StrokeColor := Data.StrokeColor;
+  LineLayer.StrokeStyle := Data.StrokeStyle;
+  LineLayer.StrokeWidth := Max(Data.StrokeWidth, 0.1);
+  LineLayer.Visible := Data.Visible;
+  FLayers.Insert(Result, LineLayer);
+  for I := 0 to FSelectedLayers.Count - 1 do
+    if FSelectedLayers[I] >= Result then
+      FSelectedLayers[I] := FSelectedLayers[I] + 1;
+  if FSelectedIndex >= Result then
+    Inc(FSelectedIndex);
+  Changed;
+end;
+
+function TVectArtDocument.InsertRoundedRectangleLine(Index: Integer;
+  const Data: TScreenLayoutRoundedRectangleLineData): Integer;
+var
+  I: Integer;
+  LineLayer: TScreenLayoutRoundedRectangleLineLayer;
+begin
+  Result := EnsureRange(Index, 1, FLayers.Count);
+  LineLayer := TScreenLayoutRoundedRectangleLineLayer.Create(Data.Name,
+    Data.Bounds, Data.CornerRadii);
+  LineLayer.Locked := Data.Locked;
+  LineLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  LineLayer.RotationDegrees := NormalizeAngleDegrees(Data.RotationDegrees);
+  LineLayer.StrokeColor := Data.StrokeColor;
+  LineLayer.StrokeStyle := Data.StrokeStyle;
+  LineLayer.StrokeWidth := Max(Data.StrokeWidth, 0.1);
+  LineLayer.Visible := Data.Visible;
+  FLayers.Insert(Result, LineLayer);
+  for I := 0 to FSelectedLayers.Count - 1 do
+    if FSelectedLayers[I] >= Result then
+      FSelectedLayers[I] := FSelectedLayers[I] + 1;
+  if FSelectedIndex >= Result then
+    Inc(FSelectedIndex);
+  Changed;
+end;
+
+function TVectArtDocument.InsertEllipseLine(Index: Integer;
+  const Data: TScreenLayoutEllipseLineData): Integer;
+var
+  I: Integer;
+  LineLayer: TScreenLayoutEllipseLineLayer;
+begin
+  Result := EnsureRange(Index, 1, FLayers.Count);
+  LineLayer := TScreenLayoutEllipseLineLayer.Create(Data.Name, Data.Bounds);
+  LineLayer.Locked := Data.Locked;
+  LineLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  LineLayer.RotationDegrees := NormalizeAngleDegrees(Data.RotationDegrees);
+  LineLayer.StrokeColor := Data.StrokeColor;
+  LineLayer.StrokeStyle := Data.StrokeStyle;
+  LineLayer.StrokeWidth := Max(Data.StrokeWidth, 0.1);
+  LineLayer.Visible := Data.Visible;
+  FLayers.Insert(Result, LineLayer);
+  for I := 0 to FSelectedLayers.Count - 1 do
+    if FSelectedLayers[I] >= Result then
+      FSelectedLayers[I] := FSelectedLayers[I] + 1;
+  if FSelectedIndex >= Result then
+    Inc(FSelectedIndex);
+  Changed;
+end;
+
 function TVectArtDocument.InsertPath(Index: Integer;
   const Data: TVectArtPathData): Integer;
 var
@@ -892,6 +1305,236 @@ begin
   Data.Opacity := RoundedLayer.Opacity;
   Data.RotationDegrees := RoundedLayer.RotationDegrees;
   Data.Visible := RoundedLayer.Visible;
+  FLayers.Delete(Index);
+  Selection := TList<Integer>.Create;
+  try
+    for I := 0 to FSelectedLayers.Count - 1 do
+      if FSelectedLayers[I] < Index then
+        Selection.Add(FSelectedLayers[I])
+      else if FSelectedLayers[I] > Index then
+        Selection.Add(FSelectedLayers[I] - 1);
+    if (Selection.Count = 0) and (FLayers.Count > 1) then
+      Selection.Add(Min(Index, FLayers.Count - 1));
+    SetSelectedLayersCore(Selection.ToArray, False);
+  finally
+    Selection.Free;
+  end;
+  Changed;
+end;
+
+function TVectArtDocument.RemoveEllipse(Index: Integer;
+  out Data: TScreenLayoutEllipseData): Boolean;
+var
+  EllipseLayer: TScreenLayoutEllipseLayer;
+  I: Integer;
+  Selection: TList<Integer>;
+begin
+  Result := (Index > 0) and (Index < FLayers.Count) and
+    (FLayers[Index] is TScreenLayoutEllipseLayer);
+  if not Result then
+    Exit;
+  EllipseLayer := TScreenLayoutEllipseLayer(FLayers[Index]);
+  Data.Bounds := EllipseLayer.Bounds;
+  Data.FillColor := EllipseLayer.FillColor;
+  Data.Locked := EllipseLayer.Locked;
+  Data.Name := EllipseLayer.Name;
+  Data.Opacity := EllipseLayer.Opacity;
+  Data.RotationDegrees := EllipseLayer.RotationDegrees;
+  Data.Visible := EllipseLayer.Visible;
+  FLayers.Delete(Index);
+  Selection := TList<Integer>.Create;
+  try
+    for I := 0 to FSelectedLayers.Count - 1 do
+      if FSelectedLayers[I] < Index then
+        Selection.Add(FSelectedLayers[I])
+      else if FSelectedLayers[I] > Index then
+        Selection.Add(FSelectedLayers[I] - 1);
+    if (Selection.Count = 0) and (FLayers.Count > 1) then
+      Selection.Add(Min(Index, FLayers.Count - 1));
+    SetSelectedLayersCore(Selection.ToArray, False);
+  finally
+    Selection.Free;
+  end;
+  Changed;
+end;
+
+function TVectArtDocument.RemoveArc(Index: Integer;
+  out Data: TScreenLayoutArcData): Boolean;
+var
+  ArcLayer: TScreenLayoutArcLayer;
+  I: Integer;
+  Selection: TList<Integer>;
+begin
+  Result := (Index > 0) and (Index < FLayers.Count) and
+    (FLayers[Index] is TScreenLayoutArcLayer);
+  if not Result then
+    Exit;
+  ArcLayer := TScreenLayoutArcLayer(FLayers[Index]);
+  Data.Bounds := ArcLayer.Bounds;
+  Data.LineCap := ArcLayer.LineCap;
+  Data.Locked := ArcLayer.Locked;
+  Data.Name := ArcLayer.Name;
+  Data.Opacity := ArcLayer.Opacity;
+  Data.RotationDegrees := ArcLayer.RotationDegrees;
+  Data.StartAngleDegrees := ArcLayer.StartAngleDegrees;
+  Data.StrokeColor := ArcLayer.StrokeColor;
+  Data.StrokeStyle := ArcLayer.StrokeStyle;
+  Data.StrokeWidth := ArcLayer.StrokeWidth;
+  Data.SweepAngleDegrees := ArcLayer.SweepAngleDegrees;
+  Data.Visible := ArcLayer.Visible;
+  FLayers.Delete(Index);
+  Selection := TList<Integer>.Create;
+  try
+    for I := 0 to FSelectedLayers.Count - 1 do
+      if FSelectedLayers[I] < Index then
+        Selection.Add(FSelectedLayers[I])
+      else if FSelectedLayers[I] > Index then
+        Selection.Add(FSelectedLayers[I] - 1);
+    if (Selection.Count = 0) and (FLayers.Count > 1) then
+      Selection.Add(Min(Index, FLayers.Count - 1));
+    SetSelectedLayersCore(Selection.ToArray, False);
+  finally
+    Selection.Free;
+  end;
+  Changed;
+end;
+
+function TVectArtDocument.RemoveRectangleLine(Index: Integer;
+  out Data: TScreenLayoutRectangleLineData): Boolean;
+var
+  I: Integer;
+  LineLayer: TScreenLayoutRectangleLineLayer;
+  Selection: TList<Integer>;
+begin
+  Result := (Index > 0) and (Index < FLayers.Count) and
+    (FLayers[Index].ClassType = TScreenLayoutRectangleLineLayer);
+  if not Result then
+    Exit;
+  LineLayer := TScreenLayoutRectangleLineLayer(FLayers[Index]);
+  Data.Bounds := LineLayer.Bounds;
+  Data.Locked := LineLayer.Locked;
+  Data.Name := LineLayer.Name;
+  Data.Opacity := LineLayer.Opacity;
+  Data.RotationDegrees := LineLayer.RotationDegrees;
+  Data.StrokeColor := LineLayer.StrokeColor;
+  Data.StrokeStyle := LineLayer.StrokeStyle;
+  Data.StrokeWidth := LineLayer.StrokeWidth;
+  Data.Visible := LineLayer.Visible;
+  FLayers.Delete(Index);
+  Selection := TList<Integer>.Create;
+  try
+    for I := 0 to FSelectedLayers.Count - 1 do
+      if FSelectedLayers[I] < Index then
+        Selection.Add(FSelectedLayers[I])
+      else if FSelectedLayers[I] > Index then
+        Selection.Add(FSelectedLayers[I] - 1);
+    if (Selection.Count = 0) and (FLayers.Count > 1) then
+      Selection.Add(Min(Index, FLayers.Count - 1));
+    SetSelectedLayersCore(Selection.ToArray, False);
+  finally
+    Selection.Free;
+  end;
+  Changed;
+end;
+
+function TVectArtDocument.RemoveRoundedRectangleLine(Index: Integer;
+  out Data: TScreenLayoutRoundedRectangleLineData): Boolean;
+var
+  I: Integer;
+  LineLayer: TScreenLayoutRoundedRectangleLineLayer;
+  Selection: TList<Integer>;
+begin
+  Result := (Index > 0) and (Index < FLayers.Count) and
+    (FLayers[Index] is TScreenLayoutRoundedRectangleLineLayer);
+  if not Result then
+    Exit;
+  LineLayer := TScreenLayoutRoundedRectangleLineLayer(FLayers[Index]);
+  Data.Bounds := LineLayer.Bounds;
+  Data.CornerRadii := LineLayer.CornerRadii;
+  Data.Locked := LineLayer.Locked;
+  Data.Name := LineLayer.Name;
+  Data.Opacity := LineLayer.Opacity;
+  Data.RotationDegrees := LineLayer.RotationDegrees;
+  Data.StrokeColor := LineLayer.StrokeColor;
+  Data.StrokeStyle := LineLayer.StrokeStyle;
+  Data.StrokeWidth := LineLayer.StrokeWidth;
+  Data.Visible := LineLayer.Visible;
+  FLayers.Delete(Index);
+  Selection := TList<Integer>.Create;
+  try
+    for I := 0 to FSelectedLayers.Count - 1 do
+      if FSelectedLayers[I] < Index then
+        Selection.Add(FSelectedLayers[I])
+      else if FSelectedLayers[I] > Index then
+        Selection.Add(FSelectedLayers[I] - 1);
+    if (Selection.Count = 0) and (FLayers.Count > 1) then
+      Selection.Add(Min(Index, FLayers.Count - 1));
+    SetSelectedLayersCore(Selection.ToArray, False);
+  finally
+    Selection.Free;
+  end;
+  Changed;
+end;
+
+function TVectArtDocument.RemoveEllipseArcShape(Index: Integer;
+  out Data: TScreenLayoutEllipseArcShapeData): Boolean;
+var
+  I: Integer;
+  ShapeLayer: TScreenLayoutEllipseArcShapeLayer;
+  Selection: TList<Integer>;
+begin
+  Result := (Index > 0) and (Index < FLayers.Count) and
+    (FLayers[Index] is TScreenLayoutEllipseArcShapeLayer);
+  if not Result then
+    Exit;
+  ShapeLayer := TScreenLayoutEllipseArcShapeLayer(FLayers[Index]);
+  Data.Bounds := ShapeLayer.Bounds;
+  Data.FillColor := ShapeLayer.FillColor;
+  Data.Locked := ShapeLayer.Locked;
+  Data.Name := ShapeLayer.Name;
+  Data.Opacity := ShapeLayer.Opacity;
+  Data.RotationDegrees := ShapeLayer.RotationDegrees;
+  Data.StartAngleDegrees := ShapeLayer.StartAngleDegrees;
+  Data.SweepAngleDegrees := ShapeLayer.SweepAngleDegrees;
+  Data.Visible := ShapeLayer.Visible;
+  FLayers.Delete(Index);
+  Selection := TList<Integer>.Create;
+  try
+    for I := 0 to FSelectedLayers.Count - 1 do
+      if FSelectedLayers[I] < Index then
+        Selection.Add(FSelectedLayers[I])
+      else if FSelectedLayers[I] > Index then
+        Selection.Add(FSelectedLayers[I] - 1);
+    if (Selection.Count = 0) and (FLayers.Count > 1) then
+      Selection.Add(Min(Index, FLayers.Count - 1));
+    SetSelectedLayersCore(Selection.ToArray, False);
+  finally
+    Selection.Free;
+  end;
+  Changed;
+end;
+
+function TVectArtDocument.RemoveEllipseLine(Index: Integer;
+  out Data: TScreenLayoutEllipseLineData): Boolean;
+var
+  I: Integer;
+  LineLayer: TScreenLayoutEllipseLineLayer;
+  Selection: TList<Integer>;
+begin
+  Result := (Index > 0) and (Index < FLayers.Count) and
+    (FLayers[Index] is TScreenLayoutEllipseLineLayer);
+  if not Result then
+    Exit;
+  LineLayer := TScreenLayoutEllipseLineLayer(FLayers[Index]);
+  Data.Bounds := LineLayer.Bounds;
+  Data.Locked := LineLayer.Locked;
+  Data.Name := LineLayer.Name;
+  Data.Opacity := LineLayer.Opacity;
+  Data.RotationDegrees := LineLayer.RotationDegrees;
+  Data.StrokeColor := LineLayer.StrokeColor;
+  Data.StrokeStyle := LineLayer.StrokeStyle;
+  Data.StrokeWidth := LineLayer.StrokeWidth;
+  Data.Visible := LineLayer.Visible;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -1260,6 +1903,204 @@ begin
   if SameValue(RectangleLayer.RotationDegrees, NewValue) then
     Exit;
   RectangleLayer.RotationDegrees := NewValue;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetRectangleLineBounds(Index: Integer;
+  const Value: TRectF);
+var
+  CurrentBounds: TRectF;
+  LineLayer: TScreenLayoutRectangleLineLayer;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutRectangleLineLayer) then
+    Exit;
+  LineLayer := TScreenLayoutRectangleLineLayer(FLayers[Index]);
+  CurrentBounds := LineLayer.Bounds;
+  if SameValue(CurrentBounds.Left, Value.Left) and
+    SameValue(CurrentBounds.Top, Value.Top) and
+    SameValue(CurrentBounds.Right, Value.Right) and
+    SameValue(CurrentBounds.Bottom, Value.Bottom) then
+    Exit;
+  LineLayer.Bounds := Value;
+  if LineLayer is TScreenLayoutRoundedRectangleLineLayer then
+    TScreenLayoutRoundedRectangleLineLayer(LineLayer).CornerRadii :=
+      ClampScreenLayoutCornerRadii(Value,
+        TScreenLayoutRoundedRectangleLineLayer(LineLayer).CornerRadii);
+  Changed;
+end;
+
+procedure TVectArtDocument.SetRoundedRectangleLineCornerRadii(Index: Integer;
+  const Value: TScreenLayoutCornerRadii);
+var
+  LineLayer: TScreenLayoutRoundedRectangleLineLayer;
+  NewValue: TScreenLayoutCornerRadii;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutRoundedRectangleLineLayer) then
+    Exit;
+  LineLayer := TScreenLayoutRoundedRectangleLineLayer(FLayers[Index]);
+  NewValue := ClampScreenLayoutCornerRadii(LineLayer.Bounds, Value);
+  if SameValue(LineLayer.CornerRadii.TopLeft, NewValue.TopLeft) and
+    SameValue(LineLayer.CornerRadii.TopRight, NewValue.TopRight) and
+    SameValue(LineLayer.CornerRadii.BottomRight, NewValue.BottomRight) and
+    SameValue(LineLayer.CornerRadii.BottomLeft, NewValue.BottomLeft) then
+    Exit;
+  LineLayer.CornerRadii := NewValue;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetRectangleLineRotation(Index: Integer;
+  Value: Single);
+var
+  LineLayer: TScreenLayoutRectangleLineLayer;
+  NewValue: Single;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutRectangleLineLayer) then
+    Exit;
+  LineLayer := TScreenLayoutRectangleLineLayer(FLayers[Index]);
+  NewValue := NormalizeAngleDegrees(Value);
+  if SameValue(LineLayer.RotationDegrees, NewValue) then
+    Exit;
+  LineLayer.RotationDegrees := NewValue;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetRectangleLineStroke(Index: Integer;
+  Color: TColor; Width: Single; Style: TVectArtMifStrokeStyle);
+var
+  LineLayer: TScreenLayoutRectangleLineLayer;
+  NewWidth: Single;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutRectangleLineLayer) then
+    Exit;
+  LineLayer := TScreenLayoutRectangleLineLayer(FLayers[Index]);
+  NewWidth := Max(Width, 0.1);
+  if (LineLayer.StrokeColor = Color) and
+    SameValue(LineLayer.StrokeWidth, NewWidth) and
+    (LineLayer.StrokeStyle = Style) then
+    Exit;
+  LineLayer.StrokeColor := Color;
+  LineLayer.StrokeWidth := NewWidth;
+  LineLayer.StrokeStyle := Style;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetArcBounds(Index: Integer;
+  const Value: TRectF);
+var
+  ArcLayer: TScreenLayoutArcLayer;
+  CurrentBounds: TRectF;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutArcLayer) then
+    Exit;
+  ArcLayer := TScreenLayoutArcLayer(FLayers[Index]);
+  CurrentBounds := ArcLayer.Bounds;
+  if SameValue(CurrentBounds.Left, Value.Left) and
+    SameValue(CurrentBounds.Top, Value.Top) and
+    SameValue(CurrentBounds.Right, Value.Right) and
+    SameValue(CurrentBounds.Bottom, Value.Bottom) then
+    Exit;
+  ArcLayer.Bounds := Value;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetArcAngles(Index: Integer; StartAngleDegrees,
+  SweepAngleDegrees: Single);
+var
+  ArcLayer: TScreenLayoutArcLayer;
+  NewStartAngle: Single;
+  NewSweepAngle: Single;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutArcLayer) then
+    Exit;
+  ArcLayer := TScreenLayoutArcLayer(FLayers[Index]);
+  NewStartAngle := NormalizeScreenLayoutEllipseAngleDegrees(
+    StartAngleDegrees);
+  NewSweepAngle := EnsureRange(SweepAngleDegrees, 0.0, 360.0);
+  if SameValue(ArcLayer.StartAngleDegrees, NewStartAngle) and
+    SameValue(ArcLayer.SweepAngleDegrees, NewSweepAngle) then
+    Exit;
+  ArcLayer.StartAngleDegrees := NewStartAngle;
+  ArcLayer.SweepAngleDegrees := NewSweepAngle;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetArcLineCap(Index: Integer;
+  Value: TVectArtLineCap);
+var
+  ArcLayer: TScreenLayoutArcLayer;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutArcLayer) then
+    Exit;
+  ArcLayer := TScreenLayoutArcLayer(FLayers[Index]);
+  if ArcLayer.LineCap = Value then
+    Exit;
+  ArcLayer.LineCap := Value;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetArcRotation(Index: Integer; Value: Single);
+var
+  ArcLayer: TScreenLayoutArcLayer;
+  NewValue: Single;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutArcLayer) then
+    Exit;
+  ArcLayer := TScreenLayoutArcLayer(FLayers[Index]);
+  NewValue := NormalizeAngleDegrees(Value);
+  if SameValue(ArcLayer.RotationDegrees, NewValue) then
+    Exit;
+  ArcLayer.RotationDegrees := NewValue;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetEllipseArcShapeAngles(Index: Integer;
+  StartAngleDegrees, SweepAngleDegrees: Single);
+var
+  NewStartAngle: Single;
+  NewSweepAngle: Single;
+  ShapeLayer: TScreenLayoutEllipseArcShapeLayer;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutEllipseArcShapeLayer) then
+    Exit;
+  ShapeLayer := TScreenLayoutEllipseArcShapeLayer(FLayers[Index]);
+  NewStartAngle := NormalizeScreenLayoutEllipseAngleDegrees(
+    StartAngleDegrees);
+  NewSweepAngle := EnsureRange(SweepAngleDegrees, 0.0, 360.0);
+  if SameValue(ShapeLayer.StartAngleDegrees, NewStartAngle) and
+    SameValue(ShapeLayer.SweepAngleDegrees, NewSweepAngle) then
+    Exit;
+  ShapeLayer.StartAngleDegrees := NewStartAngle;
+  ShapeLayer.SweepAngleDegrees := NewSweepAngle;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetArcStroke(Index: Integer; Color: TColor;
+  Width: Single; Style: TVectArtMifStrokeStyle);
+var
+  ArcLayer: TScreenLayoutArcLayer;
+  NewWidth: Single;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutArcLayer) then
+    Exit;
+  ArcLayer := TScreenLayoutArcLayer(FLayers[Index]);
+  NewWidth := Max(Width, 0.1);
+  if (ArcLayer.StrokeColor = Color) and
+    SameValue(ArcLayer.StrokeWidth, NewWidth) and
+    (ArcLayer.StrokeStyle = Style) then
+    Exit;
+  ArcLayer.StrokeColor := Color;
+  ArcLayer.StrokeWidth := NewWidth;
+  ArcLayer.StrokeStyle := Style;
   Changed;
 end;
 
