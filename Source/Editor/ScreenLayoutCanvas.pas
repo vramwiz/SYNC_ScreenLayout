@@ -5,38 +5,14 @@ unit ScreenLayoutCanvas;
 interface
 
 uses
-  System.Classes, System.SysUtils, System.Types, Winapi.Messages,
-  Winapi.Windows, Vcl.Controls, Vcl.Direct2D, Vcl.Forms, Vcl.Graphics,
-  Vcl.StdCtrls,
+  System.Classes, System.SysUtils, System.Types, Winapi.Windows, Vcl.Controls,
+  Vcl.Direct2D, Vcl.Forms, Vcl.Graphics, Vcl.StdCtrls,
   ScreenLayoutCanvasInteraction,
   ScreenLayoutDocument, ScreenLayoutEditHistory,
   ScreenLayoutEditorState, ScreenLayoutSelectionGeometry,
-  ScreenLayoutShapeCreation, ScreenLayoutRenderer;
+  ScreenLayoutShapeCreation, ScreenLayoutRenderer, ScreenLayoutTextEditing;
 
 type
-  TScreenLayoutCommittedTextEvent = procedure(Sender: TObject;
-    const Text: string) of object;
-  TScreenLayoutCompositionEvent = procedure(Sender: TObject;
-    const Text: string; CursorPosition: Integer; Active: Boolean) of object;
-
-  TScreenLayoutImeEdit = class(TEdit)
-  private
-    FOnCommittedText: TScreenLayoutCommittedTextEvent;
-    FOnComposition: TScreenLayoutCompositionEvent;
-    procedure WMChar(var Message: TWMChar); message WM_CHAR;
-    procedure WMImeComposition(var Message: TMessage);
-      message WM_IME_COMPOSITION;
-    procedure WMImeEndComposition(var Message: TMessage);
-      message WM_IME_ENDCOMPOSITION;
-    procedure WMImeStartComposition(var Message: TMessage);
-      message WM_IME_STARTCOMPOSITION;
-  public
-    property OnCommittedText: TScreenLayoutCommittedTextEvent
-      read FOnCommittedText write FOnCommittedText;
-    property OnComposition: TScreenLayoutCompositionEvent
-      read FOnComposition write FOnComposition;
-  end;
-
   TVectArtCanvasControl = class(TCustomControl)
   private
     FCanvasBounds: TRect;
@@ -53,6 +29,8 @@ type
     FTextBeforeSelection: TArray<Integer>;
     FTextBuffer: string;
     FTextCaretIndex: Integer;
+    FTextPreferredCaretX: Single;
+    FTextSelectionAnchor: Integer;
     FTextCompositionActive: Boolean;
     FTextCompositionCursor: Integer;
     FTextCompositionLabel: TLabel;
@@ -96,6 +74,8 @@ type
     procedure TextEditorExit(Sender: TObject);
     procedure TextEditorKeyDown(Sender: TObject; var Key: Word;
       Shift: TShiftState);
+    procedure MoveTextCaretVertical(Direction: Integer;
+      ExtendSelection: Boolean);
     procedure UpdateTextEditorBackground;
     procedure UpdateTextEditorBounds;
     procedure UpdateTextLayerFromBuffer;
@@ -136,9 +116,9 @@ const
 implementation
 
 uses
-  System.Math, Winapi.D2D1, Winapi.Imm,
-  ScreenLayoutEllipseGeometry, ScreenLayoutGeometry, ScreenLayoutPathOperations,
-  ScreenLayoutShapeOperations, ScreenLayoutTextCommands,
+  System.Math, System.Skia, Winapi.D2D1, Vcl.Clipbrd,
+  ScreenLayoutCanvasPreview, ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
+  ScreenLayoutPathOperations, ScreenLayoutShapeOperations, ScreenLayoutTextCommands,
   ScreenLayoutTextGeometry, ScreenLayoutLayerNaming;
 
 const
@@ -177,365 +157,6 @@ begin
   AlphaBlend(Target.Handle, Bounds.Left, Bounds.Top,
     Bounds.Width, Bounds.Height, Bitmap.Canvas.Handle,
     0, 0, Bitmap.Width, Bitmap.Height, Blend);
-end;
-
-procedure TScreenLayoutImeEdit.WMChar(var Message: TWMChar);
-begin
-  if (Message.CharCode >= 32) and Assigned(FOnCommittedText) then
-    FOnCommittedText(Self, string(WideChar(Message.CharCode)));
-  // 確定文字はDocument側へ渡し、Edit自身の文字列には残さない。
-  Message.Result := 0;
-end;
-
-procedure TScreenLayoutImeEdit.WMImeComposition(var Message: TMessage);
-var
-  ByteCount: Integer;
-  CompositionCursor: Integer;
-  CompositionText: string;
-  InputContext: HIMC;
-begin
-  CompositionText := '';
-  CompositionCursor := 0;
-  InputContext := ImmGetContext(Handle);
-  if InputContext <> 0 then
-  try
-    ByteCount := ImmGetCompositionStringW(InputContext, GCS_COMPSTR,
-      nil, 0);
-    if ByteCount > 0 then
-    begin
-      SetLength(CompositionText, ByteCount div SizeOf(Char));
-      ImmGetCompositionStringW(InputContext, GCS_COMPSTR,
-        PChar(CompositionText), ByteCount);
-    end;
-    CompositionCursor := ImmGetCompositionStringW(InputContext,
-      GCS_CURSORPOS, nil, 0);
-    if CompositionCursor < 0 then
-      CompositionCursor := 0;
-  finally
-    ImmReleaseContext(Handle, InputContext);
-  end;
-  inherited;
-  if Assigned(FOnComposition) then
-    FOnComposition(Self, CompositionText, CompositionCursor, True);
-end;
-
-procedure TScreenLayoutImeEdit.WMImeEndComposition(var Message: TMessage);
-begin
-  inherited;
-  if Assigned(FOnComposition) then
-    FOnComposition(Self, '', 0, False);
-end;
-
-procedure TScreenLayoutImeEdit.WMImeStartComposition(var Message: TMessage);
-begin
-  inherited;
-  if Assigned(FOnComposition) then
-    FOnComposition(Self, '', 0, True);
-end;
-
-type
-  TPreviewLineSegment = record
-    StartPoint: TPoint;
-    EndPoint: TPoint;
-  end;
-
-function BuildVertexKindIconPoints(const Bounds: TRect;
-  Kind: TScreenLayoutVertexKind): TArray<TPoint>;
-var
-  CenterX: Integer;
-begin
-  CenterX := (Bounds.Left + Bounds.Right) div 2;
-  if Kind = slvkSharp then
-  begin
-    SetLength(Result, 3);
-    Result[0] := Point(Bounds.Left + 5, Bounds.Top + 5);
-    Result[1] := Point(CenterX, Bounds.Bottom - 5);
-    Result[2] := Point(Bounds.Right - 5, Bounds.Top + 5);
-  end
-  else
-  begin
-    SetLength(Result, 7);
-    Result[0] := Point(Bounds.Left + 5, Bounds.Top + 5);
-    Result[1] := Point(Bounds.Left + 5, Bounds.Bottom - 8);
-    Result[2] := Point(Bounds.Left + 7, Bounds.Bottom - 5);
-    Result[3] := Point(CenterX, Bounds.Bottom - 4);
-    Result[4] := Point(Bounds.Right - 7, Bounds.Bottom - 5);
-    Result[5] := Point(Bounds.Right - 5, Bounds.Bottom - 8);
-    Result[6] := Point(Bounds.Right - 5, Bounds.Top + 5);
-  end;
-end;
-
-function BuildDiamondPoints(const Bounds: TRect): TArray<TPoint>;
-begin
-  SetLength(Result, 4);
-  Result[0] := Point((Bounds.Left + Bounds.Right) div 2, Bounds.Top);
-  Result[1] := Point(Bounds.Right, (Bounds.Top + Bounds.Bottom) div 2);
-  Result[2] := Point((Bounds.Left + Bounds.Right) div 2, Bounds.Bottom);
-  Result[3] := Point(Bounds.Left, (Bounds.Top + Bounds.Bottom) div 2);
-end;
-
-procedure BuildRotationMarkPoints(const Bounds: TRect;
-  out ArcPoints, ArrowPoints: TArray<TPoint>);
-const
-  ARC_POINT_COUNT = 10;
-var
-  Angle: Single;
-  CenterX: Single;
-  CenterY: Single;
-  I: Integer;
-  PerpendicularX: Single;
-  PerpendicularY: Single;
-  Radius: Single;
-  TangentX: Single;
-  TangentY: Single;
-  Tip: TPoint;
-begin
-  CenterX := (Bounds.Left + Bounds.Right) * 0.5;
-  CenterY := (Bounds.Top + Bounds.Bottom) * 0.5;
-  Radius := Max(Min(Bounds.Width, Bounds.Height) * 0.5 - 4, 2);
-  SetLength(ArcPoints, ARC_POINT_COUNT);
-  for I := 0 to High(ArcPoints) do
-  begin
-    Angle := DegToRad(45 + 270 * I / High(ArcPoints));
-    ArcPoints[I] := Point(Round(CenterX + Cos(Angle) * Radius),
-      Round(CenterY - Sin(Angle) * Radius));
-  end;
-  Tip := ArcPoints[High(ArcPoints)];
-  Angle := DegToRad(315);
-  TangentX := -Sin(Angle);
-  TangentY := -Cos(Angle);
-  PerpendicularX := -TangentY;
-  PerpendicularY := TangentX;
-  SetLength(ArrowPoints, 3);
-  ArrowPoints[0] := Tip;
-  ArrowPoints[1] := Point(Round(Tip.X - TangentX * 4 +
-    PerpendicularX * 2), Round(Tip.Y - TangentY * 4 +
-    PerpendicularY * 2));
-  ArrowPoints[2] := Point(Round(Tip.X - TangentX * 4 -
-    PerpendicularX * 2), Round(Tip.Y - TangentY * 4 -
-    PerpendicularY * 2));
-end;
-
-function BuildStyledPreviewSegments(const StartPoint, EndPoint: TPoint;
-  Width: Single; Style: TVectArtMifStrokeStyle): TArray<TPreviewLineSegment>;
-var
-  CurrentDistance: Single;
-  DashIndex: Integer;
-  DrawSegment: Boolean;
-  DX: Single;
-  DY: Single;
-  EndDistance: Single;
-  Intervals: TArray<Single>;
-  LineLength: Single;
-  SegmentLength: Single;
-  UnitX: Single;
-  UnitY: Single;
-begin
-  Result := nil;
-  DX := EndPoint.X - StartPoint.X;
-  DY := EndPoint.Y - StartPoint.Y;
-  LineLength := Hypot(DX, DY);
-  if LineLength <= 0 then
-    Exit;
-  Intervals := VectArtStrokeDashIntervals(Style, Max(Width, 1.0));
-  if Length(Intervals) = 0 then
-  begin
-    SetLength(Result, 1);
-    Result[0].StartPoint := StartPoint;
-    Result[0].EndPoint := EndPoint;
-    Exit;
-  end;
-  UnitX := DX / LineLength;
-  UnitY := DY / LineLength;
-  CurrentDistance := 0;
-  DashIndex := 0;
-  DrawSegment := True;
-  while CurrentDistance < LineLength do
-  begin
-    SegmentLength := Max(Intervals[DashIndex], 1.0);
-    EndDistance := Min(CurrentDistance + SegmentLength, LineLength);
-    if DrawSegment then
-    begin
-      SetLength(Result, Length(Result) + 1);
-      Result[High(Result)].StartPoint := Point(
-        StartPoint.X + Round(UnitX * CurrentDistance),
-        StartPoint.Y + Round(UnitY * CurrentDistance));
-      Result[High(Result)].EndPoint := Point(
-        StartPoint.X + Round(UnitX * EndDistance),
-        StartPoint.Y + Round(UnitY * EndDistance));
-    end;
-    CurrentDistance := EndDistance;
-    DashIndex := (DashIndex + 1) mod Length(Intervals);
-    DrawSegment := not DrawSegment;
-  end;
-end;
-
-procedure DrawStyledPreviewLine(Target: TCanvas; const StartPoint,
-  EndPoint: TPoint; Color: TColor; Width: Single;
-  Style: TVectArtMifStrokeStyle; LineCap: TVectArtLineCap); overload;
-var
-  DX: Single;
-  DY: Single;
-  EffectiveCap: TVectArtLineCap;
-  I: Integer;
-  LengthValue: Single;
-  P1: TPoint;
-  P2: TPoint;
-  Points: array[0..2] of TPoint;
-  Radius: Integer;
-  Segments: TArray<TPreviewLineSegment>;
-begin
-  Segments := BuildStyledPreviewSegments(StartPoint, EndPoint, Width, Style);
-  EffectiveCap := LineCap;
-  Target.Pen.Color := Color;
-  Target.Pen.Width := Max(Round(Width), 1);
-  Target.Pen.Style := psSolid;
-  for I := 0 to High(Segments) do
-  begin
-    P1 := Segments[I].StartPoint;
-    P2 := Segments[I].EndPoint;
-    if EffectiveCap = vlcSquare then
-    begin
-      DX := P2.X - P1.X;
-      DY := P2.Y - P1.Y;
-      LengthValue := Hypot(DX, DY);
-      if LengthValue > 0 then
-      begin
-        P1.Offset(-Round(DX / LengthValue * Width * 0.5),
-          -Round(DY / LengthValue * Width * 0.5));
-        P2.Offset(Round(DX / LengthValue * Width * 0.5),
-          Round(DY / LengthValue * Width * 0.5));
-      end;
-    end;
-    Target.MoveTo(P1.X, P1.Y);
-    Target.LineTo(P2.X, P2.Y);
-    if EffectiveCap = vlcRound then
-    begin
-      Radius := Max(Round(Width * 0.5), 1);
-      Target.Brush.Style := bsSolid;
-      Target.Brush.Color := Color;
-      Target.Ellipse(P1.X - Radius, P1.Y - Radius, P1.X + Radius + 1,
-        P1.Y + Radius + 1);
-      Target.Ellipse(P2.X - Radius, P2.Y - Radius, P2.X + Radius + 1,
-        P2.Y + Radius + 1);
-      Target.Brush.Style := bsClear;
-    end
-    else if EffectiveCap = vlcTriangle then
-    begin
-      DX := P2.X - P1.X;
-      DY := P2.Y - P1.Y;
-      LengthValue := Hypot(DX, DY);
-      if LengthValue > 0 then
-      begin
-        Radius := Max(Round(Width * 0.5), 1);
-        DX := DX / LengthValue;
-        DY := DY / LengthValue;
-        Target.Brush.Style := bsSolid;
-        Target.Brush.Color := Color;
-        Points[0] := Point(P1.X - Round(DY * Radius),
-          P1.Y + Round(DX * Radius));
-        Points[1] := Point(P1.X - Round(DX * Radius),
-          P1.Y - Round(DY * Radius));
-        Points[2] := Point(P1.X + Round(DY * Radius),
-          P1.Y - Round(DX * Radius));
-        Target.Polygon(Points);
-        Points[0] := Point(P2.X - Round(DY * Radius),
-          P2.Y + Round(DX * Radius));
-        Points[1] := Point(P2.X + Round(DX * Radius),
-          P2.Y + Round(DY * Radius));
-        Points[2] := Point(P2.X + Round(DY * Radius),
-          P2.Y - Round(DX * Radius));
-        Target.Polygon(Points);
-        Target.Brush.Style := bsClear;
-      end;
-    end;
-  end;
-  Target.Pen.Width := 1;
-end;
-
-procedure DrawStyledPreviewLine(Target: TDirect2DCanvas;
-  const StartPoint, EndPoint: TPoint; Color: TColor; Width: Single;
-  Style: TVectArtMifStrokeStyle; LineCap: TVectArtLineCap); overload;
-var
-  DX: Single;
-  DY: Single;
-  EffectiveCap: TVectArtLineCap;
-  I: Integer;
-  LengthValue: Single;
-  P1: TPoint;
-  P2: TPoint;
-  Points: array[0..2] of TPoint;
-  Radius: Integer;
-  Segments: TArray<TPreviewLineSegment>;
-begin
-  Target.RenderTarget.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-  Segments := BuildStyledPreviewSegments(StartPoint, EndPoint, Width, Style);
-  EffectiveCap := LineCap;
-  Target.Pen.Color := Color;
-  Target.Pen.Width := Max(Round(Width), 1);
-  Target.Pen.Style := psSolid;
-  for I := 0 to High(Segments) do
-  begin
-    P1 := Segments[I].StartPoint;
-    P2 := Segments[I].EndPoint;
-    if EffectiveCap = vlcSquare then
-    begin
-      DX := P2.X - P1.X;
-      DY := P2.Y - P1.Y;
-      LengthValue := Hypot(DX, DY);
-      if LengthValue > 0 then
-      begin
-        P1.Offset(-Round(DX / LengthValue * Width * 0.5),
-          -Round(DY / LengthValue * Width * 0.5));
-        P2.Offset(Round(DX / LengthValue * Width * 0.5),
-          Round(DY / LengthValue * Width * 0.5));
-      end;
-    end;
-    Target.MoveTo(P1.X, P1.Y);
-    Target.LineTo(P2.X, P2.Y);
-    if EffectiveCap = vlcRound then
-    begin
-      Radius := Max(Round(Width * 0.5), 1);
-      Target.Brush.Style := bsSolid;
-      Target.Brush.Color := Color;
-      Target.Ellipse(P1.X - Radius, P1.Y - Radius, P1.X + Radius + 1,
-        P1.Y + Radius + 1);
-      Target.Ellipse(P2.X - Radius, P2.Y - Radius, P2.X + Radius + 1,
-        P2.Y + Radius + 1);
-      Target.Brush.Style := bsClear;
-    end
-    else if EffectiveCap = vlcTriangle then
-    begin
-      DX := P2.X - P1.X;
-      DY := P2.Y - P1.Y;
-      LengthValue := Hypot(DX, DY);
-      if LengthValue > 0 then
-      begin
-        Radius := Max(Round(Width * 0.5), 1);
-        DX := DX / LengthValue;
-        DY := DY / LengthValue;
-        Target.Brush.Style := bsSolid;
-        Target.Brush.Color := Color;
-        Points[0] := Point(P1.X - Round(DY * Radius),
-          P1.Y + Round(DX * Radius));
-        Points[1] := Point(P1.X - Round(DX * Radius),
-          P1.Y - Round(DY * Radius));
-        Points[2] := Point(P1.X + Round(DY * Radius),
-          P1.Y - Round(DX * Radius));
-        Target.Polygon(Points);
-        Points[0] := Point(P2.X - Round(DY * Radius),
-          P2.Y + Round(DX * Radius));
-        Points[1] := Point(P2.X + Round(DX * Radius),
-          P2.Y + Round(DY * Radius));
-        Points[2] := Point(P2.X + Round(DY * Radius),
-          P2.Y - Round(DX * Radius));
-        Target.Polygon(Points);
-        Target.Brush.Style := bsClear;
-      end;
-    end;
-  end;
-  Target.Pen.Width := 1;
-  Target.RenderTarget.SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 end;
 
 constructor TVectArtCanvasControl.Create(AOwner: TComponent);
@@ -618,6 +239,8 @@ begin
   FTextNewLayer := True;
   FTextBuffer := '';
   FTextCaretIndex := 0;
+  FTextSelectionAnchor := 0;
+  FTextPreferredCaretX := -1.0;
   FTextCompositionActive := False;
   FTextCompositionCursor := 0;
   FTextCompositionLabel.Caption := '';
@@ -647,6 +270,7 @@ begin
     FinishTextEdit(False);
   Layer := TScreenLayoutTextLayer(FDocument[Index]);
   FTextBeforeSelection := FDocument.GetSelectedLayerIndices;
+  FDocument.SetSelectedLayers([Index]);
   FTextLayerIndex := Index;
   FTextOriginalData := CaptureScreenLayoutTextData(Layer);
   FTextGuideBounds := TRectF.Create(Layer.Bounds.Left, Layer.Bounds.Top,
@@ -655,6 +279,8 @@ begin
   FTextNewLayer := False;
   FTextBuffer := Layer.Text;
   FTextCaretIndex := Length(FTextBuffer);
+  FTextSelectionAnchor := FTextCaretIndex;
+  FTextPreferredCaretX := -1.0;
   FTextCompositionActive := False;
   FTextCompositionCursor := 0;
   FTextCompositionLabel.Caption := '';
@@ -686,8 +312,61 @@ end;
 procedure TVectArtCanvasControl.DrawTextEditingOverlay(
   ACanvas: TCanvas);
 var
+  CaretLines: TArray<TScreenLayoutCaretLine>;
+  Font: ISkFont;
   GuideRect: TRect;
+  I: Integer;
+  Layer: TScreenLayoutTextLayer;
+  LineHeight: Single;
+  PrefixText: string;
+  SelectedText: string;
+  SelectionEnd: Integer;
+  SelectionRect: TRect;
+  SelectionStart: Integer;
+  SpanEnd: Integer;
+  SpanStart: Integer;
 begin
+  if FTextEditing and (FDocument <> nil) and
+    (FTextLayerIndex > 0) and (FTextLayerIndex < FDocument.LayerCount) and
+    (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
+  begin
+    SelectionStart := Min(FTextCaretIndex, FTextSelectionAnchor);
+    SelectionEnd := Max(FTextCaretIndex, FTextSelectionAnchor);
+    if SelectionStart <> SelectionEnd then
+    begin
+      Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
+      Font := CreateScreenLayoutTextFont(Layer.FontFamily, Layer.FontSize);
+      LineHeight := Max(Font.Spacing, Layer.FontSize);
+      CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
+        Layer.FontFamily, Layer.FontSize, Layer.WrapWidth);
+      ACanvas.Font.Name := Layer.FontFamily;
+      ACanvas.Font.Height := -Max(Round(Layer.FontSize * FZoom), 1);
+      ACanvas.Font.Color := clHighlightText;
+      for I := 0 to High(CaretLines) do
+      begin
+        SpanStart := Max(SelectionStart, CaretLines[I].StartIndex);
+        SpanEnd := Min(SelectionEnd, CaretLines[I].EndIndex);
+        if SpanStart >= SpanEnd then
+          Continue;
+        PrefixText := Copy(FTextBuffer, CaretLines[I].StartIndex + 1,
+          SpanStart - CaretLines[I].StartIndex);
+        SelectedText := Copy(FTextBuffer, SpanStart + 1,
+          SpanEnd - SpanStart);
+        SelectionRect := Rect(
+          ToScreenX(FTextGuideBounds.Left + Font.MeasureText(PrefixText)),
+          ToScreenY(FTextGuideBounds.Top + I * LineHeight),
+          ToScreenX(FTextGuideBounds.Left + Font.MeasureText(
+            PrefixText + SelectedText)),
+          ToScreenY(FTextGuideBounds.Top + (I + 1) * LineHeight));
+        ACanvas.Brush.Style := bsSolid;
+        ACanvas.Brush.Color := clHighlight;
+        ACanvas.FillRect(SelectionRect);
+        ACanvas.Brush.Style := bsClear;
+        ACanvas.TextOut(SelectionRect.Left, SelectionRect.Top,
+          SelectedText);
+      end;
+    end;
+  end;
   if FTextDragActive then
   begin
     GuideRect := TRect.Create(
@@ -706,8 +385,61 @@ end;
 procedure TVectArtCanvasControl.DrawTextEditingOverlayDirect2D(
   ACanvas: TDirect2DCanvas);
 var
+  CaretLines: TArray<TScreenLayoutCaretLine>;
+  Font: ISkFont;
   GuideRect: TRect;
+  I: Integer;
+  Layer: TScreenLayoutTextLayer;
+  LineHeight: Single;
+  PrefixText: string;
+  SelectedText: string;
+  SelectionEnd: Integer;
+  SelectionRect: TRect;
+  SelectionStart: Integer;
+  SpanEnd: Integer;
+  SpanStart: Integer;
 begin
+  if FTextEditing and (FDocument <> nil) and
+    (FTextLayerIndex > 0) and (FTextLayerIndex < FDocument.LayerCount) and
+    (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
+  begin
+    SelectionStart := Min(FTextCaretIndex, FTextSelectionAnchor);
+    SelectionEnd := Max(FTextCaretIndex, FTextSelectionAnchor);
+    if SelectionStart <> SelectionEnd then
+    begin
+      Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
+      Font := CreateScreenLayoutTextFont(Layer.FontFamily, Layer.FontSize);
+      LineHeight := Max(Font.Spacing, Layer.FontSize);
+      CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
+        Layer.FontFamily, Layer.FontSize, Layer.WrapWidth);
+      ACanvas.Font.Name := Layer.FontFamily;
+      ACanvas.Font.Height := -Max(Round(Layer.FontSize * FZoom), 1);
+      ACanvas.Font.Color := clHighlightText;
+      for I := 0 to High(CaretLines) do
+      begin
+        SpanStart := Max(SelectionStart, CaretLines[I].StartIndex);
+        SpanEnd := Min(SelectionEnd, CaretLines[I].EndIndex);
+        if SpanStart >= SpanEnd then
+          Continue;
+        PrefixText := Copy(FTextBuffer, CaretLines[I].StartIndex + 1,
+          SpanStart - CaretLines[I].StartIndex);
+        SelectedText := Copy(FTextBuffer, SpanStart + 1,
+          SpanEnd - SpanStart);
+        SelectionRect := Rect(
+          ToScreenX(FTextGuideBounds.Left + Font.MeasureText(PrefixText)),
+          ToScreenY(FTextGuideBounds.Top + I * LineHeight),
+          ToScreenX(FTextGuideBounds.Left + Font.MeasureText(
+            PrefixText + SelectedText)),
+          ToScreenY(FTextGuideBounds.Top + (I + 1) * LineHeight));
+        ACanvas.Brush.Style := bsSolid;
+        ACanvas.Brush.Color := clHighlight;
+        ACanvas.FillRect(SelectionRect);
+        ACanvas.Brush.Style := bsClear;
+        ACanvas.TextOut(SelectionRect.Left, SelectionRect.Top,
+          SelectedText);
+      end;
+    end;
+  end;
   if FTextDragActive then
   begin
     GuideRect := TRect.Create(
@@ -776,6 +508,8 @@ begin
     FTextNewLayer := False;
     FTextBuffer := '';
     FTextCaretIndex := 0;
+    FTextSelectionAnchor := 0;
+    FTextPreferredCaretX := -1.0;
     FTextCompositionActive := False;
     FTextCompositionCursor := 0;
     FTextCompositionLabel.Caption := '';
@@ -801,8 +535,8 @@ begin
   FTextCompositionCursor := 0;
   FTextCompositionLabel.Caption := '';
   FTextCompositionLabel.Visible := False;
-  Insert(Text, FTextBuffer, FTextCaretIndex + 1);
-  Inc(FTextCaretIndex, Length(Text));
+  InsertScreenLayoutTextAtCaret(FTextBuffer, FTextCaretIndex,
+    FTextSelectionAnchor, FTextPreferredCaretX, Text);
   UpdateTextLayerFromBuffer;
 end;
 
@@ -830,11 +564,128 @@ begin
     FinishTextEdit(False);
 end;
 
+procedure TVectArtCanvasControl.MoveTextCaretVertical(Direction: Integer;
+  ExtendSelection: Boolean);
+var
+  CaretLines: TArray<TScreenLayoutCaretLine>;
+  CurrentLine: Integer;
+  Font: ISkFont;
+  I: Integer;
+  Layer: TScreenLayoutTextLayer;
+  TargetLine: Integer;
+begin
+  Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
+  CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
+    Layer.FontFamily, Layer.FontSize, Layer.WrapWidth);
+  if Length(CaretLines) = 0 then
+    Exit;
+  CurrentLine := 0;
+  for I := 0 to High(CaretLines) do
+    if (FTextCaretIndex >= CaretLines[I].StartIndex) and
+      (FTextCaretIndex <= CaretLines[I].EndIndex) then
+      CurrentLine := I;
+  if FTextPreferredCaretX < 0 then
+  begin
+    Font := CreateScreenLayoutTextFont(Layer.FontFamily, Layer.FontSize);
+    FTextPreferredCaretX := Font.MeasureText(Copy(FTextBuffer,
+      CaretLines[CurrentLine].StartIndex + 1,
+      FTextCaretIndex - CaretLines[CurrentLine].StartIndex));
+  end;
+  TargetLine := EnsureRange(CurrentLine + Direction, 0,
+    High(CaretLines));
+  FTextCaretIndex := ScreenLayoutTextCaretIndexAtLineX(
+    CaretLines[TargetLine], Layer.FontFamily, Layer.FontSize,
+    FTextPreferredCaretX);
+  if not ExtendSelection then
+    FTextSelectionAnchor := FTextCaretIndex;
+  UpdateTextEditorBounds;
+  Invalidate;
+end;
+
 procedure TVectArtCanvasControl.TextEditorKeyDown(Sender: TObject;
   var Key: Word; Shift: TShiftState);
 var
+  CaretLines: TArray<TScreenLayoutCaretLine>;
+  CurrentLine: Integer;
   DeleteCount: Integer;
+  ExtendSelection: Boolean;
+  I: Integer;
+  Layer: TScreenLayoutTextLayer;
+  SelectionEnd: Integer;
+  SelectionStart: Integer;
 begin
+  if (FDocument = nil) or (FTextLayerIndex <= 0) or
+    (FTextLayerIndex >= FDocument.LayerCount) or
+    not (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
+    Exit;
+  Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
+  ExtendSelection := ssShift in Shift;
+  if ssCtrl in Shift then
+  begin
+    case Key of
+      Ord('A'):
+        begin
+          Key := 0;
+          FTextSelectionAnchor := 0;
+          FTextCaretIndex := Length(FTextBuffer);
+          FTextPreferredCaretX := -1.0;
+          UpdateTextEditorBounds;
+          Invalidate;
+        end;
+      Ord('C'):
+        begin
+          Key := 0;
+          SelectionStart := Min(FTextCaretIndex, FTextSelectionAnchor);
+          SelectionEnd := Max(FTextCaretIndex, FTextSelectionAnchor);
+          if SelectionStart <> SelectionEnd then
+            Clipboard.AsText := Copy(FTextBuffer, SelectionStart + 1,
+              SelectionEnd - SelectionStart);
+        end;
+      Ord('X'):
+        begin
+          Key := 0;
+          SelectionStart := Min(FTextCaretIndex, FTextSelectionAnchor);
+          SelectionEnd := Max(FTextCaretIndex, FTextSelectionAnchor);
+          if SelectionStart <> SelectionEnd then
+          begin
+            Clipboard.AsText := Copy(FTextBuffer, SelectionStart + 1,
+              SelectionEnd - SelectionStart);
+            DeleteScreenLayoutTextSelection(FTextBuffer, FTextCaretIndex,
+              FTextSelectionAnchor, FTextPreferredCaretX);
+            UpdateTextLayerFromBuffer;
+          end;
+        end;
+      Ord('V'):
+        begin
+          Key := 0;
+          InsertScreenLayoutTextAtCaret(FTextBuffer, FTextCaretIndex,
+            FTextSelectionAnchor, FTextPreferredCaretX, Clipboard.AsText);
+          UpdateTextLayerFromBuffer;
+        end;
+      VK_HOME:
+        begin
+          Key := 0;
+          FTextCaretIndex := 0;
+          if not ExtendSelection then
+            FTextSelectionAnchor := FTextCaretIndex;
+          FTextPreferredCaretX := -1.0;
+          UpdateTextEditorBounds;
+          Invalidate;
+        end;
+      VK_END:
+        begin
+          Key := 0;
+          FTextCaretIndex := Length(FTextBuffer);
+          if not ExtendSelection then
+            FTextSelectionAnchor := FTextCaretIndex;
+          FTextPreferredCaretX := -1.0;
+          UpdateTextEditorBounds;
+          Invalidate;
+        end;
+    end;
+    if Key = 0 then
+      Exit;
+  end;
   case Key of
     VK_ESCAPE:
       begin
@@ -844,13 +695,19 @@ begin
     VK_RETURN:
       begin
         Key := 0;
-        Insert(sLineBreak, FTextBuffer, FTextCaretIndex + 1);
-        Inc(FTextCaretIndex, Length(sLineBreak));
+        InsertScreenLayoutTextAtCaret(FTextBuffer, FTextCaretIndex,
+          FTextSelectionAnchor, FTextPreferredCaretX, sLineBreak);
         UpdateTextLayerFromBuffer;
       end;
     VK_BACK:
       begin
         Key := 0;
+        if DeleteScreenLayoutTextSelection(FTextBuffer, FTextCaretIndex,
+          FTextSelectionAnchor, FTextPreferredCaretX) then
+        begin
+          UpdateTextLayerFromBuffer;
+          Exit;
+        end;
         if FTextCaretIndex <= 0 then
           Exit;
         DeleteCount := 1;
@@ -867,11 +724,19 @@ begin
         Delete(FTextBuffer, FTextCaretIndex - DeleteCount + 1,
           DeleteCount);
         Dec(FTextCaretIndex, DeleteCount);
+        FTextSelectionAnchor := FTextCaretIndex;
+        FTextPreferredCaretX := -1.0;
         UpdateTextLayerFromBuffer;
       end;
     VK_DELETE:
       begin
         Key := 0;
+        if DeleteScreenLayoutTextSelection(FTextBuffer, FTextCaretIndex,
+          FTextSelectionAnchor, FTextPreferredCaretX) then
+        begin
+          UpdateTextLayerFromBuffer;
+          Exit;
+        end;
         if FTextCaretIndex >= Length(FTextBuffer) then
           Exit;
         DeleteCount := 1;
@@ -886,51 +751,71 @@ begin
           (Ord(FTextBuffer[FTextCaretIndex + 2]) <= $DFFF) then
           DeleteCount := 2;
         Delete(FTextBuffer, FTextCaretIndex + 1, DeleteCount);
+        FTextSelectionAnchor := FTextCaretIndex;
+        FTextPreferredCaretX := -1.0;
         UpdateTextLayerFromBuffer;
       end;
     VK_LEFT:
       begin
         Key := 0;
-        if FTextCaretIndex > 0 then
-          Dec(FTextCaretIndex);
-        if (FTextCaretIndex > 0) and
-          (Ord(FTextBuffer[FTextCaretIndex]) >= $D800) and
-          (Ord(FTextBuffer[FTextCaretIndex]) <= $DBFF) then
-          Dec(FTextCaretIndex);
-        if (FTextCaretIndex > 0) and
-          (FTextBuffer[FTextCaretIndex] = #13) and
-          (FTextBuffer[FTextCaretIndex + 1] = #10) then
-          Dec(FTextCaretIndex);
+        MoveScreenLayoutTextCaretHorizontal(FTextBuffer, FTextCaretIndex,
+          FTextSelectionAnchor, FTextPreferredCaretX, -1,
+          ExtendSelection);
         UpdateTextEditorBounds;
         Invalidate;
       end;
     VK_RIGHT:
       begin
         Key := 0;
-        if FTextCaretIndex < Length(FTextBuffer) then
-          Inc(FTextCaretIndex);
-        if (FTextCaretIndex < Length(FTextBuffer)) and
-          (Ord(FTextBuffer[FTextCaretIndex]) >= $D800) and
-          (Ord(FTextBuffer[FTextCaretIndex]) <= $DBFF) then
-          Inc(FTextCaretIndex);
-        if (FTextCaretIndex < Length(FTextBuffer)) and
-          (FTextBuffer[FTextCaretIndex] = #13) and
-          (FTextBuffer[FTextCaretIndex + 1] = #10) then
-          Inc(FTextCaretIndex);
+        MoveScreenLayoutTextCaretHorizontal(FTextBuffer, FTextCaretIndex,
+          FTextSelectionAnchor, FTextPreferredCaretX, 1,
+          ExtendSelection);
         UpdateTextEditorBounds;
         Invalidate;
+      end;
+    VK_UP:
+      begin
+        Key := 0;
+        MoveTextCaretVertical(-1, ExtendSelection);
+      end;
+    VK_DOWN:
+      begin
+        Key := 0;
+        MoveTextCaretVertical(1, ExtendSelection);
       end;
     VK_HOME:
       begin
         Key := 0;
-        FTextCaretIndex := 0;
+        CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
+          Layer.FontFamily, Layer.FontSize, Layer.WrapWidth);
+        CurrentLine := 0;
+        for I := 0 to High(CaretLines) do
+          if (FTextCaretIndex >= CaretLines[I].StartIndex) and
+            (FTextCaretIndex <= CaretLines[I].EndIndex) then
+            CurrentLine := I;
+        if Length(CaretLines) > 0 then
+          FTextCaretIndex := CaretLines[CurrentLine].StartIndex;
+        if not ExtendSelection then
+          FTextSelectionAnchor := FTextCaretIndex;
+        FTextPreferredCaretX := -1.0;
         UpdateTextEditorBounds;
         Invalidate;
       end;
     VK_END:
       begin
         Key := 0;
-        FTextCaretIndex := Length(FTextBuffer);
+        CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
+          Layer.FontFamily, Layer.FontSize, Layer.WrapWidth);
+        CurrentLine := 0;
+        for I := 0 to High(CaretLines) do
+          if (FTextCaretIndex >= CaretLines[I].StartIndex) and
+            (FTextCaretIndex <= CaretLines[I].EndIndex) then
+            CurrentLine := I;
+        if Length(CaretLines) > 0 then
+          FTextCaretIndex := CaretLines[CurrentLine].EndIndex;
+        if not ExtendSelection then
+          FTextSelectionAnchor := FTextCaretIndex;
+        FTextPreferredCaretX := -1.0;
         UpdateTextEditorBounds;
         Invalidate;
       end;
@@ -1199,6 +1084,8 @@ end;
 
 procedure TVectArtCanvasControl.MouseDown(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
+var
+  TextLayerIndex: Integer;
 begin
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
@@ -1243,6 +1130,16 @@ begin
     begin
       if not PtInRect(FCanvasBounds, Point(X, Y)) then
         Exit;
+      FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+      TextLayerIndex := FInteraction.LayerAt(X, Y);
+      if (TextLayerIndex > 0) and
+        (FDocument[TextLayerIndex] is TScreenLayoutTextLayer) then
+      begin
+        BeginExistingTextEdit(TextLayerIndex);
+        Cursor := crIBeam;
+        Invalidate;
+        Exit;
+      end;
       FTextDragActive := True;
       FTextDragStart := Point(X, Y);
       FTextDragCurrent := FTextDragStart;

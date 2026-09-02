@@ -29,6 +29,12 @@ type
     procedure SyncThumbnailCache;
     procedure DrawImageThumbnail(ACanvas: TCustomCanvas;
       const ThumbnailRect: TRect; ImageLayer: TVectArtImageLayer);
+    procedure DrawTextThumbnail(ACanvas: TCanvas;
+      const ThumbnailRect: TRect; TextLayer: TScreenLayoutTextLayer;
+      Visible: Boolean); overload;
+    procedure DrawTextThumbnail(ACanvas: TDirect2DCanvas;
+      const ThumbnailRect: TRect; TextLayer: TScreenLayoutTextLayer;
+      Visible: Boolean); overload;
     procedure DrawLayerItem(ACanvas: TCanvas; const ItemRect: TRect;
       Layer: TVectArtLayer; Selected, Active: Boolean); overload;
     procedure DrawLayerItem(ACanvas: TDirect2DCanvas;
@@ -89,6 +95,9 @@ const
 type
   TScreenLayoutThumbnailContours = TArray<TArray<TPoint>>;
 
+function BlendThumbnailColor(Foreground: TColor; Opacity: Single): TColor;
+  forward;
+
 function ScreenLayoutArcThumbnailSourcePoints(
   ArcLayer: TScreenLayoutArcLayer): TArray<TPointF>;
 const
@@ -101,6 +110,72 @@ begin
     Result[I] := ScreenLayoutEllipsePoint(ArcLayer.Bounds,
       ArcLayer.RotationDegrees, ArcLayer.StartAngleDegrees +
       ArcLayer.SweepAngleDegrees * I / SEGMENT_COUNT);
+end;
+
+procedure TVectArtLayerRenderer.DrawTextThumbnail(ACanvas: TCanvas;
+  const ThumbnailRect: TRect; TextLayer: TScreenLayoutTextLayer;
+  Visible: Boolean);
+var
+  AvailableRect: TRect;
+  FontScale: Single;
+  PreviewRect: TRect;
+  PreviewText: string;
+  PreviewOpacity: Single;
+begin
+  AvailableRect := ThumbnailRect;
+  InflateRect(AvailableRect, -5, -3);
+  PreviewRect := FitThumbnailRect(AvailableRect,
+    Max(Round(TextLayer.Bounds.Width), 1),
+    Max(Round(TextLayer.Bounds.Height), 1));
+  FontScale := Min(PreviewRect.Width / Max(TextLayer.Bounds.Width, 1.0),
+    PreviewRect.Height / Max(TextLayer.Bounds.Height, 1.0));
+  PreviewText := TextLayer.Text;
+  if PreviewText = '' then
+    PreviewText := 'T';
+  PreviewOpacity := TextLayer.Opacity;
+  if not Visible then
+    PreviewOpacity := PreviewOpacity * 0.35;
+  ACanvas.Font.Name := TextLayer.FontFamily;
+  ACanvas.Font.Height := -Max(Round(TextLayer.FontSize * FontScale), 1);
+  ACanvas.Font.Style := [];
+  ACanvas.Font.Color := BlendThumbnailColor(TextLayer.FillColor,
+    PreviewOpacity);
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.TextRect(PreviewRect, PreviewText,
+    [tfWordBreak, tfNoPrefix, tfEditControl]);
+end;
+
+procedure TVectArtLayerRenderer.DrawTextThumbnail(
+  ACanvas: TDirect2DCanvas; const ThumbnailRect: TRect;
+  TextLayer: TScreenLayoutTextLayer; Visible: Boolean);
+var
+  AvailableRect: TRect;
+  FontScale: Single;
+  PreviewRect: TRect;
+  PreviewText: string;
+  PreviewOpacity: Single;
+begin
+  AvailableRect := ThumbnailRect;
+  InflateRect(AvailableRect, -5, -3);
+  PreviewRect := FitThumbnailRect(AvailableRect,
+    Max(Round(TextLayer.Bounds.Width), 1),
+    Max(Round(TextLayer.Bounds.Height), 1));
+  FontScale := Min(PreviewRect.Width / Max(TextLayer.Bounds.Width, 1.0),
+    PreviewRect.Height / Max(TextLayer.Bounds.Height, 1.0));
+  PreviewText := TextLayer.Text;
+  if PreviewText = '' then
+    PreviewText := 'T';
+  PreviewOpacity := TextLayer.Opacity;
+  if not Visible then
+    PreviewOpacity := PreviewOpacity * 0.35;
+  ACanvas.Font.Name := TextLayer.FontFamily;
+  ACanvas.Font.Height := -Max(Round(TextLayer.FontSize * FontScale), 1);
+  ACanvas.Font.Style := [];
+  ACanvas.Font.Color := BlendThumbnailColor(TextLayer.FillColor,
+    PreviewOpacity);
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.TextRect(PreviewRect, PreviewText,
+    [tfWordBreak, tfNoPrefix, tfEditControl]);
 end;
 
 constructor TVectArtLayerRenderer.Create;
@@ -534,19 +609,8 @@ begin
     end;
   end;
   if Layer is TScreenLayoutTextLayer then
-  begin
-    ACanvas.Font.Name := TScreenLayoutTextLayer(Layer).FontFamily;
-    ACanvas.Font.Height := -32;
-    ACanvas.Font.Style := [fsBold];
-    ACanvas.Font.Color := BlendThumbnailColor(
-      TScreenLayoutTextLayer(Layer).FillColor, Layer.Opacity);
-    ACanvas.Brush.Style := bsClear;
-    ACanvas.TextOut((ThumbnailRect.Left + ThumbnailRect.Right -
-      ACanvas.TextWidth('T')) div 2,
-      (ThumbnailRect.Top + ThumbnailRect.Bottom -
-        ACanvas.TextHeight('T')) div 2, 'T');
-    ACanvas.Font.Style := [];
-  end;
+    DrawTextThumbnail(ACanvas, ThumbnailRect,
+      TScreenLayoutTextLayer(Layer), Layer.Visible);
   if (Layer is TVectArtRectangleLayer) and
     not (Layer is TScreenLayoutTextLayer) then
   begin
@@ -926,19 +990,8 @@ begin
     end;
   end;
   if Layer is TScreenLayoutTextLayer then
-  begin
-    ACanvas.Font.Name := TScreenLayoutTextLayer(Layer).FontFamily;
-    ACanvas.Font.Height := -32;
-    ACanvas.Font.Style := [fsBold];
-    ACanvas.Font.Color := BlendThumbnailColor(
-      TScreenLayoutTextLayer(Layer).FillColor, Layer.Opacity);
-    ACanvas.Brush.Style := bsClear;
-    ACanvas.TextOut((ThumbnailRect.Left + ThumbnailRect.Right -
-      ACanvas.TextWidth('T')) div 2,
-      (ThumbnailRect.Top + ThumbnailRect.Bottom -
-        ACanvas.TextHeight('T')) div 2, 'T');
-    ACanvas.Font.Style := [];
-  end;
+    DrawTextThumbnail(ACanvas, ThumbnailRect,
+      TScreenLayoutTextLayer(Layer), Layer.Visible);
   if (Layer is TVectArtRectangleLayer) and
     not (Layer is TScreenLayoutTextLayer) then
   begin

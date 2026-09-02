@@ -122,6 +122,8 @@ type
       const ACanvasBounds: TRect; AZoom: Single);
     // 現在位置で開始できる編集操作に対応したカーソルを返す。
     function CursorAt(X, Y: Integer): TCursor;
+    // 画面座標の最前面にある表示レイヤーを返し、該当しなければ-1を返す。
+    function LayerAt(X, Y: Integer): Integer;
     // 修飾キーなしの押下を処理し、マウスキャプチャが必要ならTrueを返す。
     function MouseDown(Button: TMouseButton; X, Y: Integer): Boolean;
       overload;
@@ -1128,6 +1130,11 @@ begin
         Exit(I);
     end;
   end;
+end;
+
+function TVectArtCanvasInteraction.LayerAt(X, Y: Integer): Integer;
+begin
+  Result := HitTestLayer(X, Y);
 end;
 
 function TVectArtCanvasInteraction.LayerScreenRect(Index: Integer): TRect;
