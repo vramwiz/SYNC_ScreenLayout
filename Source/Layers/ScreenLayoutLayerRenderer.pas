@@ -1,47 +1,29 @@
-﻿// レイヤー一覧の行配置、サムネイル、状態アイコンをGDI／Direct2Dで描画する。
+﻿// 共通Skia描画結果をサムネイルへ合成し、レイヤー一覧の行と状態アイコンを描画する。
 unit ScreenLayoutLayerRenderer;
 
 interface
 
 uses
   System.Generics.Collections, System.SysUtils, System.Types, Vcl.Direct2D,
-  Vcl.Graphics, Vcl.Imaging.pngimage, ScreenLayoutDocument;
+  Vcl.Graphics, ScreenLayoutDocument, ScreenLayoutRenderer;
 
 type
-  TVectArtImageThumbnailCacheEntry = class
-  public
-    Image: TPngImage;
-    Signature: UInt64;
-    destructor Destroy; override;
-  end;
-
   TVectArtLayerRenderer = class
   private
     FDocument: TVectArtDocument;
-    FImageThumbnails: TObjectDictionary<TVectArtImageLayer,
-      TVectArtImageThumbnailCacheEntry>;
     FOpenGroup: TScreenLayoutGroupLayer;
     FLastSelectedIndex: Integer;
     FScrollOffset: Integer;
+    FRenderedThumbnails: TObjectDictionary<TVectArtLayer, TBitmap>;
+    FThumbnailBitmap: TBitmap;
+    FThumbnailBuffer: TVectArtRenderBuffer;
     FThumbnailRevision: Int64;
     procedure EnsureSelectionVisible(const Bounds: TRect);
     procedure ClampScrollOffset(const Bounds: TRect);
-    function ImageDataSignature(const Data: TBytes): UInt64;
-    function ImageThumbnail(ImageLayer: TVectArtImageLayer): TPngImage;
     procedure SetDocument(const Value: TVectArtDocument);
     procedure SyncThumbnailCache;
-    procedure DrawImageThumbnail(ACanvas: TCustomCanvas;
-      const ThumbnailRect: TRect; ImageLayer: TVectArtImageLayer);
-    procedure DrawGroupThumbnail(ACanvas: TCanvas;
-      const ThumbnailRect: TRect; GroupLayer: TScreenLayoutGroupLayer); overload;
-    procedure DrawGroupThumbnail(ACanvas: TDirect2DCanvas;
-      const ThumbnailRect: TRect; GroupLayer: TScreenLayoutGroupLayer); overload;
-    procedure DrawTextThumbnail(ACanvas: TCanvas;
-      const ThumbnailRect: TRect; TextLayer: TScreenLayoutTextLayer;
-      Visible: Boolean); overload;
-    procedure DrawTextThumbnail(ACanvas: TDirect2DCanvas;
-      const ThumbnailRect: TRect; TextLayer: TScreenLayoutTextLayer;
-      Visible: Boolean); overload;
+    procedure DrawRenderedLayerThumbnail(ACanvas: TCustomCanvas;
+      const ThumbnailRect: TRect; Layer: TVectArtLayer);
     procedure DrawLayerItem(ACanvas: TCanvas; const ItemRect: TRect;
       Layer: TVectArtLayer; Selected, Active: Boolean); overload;
     procedure DrawLayerItem(ACanvas: TDirect2DCanvas;
@@ -69,19 +51,10 @@ type
     property ScrollOffset: Integer read FScrollOffset write SetScrollOffset;
   end;
 
-function VectArtLineThumbnailStrokeWidth(StrokeWidth: Single): Integer;
-procedure VectArtLineThumbnailPoints(const ThumbnailRect: TRect;
-  PreviewStrokeWidth: Integer; out StartPoint, EndPoint: TPoint);
-// Path全体を縦横比を保ってサムネイル内へ収めた画面座標を返す。
-function VectArtPathThumbnailPoints(const SourcePoints: TArray<TPointF>;
-  const ThumbnailRect: TRect; PreviewStrokeWidth: Integer): TArray<TPoint>;
-
 implementation
 
 uses
-  System.Classes, System.Math, System.Skia, Winapi.D2D1, Winapi.Windows,
-  ScreenLayoutEllipseGeometry, ScreenLayoutPathOperations,
-  ScreenLayoutShapeOperations, ScreenLayoutLayerGeometry;
+  System.Math, Winapi.Windows, ScreenLayoutPathOperations;
 
 const
   COLOR_LIST_BACKGROUND   = TColor($001A1A1A);
@@ -102,70 +75,6 @@ const
   THUMBNAIL_HEIGHT        = 54;
   THUMBNAIL_WIDTH         = 96;
   VISIBILITY_BUTTON_TOP   = 17;
-  LINE_THUMBNAIL_MAX_STROKE = 10;
-  LINE_THUMBNAIL_MIN_MARGIN = 8;
-
-type
-  TScreenLayoutThumbnailContours = TArray<TArray<TPoint>>;
-
-function BlendThumbnailColor(Foreground: TColor; Opacity: Single): TColor;
-  forward;
-
-function ScreenLayoutArcThumbnailSourcePoints(
-  ArcLayer: TScreenLayoutArcLayer): TArray<TPointF>;
-const
-  SEGMENT_COUNT = 32;
-var
-  I: Integer;
-begin
-  SetLength(Result, SEGMENT_COUNT + 1);
-  for I := 0 to SEGMENT_COUNT do
-    Result[I] := ScreenLayoutEllipsePoint(ArcLayer.Bounds,
-      ArcLayer.RotationDegrees, ArcLayer.StartAngleDegrees +
-      ArcLayer.SweepAngleDegrees * I / SEGMENT_COUNT);
-end;
-
-function GroupThumbnailChildRect(const ChildBounds, GroupBounds: TRectF;
-  const ThumbnailRect: TRect): TRect;
-var
-  Height: Single;
-  Width: Single;
-begin
-  Width := Max(GroupBounds.Width, 1.0);
-  Height := Max(GroupBounds.Height, 1.0);
-  Result := Rect(
-    Round(ThumbnailRect.Left +
-      (ChildBounds.Left - GroupBounds.Left) / Width * ThumbnailRect.Width),
-    Round(ThumbnailRect.Top +
-      (ChildBounds.Top - GroupBounds.Top) / Height * ThumbnailRect.Height),
-    Round(ThumbnailRect.Left +
-      (ChildBounds.Right - GroupBounds.Left) / Width * ThumbnailRect.Width),
-    Round(ThumbnailRect.Top +
-      (ChildBounds.Bottom - GroupBounds.Top) / Height * ThumbnailRect.Height));
-  if Result.Width = 0 then
-    Inc(Result.Right);
-  if Result.Height = 0 then
-    Inc(Result.Bottom);
-end;
-
-function GroupThumbnailLayerColor(Layer: TVectArtLayer): TColor;
-begin
-  if Layer is TVectArtRectangleLayer then
-    Result := TVectArtRectangleLayer(Layer).FillColor
-  else if Layer is TScreenLayoutShapeLayer then
-    Result := TScreenLayoutShapeLayer(Layer).FillColor
-  else if Layer is TScreenLayoutRectangleLineLayer then
-    Result := TScreenLayoutRectangleLineLayer(Layer).StrokeColor
-  else if Layer is TScreenLayoutArcLayer then
-    Result := TScreenLayoutArcLayer(Layer).StrokeColor
-  else if Layer is TVectArtPathLayer then
-    Result := TVectArtPathLayer(Layer).StrokeColor
-  else if Layer is TVectArtImageLayer then
-    Result := TColor($00B0B0B0)
-  else
-    Result := COLOR_TEXT_SECONDARY;
-end;
-
 function GroupLayerDetailText(GroupLayer: TScreenLayoutGroupLayer): string;
 var
   I: Integer;
@@ -185,153 +94,22 @@ begin
     Result := Result + '  ' + NameList;
 end;
 
-procedure TVectArtLayerRenderer.DrawGroupThumbnail(ACanvas: TCanvas;
-  const ThumbnailRect: TRect; GroupLayer: TScreenLayoutGroupLayer);
-var
-  ChildBounds: TRectF;
-  ChildRect: TRect;
-  GroupBounds: TRectF;
-  I: Integer;
-  Layer: TVectArtLayer;
-begin
-  if not TryGetScreenLayoutLayerBounds(GroupLayer, GroupBounds) then
-    Exit;
-  for I := 0 to GroupLayer.ChildCount - 1 do
-  begin
-    Layer := GroupLayer[I];
-    if not Layer.Visible or
-      not TryGetScreenLayoutLayerBounds(Layer, ChildBounds) then
-      Continue;
-    ChildRect := GroupThumbnailChildRect(ChildBounds, GroupBounds,
-      ThumbnailRect);
-    ACanvas.Pen.Color := GroupThumbnailLayerColor(Layer);
-    ACanvas.Pen.Width := 1;
-    if (Layer is TScreenLayoutRectangleLineLayer) or
-      (Layer is TScreenLayoutArcLayer) or (Layer is TVectArtPathLayer) then
-      ACanvas.Brush.Style := bsClear
-    else
-    begin
-      ACanvas.Brush.Style := bsSolid;
-      ACanvas.Brush.Color := BlendThumbnailColor(
-        GroupThumbnailLayerColor(Layer), Layer.Opacity);
-    end;
-    ACanvas.Rectangle(ChildRect);
-  end;
-end;
-
-procedure TVectArtLayerRenderer.DrawGroupThumbnail(
-  ACanvas: TDirect2DCanvas; const ThumbnailRect: TRect;
-  GroupLayer: TScreenLayoutGroupLayer);
-var
-  ChildBounds: TRectF;
-  ChildRect: TRect;
-  GroupBounds: TRectF;
-  I: Integer;
-  Layer: TVectArtLayer;
-begin
-  if not TryGetScreenLayoutLayerBounds(GroupLayer, GroupBounds) then
-    Exit;
-  for I := 0 to GroupLayer.ChildCount - 1 do
-  begin
-    Layer := GroupLayer[I];
-    if not Layer.Visible or
-      not TryGetScreenLayoutLayerBounds(Layer, ChildBounds) then
-      Continue;
-    ChildRect := GroupThumbnailChildRect(ChildBounds, GroupBounds,
-      ThumbnailRect);
-    ACanvas.Pen.Color := GroupThumbnailLayerColor(Layer);
-    ACanvas.Pen.Width := 1;
-    if (Layer is TScreenLayoutRectangleLineLayer) or
-      (Layer is TScreenLayoutArcLayer) or (Layer is TVectArtPathLayer) then
-      ACanvas.Brush.Style := bsClear
-    else
-    begin
-      ACanvas.Brush.Style := bsSolid;
-      ACanvas.Brush.Color := BlendThumbnailColor(
-        GroupThumbnailLayerColor(Layer), Layer.Opacity);
-    end;
-    ACanvas.Rectangle(ChildRect);
-  end;
-end;
-
-procedure TVectArtLayerRenderer.DrawTextThumbnail(ACanvas: TCanvas;
-  const ThumbnailRect: TRect; TextLayer: TScreenLayoutTextLayer;
-  Visible: Boolean);
-var
-  AvailableRect: TRect;
-  FontScale: Single;
-  PreviewRect: TRect;
-  PreviewText: string;
-  PreviewOpacity: Single;
-begin
-  AvailableRect := ThumbnailRect;
-  InflateRect(AvailableRect, -5, -3);
-  PreviewRect := FitThumbnailRect(AvailableRect,
-    Max(Round(TextLayer.Bounds.Width), 1),
-    Max(Round(TextLayer.Bounds.Height), 1));
-  FontScale := Min(PreviewRect.Width / Max(TextLayer.Bounds.Width, 1.0),
-    PreviewRect.Height / Max(TextLayer.Bounds.Height, 1.0));
-  PreviewText := TextLayer.Text;
-  if PreviewText = '' then
-    PreviewText := 'T';
-  PreviewOpacity := TextLayer.Opacity;
-  if not Visible then
-    PreviewOpacity := PreviewOpacity * 0.35;
-  ACanvas.Font.Name := TextLayer.FontFamily;
-  ACanvas.Font.Height := -Max(Round(TextLayer.FontSize * FontScale), 1);
-  ACanvas.Font.Style := [];
-  ACanvas.Font.Color := BlendThumbnailColor(TextLayer.FillColor,
-    PreviewOpacity);
-  ACanvas.Brush.Style := bsClear;
-  ACanvas.TextRect(PreviewRect, PreviewText,
-    [tfWordBreak, tfNoPrefix, tfEditControl]);
-end;
-
-procedure TVectArtLayerRenderer.DrawTextThumbnail(
-  ACanvas: TDirect2DCanvas; const ThumbnailRect: TRect;
-  TextLayer: TScreenLayoutTextLayer; Visible: Boolean);
-var
-  AvailableRect: TRect;
-  FontScale: Single;
-  PreviewRect: TRect;
-  PreviewText: string;
-  PreviewOpacity: Single;
-begin
-  AvailableRect := ThumbnailRect;
-  InflateRect(AvailableRect, -5, -3);
-  PreviewRect := FitThumbnailRect(AvailableRect,
-    Max(Round(TextLayer.Bounds.Width), 1),
-    Max(Round(TextLayer.Bounds.Height), 1));
-  FontScale := Min(PreviewRect.Width / Max(TextLayer.Bounds.Width, 1.0),
-    PreviewRect.Height / Max(TextLayer.Bounds.Height, 1.0));
-  PreviewText := TextLayer.Text;
-  if PreviewText = '' then
-    PreviewText := 'T';
-  PreviewOpacity := TextLayer.Opacity;
-  if not Visible then
-    PreviewOpacity := PreviewOpacity * 0.35;
-  ACanvas.Font.Name := TextLayer.FontFamily;
-  ACanvas.Font.Height := -Max(Round(TextLayer.FontSize * FontScale), 1);
-  ACanvas.Font.Style := [];
-  ACanvas.Font.Color := BlendThumbnailColor(TextLayer.FillColor,
-    PreviewOpacity);
-  ACanvas.Brush.Style := bsClear;
-  ACanvas.TextRect(PreviewRect, PreviewText,
-    [tfWordBreak, tfNoPrefix, tfEditControl]);
-end;
-
 constructor TVectArtLayerRenderer.Create;
 begin
   inherited Create;
-  FImageThumbnails := TObjectDictionary<TVectArtImageLayer,
-    TVectArtImageThumbnailCacheEntry>.Create([doOwnsValues]);
+  FRenderedThumbnails := TObjectDictionary<TVectArtLayer,
+    Vcl.Graphics.TBitmap>.Create([doOwnsValues]);
+  FThumbnailBitmap := Vcl.Graphics.TBitmap.Create;
+  FThumbnailBuffer := TVectArtRenderBuffer.Create;
   FThumbnailRevision := -1;
   FLastSelectedIndex := -2;
 end;
 
 destructor TVectArtLayerRenderer.Destroy;
 begin
-  FImageThumbnails.Free;
+  FThumbnailBuffer.Free;
+  FThumbnailBitmap.Free;
+  FRenderedThumbnails.Free;
   inherited Destroy;
 end;
 
@@ -370,319 +148,74 @@ begin
     MaximumScrollOffset(Bounds));
 end;
 
-destructor TVectArtImageThumbnailCacheEntry.Destroy;
-begin
-  Image.Free;
-  inherited Destroy;
-end;
-
-function TVectArtLayerRenderer.ImageDataSignature(
-  const Data: TBytes): UInt64;
+procedure TVectArtLayerRenderer.DrawRenderedLayerThumbnail(
+  ACanvas: TCustomCanvas; const ThumbnailRect: TRect;
+  Layer: TVectArtLayer);
 var
-  I: Integer;
-  Index: Integer;
+  Alpha: Cardinal;
+  BackgroundColor: TColor;
+  BackgroundValue: Cardinal;
+  CachedBitmap: Vcl.Graphics.TBitmap;
+  Destination: PByte;
+  Source: PVectArtRgbaPixel;
+  X: Integer;
+  Y: Integer;
 begin
-  Result := UInt64(Length(Data)) * UInt64($100000001B3);
-  if Length(Data) = 0 then
+  if (ACanvas = nil) or (Layer = nil) or
+    (ThumbnailRect.Width <= 0) or (ThumbnailRect.Height <= 0) then
     Exit;
-  for I := 0 to 15 do
+  if FRenderedThumbnails.TryGetValue(Layer, CachedBitmap) and
+    (CachedBitmap.Width = ThumbnailRect.Width) and
+    (CachedBitmap.Height = ThumbnailRect.Height) then
   begin
-    Index := (Int64(I) * (Length(Data) - 1)) div 15;
-    Result := (Result xor Data[Index]) * UInt64($100000001B3);
-  end;
-end;
-
-function TVectArtLayerRenderer.ImageThumbnail(
-  ImageLayer: TVectArtImageLayer): TPngImage;
-var
-  EncodedImage: ISkImage;
-  Entry: TVectArtImageThumbnailCacheEntry;
-  PngData: TBytes;
-  Signature: UInt64;
-  Stream: TBytesStream;
-begin
-  Result := nil;
-  if (ImageLayer = nil) or (Length(ImageLayer.PngData) = 0) then
+    ACanvas.Draw(ThumbnailRect.Left, ThumbnailRect.Top, CachedBitmap);
     Exit;
-  Signature := ImageDataSignature(ImageLayer.PngData);
-  if FImageThumbnails.TryGetValue(ImageLayer, Entry) and
-    (Entry.Signature = Signature) then
-    Exit(Entry.Image);
-  FImageThumbnails.Remove(ImageLayer);
-  Entry := TVectArtImageThumbnailCacheEntry.Create;
-  Entry.Image := TPngImage.Create;
-  Entry.Signature := Signature;
-  Stream := TBytesStream.Create(ImageLayer.PngData);
-  try
-    try
-      Entry.Image.LoadFromStream(Stream);
-    except
-      on EInvalidGraphic do
-      begin
-        EncodedImage := TSkImage.MakeFromEncoded(ImageLayer.PngData);
-        if EncodedImage = nil then
-          Exit;
-        PngData := EncodedImage.Encode(TSkEncodedImageFormat.PNG, 100);
-        Stream.Free;
-        Stream := TBytesStream.Create(PngData);
-        Entry.Image.LoadFromStream(Stream);
-      end;
-      on EReadError do
-      begin
-        EncodedImage := TSkImage.MakeFromEncoded(ImageLayer.PngData);
-        if EncodedImage = nil then
-          Exit;
-        PngData := EncodedImage.Encode(TSkEncodedImageFormat.PNG, 100);
-        Stream.Free;
-        Stream := TBytesStream.Create(PngData);
-        Entry.Image.LoadFromStream(Stream);
-      end;
-    end;
-    if (Entry.Image.Width <= 0) or (Entry.Image.Height <= 0) then
-      Exit;
-    FImageThumbnails.Add(ImageLayer, Entry);
-    Result := Entry.Image;
-    Entry := nil;
-  finally
-    Stream.Free;
-    Entry.Free;
   end;
-end;
-
-function BlendThumbnailColor(Foreground: TColor; Opacity: Single): TColor;
-var
-  ColorValue: TColor;
-begin
-  ColorValue := ColorToRGB(Foreground);
-  Opacity := EnsureRange(Opacity, 0.0, 1.0);
-  Result := RGB(
-    Round(GetRValue(ColorValue) * Opacity + $FF * (1 - Opacity)),
-    Round(GetGValue(ColorValue) * Opacity + $FF * (1 - Opacity)),
-    Round(GetBValue(ColorValue) * Opacity + $FF * (1 - Opacity)));
-end;
-
-function VectArtLineThumbnailStrokeWidth(StrokeWidth: Single): Integer;
-begin
-  if StrokeWidth <= 1.0 then
-    Exit(1);
-  Result := EnsureRange(Round(1 + 2 * Ln(StrokeWidth)), 1,
-    LINE_THUMBNAIL_MAX_STROKE);
-end;
-
-procedure VectArtLineThumbnailPoints(const ThumbnailRect: TRect;
-  PreviewStrokeWidth: Integer; out StartPoint, EndPoint: TPoint);
-var
-  Margin: Integer;
-begin
-  PreviewStrokeWidth := EnsureRange(PreviewStrokeWidth, 1,
-    LINE_THUMBNAIL_MAX_STROKE);
-  Margin := Max(LINE_THUMBNAIL_MIN_MARGIN,
-    ((PreviewStrokeWidth + 1) div 2) + 3);
-  Margin := Min(Margin, Max(Min(ThumbnailRect.Width,
-    ThumbnailRect.Height) div 2, 0));
-  StartPoint := Point(ThumbnailRect.Left + Margin,
-    ThumbnailRect.Bottom - Margin);
-  EndPoint := Point(ThumbnailRect.Right - Margin,
-    ThumbnailRect.Top + Margin);
-end;
-
-function VectArtPathThumbnailPoints(const SourcePoints: TArray<TPointF>;
-  const ThumbnailRect: TRect; PreviewStrokeWidth: Integer): TArray<TPoint>;
-var
-  AvailableHeight: Integer;
-  AvailableWidth: Integer;
-  I: Integer;
-  InnerLeft: Single;
-  InnerTop: Single;
-  Margin: Integer;
-  MaximumX: Single;
-  MaximumY: Single;
-  MinimumX: Single;
-  MinimumY: Single;
-  OffsetX: Single;
-  OffsetY: Single;
-  Scale: Single;
-  SourceHeight: Single;
-  SourceWidth: Single;
-begin
-  SetLength(Result, Length(SourcePoints));
-  if Length(SourcePoints) = 0 then
-    Exit;
-  PreviewStrokeWidth := EnsureRange(PreviewStrokeWidth, 1,
-    LINE_THUMBNAIL_MAX_STROKE);
-  Margin := Max(LINE_THUMBNAIL_MIN_MARGIN,
-    ((PreviewStrokeWidth + 1) div 2) + 3);
-  Margin := Min(Margin, Max(Min(ThumbnailRect.Width,
-    ThumbnailRect.Height) div 2, 0));
-  AvailableWidth := Max(ThumbnailRect.Width - 2 * Margin, 0);
-  AvailableHeight := Max(ThumbnailRect.Height - 2 * Margin, 0);
-
-  MinimumX := SourcePoints[0].X;
-  MaximumX := MinimumX;
-  MinimumY := SourcePoints[0].Y;
-  MaximumY := MinimumY;
-  for I := 1 to High(SourcePoints) do
+  FRenderedThumbnails.Remove(Layer);
+  RenderVectArtLayerThumbnail(Layer, FThumbnailBuffer,
+    ThumbnailRect.Width, ThumbnailRect.Height);
+  FThumbnailBitmap.PixelFormat := pf32bit;
+  FThumbnailBitmap.SetSize(ThumbnailRect.Width, ThumbnailRect.Height);
+  Source := FThumbnailBuffer.Data;
+  for Y := 0 to ThumbnailRect.Height - 1 do
   begin
-    MinimumX := Min(MinimumX, SourcePoints[I].X);
-    MaximumX := Max(MaximumX, SourcePoints[I].X);
-    MinimumY := Min(MinimumY, SourcePoints[I].Y);
-    MaximumY := Max(MaximumY, SourcePoints[I].Y);
-  end;
-  SourceWidth := MaximumX - MinimumX;
-  SourceHeight := MaximumY - MinimumY;
-  if (SourceWidth > 0) and (SourceHeight > 0) then
-    Scale := Min(AvailableWidth / SourceWidth,
-      AvailableHeight / SourceHeight)
-  else if SourceWidth > 0 then
-    Scale := AvailableWidth / SourceWidth
-  else if SourceHeight > 0 then
-    Scale := AvailableHeight / SourceHeight
-  else
-    Scale := 0;
-  InnerLeft := ThumbnailRect.Left + Margin;
-  InnerTop := ThumbnailRect.Top + Margin;
-  OffsetX := InnerLeft + (AvailableWidth - SourceWidth * Scale) * 0.5;
-  OffsetY := InnerTop + (AvailableHeight - SourceHeight * Scale) * 0.5;
-  for I := 0 to High(SourcePoints) do
-    Result[I] := Point(
-      Round(OffsetX + (SourcePoints[I].X - MinimumX) * Scale),
-      Round(OffsetY + (SourcePoints[I].Y - MinimumY) * Scale));
-end;
-
-function VectArtShapeThumbnailContours(
-  const SourceContours: TArray<TScreenLayoutContour>;
-  const ThumbnailRect: TRect;
-  PreviewStrokeWidth: Integer): TScreenLayoutThumbnailContours;
-var
-  AvailableHeight: Integer;
-  AvailableWidth: Integer;
-  ContourIndex: Integer;
-  FoundPoint: Boolean;
-  I: Integer;
-  InnerLeft: Single;
-  InnerTop: Single;
-  Margin: Integer;
-  MaximumX: Single;
-  MaximumY: Single;
-  MinimumX: Single;
-  MinimumY: Single;
-  OffsetX: Single;
-  OffsetY: Single;
-  Scale: Single;
-  SourceHeight: Single;
-  SourcePoints: TArray<TArray<TPointF>>;
-  SourceWidth: Single;
-begin
-  SetLength(Result, Length(SourceContours));
-  SetLength(SourcePoints, Length(SourceContours));
-  FoundPoint := False;
-  MinimumX := 0;
-  MaximumX := 0;
-  MinimumY := 0;
-  MaximumY := 0;
-  for ContourIndex := 0 to High(SourceContours) do
-  begin
-    SourcePoints[ContourIndex] := FlattenScreenLayoutShapeContour(
-      SourceContours[ContourIndex], 16);
-    for I := 0 to High(SourcePoints[ContourIndex]) do
-      if not FoundPoint then
-      begin
-        MinimumX := SourcePoints[ContourIndex][I].X;
-        MaximumX := MinimumX;
-        MinimumY := SourcePoints[ContourIndex][I].Y;
-        MaximumY := MinimumY;
-        FoundPoint := True;
-      end
+    Destination := FThumbnailBitmap.ScanLine[Y];
+    for X := 0 to ThumbnailRect.Width - 1 do
+    begin
+      if Odd((X div THUMBNAIL_CHECKER_SIZE) +
+        (Y div THUMBNAIL_CHECKER_SIZE)) then
+        BackgroundColor := TColor($00B8B8B8)
       else
-      begin
-        MinimumX := Min(MinimumX, SourcePoints[ContourIndex][I].X);
-        MaximumX := Max(MaximumX, SourcePoints[ContourIndex][I].X);
-        MinimumY := Min(MinimumY, SourcePoints[ContourIndex][I].Y);
-        MaximumY := Max(MaximumY, SourcePoints[ContourIndex][I].Y);
-      end;
+        BackgroundColor := clWhite;
+      BackgroundValue := ColorToRGB(BackgroundColor);
+      Alpha := Source^.A;
+      Destination[0] := (Cardinal(Source^.B) * Alpha +
+        Cardinal(GetBValue(BackgroundValue)) * (255 - Alpha) + 127) div 255;
+      Destination[1] := (Cardinal(Source^.G) * Alpha +
+        Cardinal(GetGValue(BackgroundValue)) * (255 - Alpha) + 127) div 255;
+      Destination[2] := (Cardinal(Source^.R) * Alpha +
+        Cardinal(GetRValue(BackgroundValue)) * (255 - Alpha) + 127) div 255;
+      Destination[3] := 255;
+      Inc(Destination, 4);
+      Inc(Source);
+    end;
   end;
-  if not FoundPoint then
-    Exit;
-  PreviewStrokeWidth := EnsureRange(PreviewStrokeWidth, 1,
-    LINE_THUMBNAIL_MAX_STROKE);
-  Margin := Max(LINE_THUMBNAIL_MIN_MARGIN,
-    ((PreviewStrokeWidth + 1) div 2) + 3);
-  Margin := Min(Margin, Max(Min(ThumbnailRect.Width,
-    ThumbnailRect.Height) div 2, 0));
-  AvailableWidth := Max(ThumbnailRect.Width - 2 * Margin, 0);
-  AvailableHeight := Max(ThumbnailRect.Height - 2 * Margin, 0);
-  SourceWidth := MaximumX - MinimumX;
-  SourceHeight := MaximumY - MinimumY;
-  if (SourceWidth > 0) and (SourceHeight > 0) then
-    Scale := Min(AvailableWidth / SourceWidth,
-      AvailableHeight / SourceHeight)
-  else if SourceWidth > 0 then
-    Scale := AvailableWidth / SourceWidth
-  else if SourceHeight > 0 then
-    Scale := AvailableHeight / SourceHeight
-  else
-    Scale := 0;
-  InnerLeft := ThumbnailRect.Left + Margin;
-  InnerTop := ThumbnailRect.Top + Margin;
-  OffsetX := InnerLeft + (AvailableWidth - SourceWidth * Scale) * 0.5;
-  OffsetY := InnerTop + (AvailableHeight - SourceHeight * Scale) * 0.5;
-  for ContourIndex := 0 to High(SourcePoints) do
-  begin
-    SetLength(Result[ContourIndex], Length(SourcePoints[ContourIndex]));
-    for I := 0 to High(SourcePoints[ContourIndex]) do
-      Result[ContourIndex][I] := Point(
-        Round(OffsetX + (SourcePoints[ContourIndex][I].X - MinimumX) *
-          Scale),
-        Round(OffsetY + (SourcePoints[ContourIndex][I].Y - MinimumY) *
-          Scale));
-  end;
-end;
-
-procedure TVectArtLayerRenderer.DrawImageThumbnail(ACanvas: TCustomCanvas;
-  const ThumbnailRect: TRect; ImageLayer: TVectArtImageLayer);
-var
-  ImageRect: TRect;
-  PngImage: TPngImage;
-begin
-  if (ACanvas = nil) or (ImageLayer = nil) or
-    (Length(ImageLayer.PngData) = 0) then
-    Exit;
-  PngImage := ImageThumbnail(ImageLayer);
-  if PngImage = nil then
-    Exit;
-  ImageRect := FitThumbnailRect(ThumbnailRect, PngImage.Width,
-    PngImage.Height);
-  ACanvas.StretchDraw(ImageRect, PngImage);
+  CachedBitmap := Vcl.Graphics.TBitmap.Create;
+  CachedBitmap.Assign(FThumbnailBitmap);
+  FRenderedThumbnails.Add(Layer, CachedBitmap);
+  ACanvas.Draw(ThumbnailRect.Left, ThumbnailRect.Top, CachedBitmap);
 end;
 
 procedure TVectArtLayerRenderer.DrawLayerItem(ACanvas: TCanvas;
   const ItemRect: TRect; Layer: TVectArtLayer; Selected, Active: Boolean);
 var
-  ArcLayer: TScreenLayoutArcLayer;
-  ArcPoints: TArray<TPoint>;
-  ArcShape: TScreenLayoutEllipseArcShapeLayer;
-  ArcShapeEnd: TPoint;
-  ArcShapeStart: TPoint;
   CanvasLayer: TVectArtCanvasLayer;
   CellRect: TRect;
   Column: Integer;
-  ContourIndex: Integer;
   DetailText: string;
   LockRect: TRect;
-  LineStrokeWidth: Integer;
-  PathDrawPoints: TArray<TPoint>;
   PathLayer: TVectArtPathLayer;
-  PathPoints: TArray<TPoint>;
-  RectangleLine: TScreenLayoutRectangleLineLayer;
-  RoundedRectangleLine: TScreenLayoutRoundedRectangleLineLayer;
-  RectangleLayer: TVectArtRectangleLayer;
-  RectangleRect: TRect;
-  RoundedRectangleLayer: TScreenLayoutRoundedRectangleLayer;
-  RoundedRadius: Integer;
   Row: Integer;
-  SavedDC: Integer;
-  ShapeContours: TScreenLayoutThumbnailContours;
-  ShapeLayer: TScreenLayoutShapeLayer;
   TextX: Integer;
   ThumbnailArea: TRect;
   ThumbnailRect: TRect;
@@ -759,203 +292,8 @@ begin
       Inc(Row);
     end;
   end;
-  if Layer is TScreenLayoutGroupLayer then
-    DrawGroupThumbnail(ACanvas, ThumbnailRect,
-      TScreenLayoutGroupLayer(Layer));
-  if Layer is TScreenLayoutTextLayer then
-    DrawTextThumbnail(ACanvas, ThumbnailRect,
-      TScreenLayoutTextLayer(Layer), Layer.Visible);
-  if (Layer is TVectArtRectangleLayer) and
-    not (Layer is TScreenLayoutTextLayer) then
-  begin
-    RectangleLayer := TVectArtRectangleLayer(Layer);
-    RectangleRect := FitThumbnailRect(ThumbnailRect,
-      Max(Round(RectangleLayer.Bounds.Width), 1),
-      Max(Round(RectangleLayer.Bounds.Height), 1));
-    if Layer.Visible then
-      ACanvas.Brush.Color := BlendThumbnailColor(RectangleLayer.FillColor,
-        RectangleLayer.Opacity)
-    else
-      ACanvas.Brush.Color := BlendThumbnailColor(RectangleLayer.FillColor,
-        RectangleLayer.Opacity * 0.35);
-    if Layer is TScreenLayoutEllipseArcShapeLayer then
-    begin
-      ArcShape := TScreenLayoutEllipseArcShapeLayer(Layer);
-      ArcShapeStart := Point(
-        Round((RectangleRect.Left + RectangleRect.Right) * 0.5 +
-          Cos(DegToRad(ArcShape.StartAngleDegrees)) *
-          RectangleRect.Width * 0.5),
-        Round((RectangleRect.Top + RectangleRect.Bottom) * 0.5 +
-          Sin(DegToRad(ArcShape.StartAngleDegrees)) *
-          RectangleRect.Height * 0.5));
-      ArcShapeEnd := Point(
-        Round((RectangleRect.Left + RectangleRect.Right) * 0.5 +
-          Cos(DegToRad(ArcShape.StartAngleDegrees +
-            ArcShape.SweepAngleDegrees)) * RectangleRect.Width * 0.5),
-        Round((RectangleRect.Top + RectangleRect.Bottom) * 0.5 +
-          Sin(DegToRad(ArcShape.StartAngleDegrees +
-            ArcShape.SweepAngleDegrees)) * RectangleRect.Height * 0.5));
-      ACanvas.Pie(RectangleRect.Left, RectangleRect.Top, RectangleRect.Right,
-        RectangleRect.Bottom, ArcShapeStart.X, ArcShapeStart.Y,
-        ArcShapeEnd.X, ArcShapeEnd.Y);
-    end
-    else if Layer is TScreenLayoutEllipseLayer then
-      ACanvas.Ellipse(RectangleRect)
-    else if Layer is TScreenLayoutRoundedRectangleLayer then
-    begin
-      RoundedRectangleLayer := TScreenLayoutRoundedRectangleLayer(Layer);
-      RoundedRadius := Max(Round(RoundedRectangleLayer.CornerRadii.TopLeft *
-        Min(RectangleRect.Width / Max(RectangleLayer.Bounds.Width, 1.0),
-          RectangleRect.Height / Max(RectangleLayer.Bounds.Height, 1.0))), 0);
-      ACanvas.RoundRect(RectangleRect.Left, RectangleRect.Top,
-        RectangleRect.Right, RectangleRect.Bottom, RoundedRadius * 2,
-        RoundedRadius * 2);
-    end
-    else
-      ACanvas.FillRect(RectangleRect);
-  end;
-  if Layer is TScreenLayoutRectangleLineLayer then
-  begin
-    RectangleLine := TScreenLayoutRectangleLineLayer(Layer);
-    RectangleRect := FitThumbnailRect(ThumbnailRect,
-      Max(Round(RectangleLine.Bounds.Width), 1),
-      Max(Round(RectangleLine.Bounds.Height), 1));
-    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(
-      RectangleLine.StrokeWidth);
-    ACanvas.Brush.Style := bsClear;
-    if Layer.Visible then
-      ACanvas.Pen.Color := BlendThumbnailColor(RectangleLine.StrokeColor,
-        RectangleLine.Opacity)
-    else
-      ACanvas.Pen.Color := BlendThumbnailColor(RectangleLine.StrokeColor,
-        RectangleLine.Opacity * 0.35);
-    ACanvas.Pen.Width := LineStrokeWidth;
-    if RectangleLine.StrokeStyle <> vssSolid then
-      ACanvas.Pen.Style := psDash
-    else
-      ACanvas.Pen.Style := psSolid;
-    if Layer is TScreenLayoutEllipseLineLayer then
-      ACanvas.Ellipse(RectangleRect)
-    else if Layer is TScreenLayoutRoundedRectangleLineLayer then
-    begin
-      RoundedRectangleLine := TScreenLayoutRoundedRectangleLineLayer(Layer);
-      RoundedRadius := Max(Round(RoundedRectangleLine.CornerRadii.TopLeft *
-        Min(RectangleRect.Width / Max(RectangleLine.Bounds.Width, 1.0),
-          RectangleRect.Height / Max(RectangleLine.Bounds.Height, 1.0))), 0);
-      ACanvas.RoundRect(RectangleRect.Left, RectangleRect.Top,
-        RectangleRect.Right, RectangleRect.Bottom, RoundedRadius * 2,
-        RoundedRadius * 2);
-    end
-    else
-      ACanvas.Rectangle(RectangleRect);
-  end;
-  if Layer is TScreenLayoutArcLayer then
-  begin
-    ArcLayer := TScreenLayoutArcLayer(Layer);
-    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(ArcLayer.StrokeWidth);
-    ArcPoints := VectArtPathThumbnailPoints(
-      ScreenLayoutArcThumbnailSourcePoints(ArcLayer), ThumbnailRect,
-      LineStrokeWidth);
-    SavedDC := SaveDC(ACanvas.Handle);
-    try
-      IntersectClipRect(ACanvas.Handle, ThumbnailRect.Left,
-        ThumbnailRect.Top, ThumbnailRect.Right, ThumbnailRect.Bottom);
-      ACanvas.Brush.Style := bsClear;
-      if Layer.Visible then
-        ACanvas.Pen.Color := BlendThumbnailColor(ArcLayer.StrokeColor,
-          ArcLayer.Opacity)
-      else
-        ACanvas.Pen.Color := BlendThumbnailColor(ArcLayer.StrokeColor,
-          ArcLayer.Opacity * 0.35);
-      ACanvas.Pen.Width := LineStrokeWidth;
-      if ArcLayer.StrokeStyle <> vssSolid then
-        ACanvas.Pen.Style := psDash
-      else
-        ACanvas.Pen.Style := psSolid;
-      ACanvas.Polyline(ArcPoints);
-    finally
-      RestoreDC(ACanvas.Handle, SavedDC);
-    end;
-  end;
-  if Layer is TVectArtPathLayer then
-  begin
-    PathLayer := TVectArtPathLayer(Layer);
-    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(
-      PathLayer.StrokeWidth);
-    PathPoints := VectArtPathThumbnailPoints(
-      FlattenScreenLayoutPathVertices(PathLayer.Vertices, 16),
-      ThumbnailRect, LineStrokeWidth);
-    SavedDC := SaveDC(ACanvas.Handle);
-    try
-      IntersectClipRect(ACanvas.Handle, ThumbnailRect.Left,
-        ThumbnailRect.Top, ThumbnailRect.Right, ThumbnailRect.Bottom);
-      if Length(PathPoints) >= 2 then
-      begin
-        if PathLayer.Closed then
-        begin
-          PathDrawPoints := Copy(PathPoints);
-          SetLength(PathDrawPoints, Length(PathPoints) + 1);
-          PathDrawPoints[High(PathDrawPoints)] := PathPoints[0];
-        end
-        else
-          PathDrawPoints := Copy(PathPoints);
-        ACanvas.Brush.Style := bsClear;
-        if Layer.Visible then
-          ACanvas.Pen.Color := BlendThumbnailColor(PathLayer.StrokeColor,
-            PathLayer.Opacity)
-        else
-          ACanvas.Pen.Color := BlendThumbnailColor(PathLayer.StrokeColor,
-            PathLayer.Opacity * 0.35);
-        ACanvas.Pen.Width := LineStrokeWidth;
-        if PathLayer.MifStrokeStyle <> vssSolid then
-          ACanvas.Pen.Style := psDash
-        else
-          ACanvas.Pen.Style := psSolid;
-        ACanvas.Polyline(PathDrawPoints);
-      end;
-    finally
-      RestoreDC(ACanvas.Handle, SavedDC);
-    end;
-    ACanvas.Brush.Style := bsSolid;
-    ACanvas.Pen.Style := psSolid;
-    ACanvas.Pen.Width := 1;
-  end;
-  if Layer is TScreenLayoutShapeLayer then
-  begin
-    ShapeLayer := TScreenLayoutShapeLayer(Layer);
-    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(
-      ShapeLayer.StrokeWidth);
-    ShapeContours := VectArtShapeThumbnailContours(ShapeLayer.Contours,
-      ThumbnailRect, LineStrokeWidth);
-    ACanvas.Brush.Style := bsSolid;
-    if Layer.Visible then
-    begin
-      ACanvas.Brush.Color := BlendThumbnailColor(ShapeLayer.FillColor,
-        ShapeLayer.Opacity);
-      ACanvas.Pen.Color := BlendThumbnailColor(ShapeLayer.StrokeColor,
-        ShapeLayer.Opacity);
-    end
-    else
-    begin
-      ACanvas.Brush.Color := BlendThumbnailColor(ShapeLayer.FillColor,
-        ShapeLayer.Opacity * 0.35);
-      ACanvas.Pen.Color := BlendThumbnailColor(ShapeLayer.StrokeColor,
-        ShapeLayer.Opacity * 0.35);
-    end;
-    ACanvas.Pen.Width := LineStrokeWidth;
-    if ShapeLayer.StrokeStyle <> vssSolid then
-      ACanvas.Pen.Style := psDash
-    else
-      ACanvas.Pen.Style := psSolid;
-    for ContourIndex := 0 to High(ShapeContours) do
-      if Length(ShapeContours[ContourIndex]) >= 3 then
-        ACanvas.Polygon(ShapeContours[ContourIndex]);
-    ACanvas.Pen.Style := psSolid;
-    ACanvas.Pen.Width := 1;
-  end;
-  if Layer is TVectArtImageLayer then
-    DrawImageThumbnail(ACanvas, ThumbnailRect,
-      TVectArtImageLayer(Layer));
+  if not (Layer is TVectArtCanvasLayer) then
+    DrawRenderedLayerThumbnail(ACanvas, ThumbnailRect, Layer);
   ACanvas.Brush.Style := bsClear;
   ACanvas.Pen.Color := COLOR_THUMB_BORDER;
   ACanvas.FrameRect(ThumbnailRect);
@@ -1051,30 +389,13 @@ end;
 procedure TVectArtLayerRenderer.DrawLayerItem(ACanvas: TDirect2DCanvas;
   const ItemRect: TRect; Layer: TVectArtLayer; Selected, Active: Boolean);
 var
-  ArcLayer: TScreenLayoutArcLayer;
-  ArcPoints: TArray<TPoint>;
-  ArcShape: TScreenLayoutEllipseArcShapeLayer;
-  ArcShapeEnd: TPoint;
-  ArcShapeStart: TPoint;
   CanvasLayer: TVectArtCanvasLayer;
   CellRect: TRect;
   Column: Integer;
-  ContourIndex: Integer;
   DetailText: string;
   LockRect: TRect;
-  LineStrokeWidth: Integer;
-  PathDrawPoints: TArray<TPoint>;
   PathLayer: TVectArtPathLayer;
-  PathPoints: TArray<TPoint>;
-  RectangleLine: TScreenLayoutRectangleLineLayer;
-  RoundedRectangleLine: TScreenLayoutRoundedRectangleLineLayer;
-  RectangleLayer: TVectArtRectangleLayer;
-  RectangleRect: TRect;
-  RoundedRectangleLayer: TScreenLayoutRoundedRectangleLayer;
-  RoundedRadius: Integer;
   Row: Integer;
-  ShapeContours: TScreenLayoutThumbnailContours;
-  ShapeLayer: TScreenLayoutShapeLayer;
   TextX: Integer;
   ThumbnailArea: TRect;
   ThumbnailRect: TRect;
@@ -1151,203 +472,8 @@ begin
       Inc(Row);
     end;
   end;
-  if Layer is TScreenLayoutGroupLayer then
-    DrawGroupThumbnail(ACanvas, ThumbnailRect,
-      TScreenLayoutGroupLayer(Layer));
-  if Layer is TScreenLayoutTextLayer then
-    DrawTextThumbnail(ACanvas, ThumbnailRect,
-      TScreenLayoutTextLayer(Layer), Layer.Visible);
-  if (Layer is TVectArtRectangleLayer) and
-    not (Layer is TScreenLayoutTextLayer) then
-  begin
-    RectangleLayer := TVectArtRectangleLayer(Layer);
-    RectangleRect := FitThumbnailRect(ThumbnailRect,
-      Max(Round(RectangleLayer.Bounds.Width), 1),
-      Max(Round(RectangleLayer.Bounds.Height), 1));
-    ACanvas.Brush.Color := RectangleLayer.FillColor;
-    if Layer.Visible then
-      ACanvas.Brush.Handle.SetOpacity(RectangleLayer.Opacity)
-    else
-      ACanvas.Brush.Handle.SetOpacity(RectangleLayer.Opacity * 0.35);
-    if Layer is TScreenLayoutEllipseArcShapeLayer then
-    begin
-      ArcShape := TScreenLayoutEllipseArcShapeLayer(Layer);
-      ArcShapeStart := Point(
-        Round((RectangleRect.Left + RectangleRect.Right) * 0.5 +
-          Cos(DegToRad(ArcShape.StartAngleDegrees)) *
-          RectangleRect.Width * 0.5),
-        Round((RectangleRect.Top + RectangleRect.Bottom) * 0.5 +
-          Sin(DegToRad(ArcShape.StartAngleDegrees)) *
-          RectangleRect.Height * 0.5));
-      ArcShapeEnd := Point(
-        Round((RectangleRect.Left + RectangleRect.Right) * 0.5 +
-          Cos(DegToRad(ArcShape.StartAngleDegrees +
-            ArcShape.SweepAngleDegrees)) * RectangleRect.Width * 0.5),
-        Round((RectangleRect.Top + RectangleRect.Bottom) * 0.5 +
-          Sin(DegToRad(ArcShape.StartAngleDegrees +
-            ArcShape.SweepAngleDegrees)) * RectangleRect.Height * 0.5));
-      ACanvas.Pie(RectangleRect.Left, RectangleRect.Top, RectangleRect.Right,
-        RectangleRect.Bottom, ArcShapeStart.X, ArcShapeStart.Y,
-        ArcShapeEnd.X, ArcShapeEnd.Y);
-    end
-    else if Layer is TScreenLayoutEllipseLayer then
-      ACanvas.Ellipse(RectangleRect)
-    else if Layer is TScreenLayoutRoundedRectangleLayer then
-    begin
-      RoundedRectangleLayer := TScreenLayoutRoundedRectangleLayer(Layer);
-      RoundedRadius := Max(Round(RoundedRectangleLayer.CornerRadii.TopLeft *
-        Min(RectangleRect.Width / Max(RectangleLayer.Bounds.Width, 1.0),
-          RectangleRect.Height / Max(RectangleLayer.Bounds.Height, 1.0))), 0);
-      ACanvas.RoundRect(RectangleRect.Left, RectangleRect.Top,
-        RectangleRect.Right, RectangleRect.Bottom, RoundedRadius * 2,
-        RoundedRadius * 2);
-    end
-    else
-      ACanvas.FillRect(RectangleRect);
-    ACanvas.Brush.Handle.SetOpacity(1.0);
-  end;
-  if Layer is TScreenLayoutRectangleLineLayer then
-  begin
-    RectangleLine := TScreenLayoutRectangleLineLayer(Layer);
-    RectangleRect := FitThumbnailRect(ThumbnailRect,
-      Max(Round(RectangleLine.Bounds.Width), 1),
-      Max(Round(RectangleLine.Bounds.Height), 1));
-    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(
-      RectangleLine.StrokeWidth);
-    ACanvas.Brush.Style := bsClear;
-    if Layer.Visible then
-      ACanvas.Pen.Color := BlendThumbnailColor(RectangleLine.StrokeColor,
-        RectangleLine.Opacity)
-    else
-      ACanvas.Pen.Color := BlendThumbnailColor(RectangleLine.StrokeColor,
-        RectangleLine.Opacity * 0.35);
-    ACanvas.Pen.Width := LineStrokeWidth;
-    if RectangleLine.StrokeStyle <> vssSolid then
-      ACanvas.Pen.Style := psDash
-    else
-      ACanvas.Pen.Style := psSolid;
-    if Layer is TScreenLayoutEllipseLineLayer then
-      ACanvas.Ellipse(RectangleRect)
-    else if Layer is TScreenLayoutRoundedRectangleLineLayer then
-    begin
-      RoundedRectangleLine := TScreenLayoutRoundedRectangleLineLayer(Layer);
-      RoundedRadius := Max(Round(RoundedRectangleLine.CornerRadii.TopLeft *
-        Min(RectangleRect.Width / Max(RectangleLine.Bounds.Width, 1.0),
-          RectangleRect.Height / Max(RectangleLine.Bounds.Height, 1.0))), 0);
-      ACanvas.RoundRect(RectangleRect.Left, RectangleRect.Top,
-        RectangleRect.Right, RectangleRect.Bottom, RoundedRadius * 2,
-        RoundedRadius * 2);
-    end
-    else
-      ACanvas.Rectangle(RectangleRect);
-  end;
-  if Layer is TScreenLayoutArcLayer then
-  begin
-    ArcLayer := TScreenLayoutArcLayer(Layer);
-    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(ArcLayer.StrokeWidth);
-    ArcPoints := VectArtPathThumbnailPoints(
-      ScreenLayoutArcThumbnailSourcePoints(ArcLayer), ThumbnailRect,
-      LineStrokeWidth);
-    ACanvas.RenderTarget.PushAxisAlignedClip(ThumbnailRect,
-      D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-    try
-      ACanvas.Brush.Style := bsClear;
-      if Layer.Visible then
-        ACanvas.Pen.Color := BlendThumbnailColor(ArcLayer.StrokeColor,
-          ArcLayer.Opacity)
-      else
-        ACanvas.Pen.Color := BlendThumbnailColor(ArcLayer.StrokeColor,
-          ArcLayer.Opacity * 0.35);
-      ACanvas.Pen.Width := LineStrokeWidth;
-      if ArcLayer.StrokeStyle <> vssSolid then
-        ACanvas.Pen.Style := psDash
-      else
-        ACanvas.Pen.Style := psSolid;
-      ACanvas.Polyline(ArcPoints);
-    finally
-      ACanvas.RenderTarget.PopAxisAlignedClip;
-    end;
-    ACanvas.Brush.Style := bsSolid;
-  end;
-  if Layer is TVectArtPathLayer then
-  begin
-    PathLayer := TVectArtPathLayer(Layer);
-    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(
-      PathLayer.StrokeWidth);
-    PathPoints := VectArtPathThumbnailPoints(
-      FlattenScreenLayoutPathVertices(PathLayer.Vertices, 16),
-      ThumbnailRect, LineStrokeWidth);
-    ACanvas.RenderTarget.PushAxisAlignedClip(ThumbnailRect,
-      D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-    try
-      if Length(PathPoints) >= 2 then
-      begin
-        if PathLayer.Closed then
-        begin
-          PathDrawPoints := Copy(PathPoints);
-          SetLength(PathDrawPoints, Length(PathPoints) + 1);
-          PathDrawPoints[High(PathDrawPoints)] := PathPoints[0];
-        end
-        else
-          PathDrawPoints := Copy(PathPoints);
-        ACanvas.Brush.Style := bsClear;
-        if Layer.Visible then
-          ACanvas.Pen.Color := BlendThumbnailColor(PathLayer.StrokeColor,
-            PathLayer.Opacity)
-        else
-          ACanvas.Pen.Color := BlendThumbnailColor(PathLayer.StrokeColor,
-            PathLayer.Opacity * 0.35);
-        ACanvas.Pen.Width := LineStrokeWidth;
-        if PathLayer.MifStrokeStyle <> vssSolid then
-          ACanvas.Pen.Style := psDash
-        else
-          ACanvas.Pen.Style := psSolid;
-        ACanvas.Polyline(PathDrawPoints);
-      end;
-    finally
-      ACanvas.Brush.Handle.SetOpacity(1.0);
-      ACanvas.RenderTarget.PopAxisAlignedClip;
-    end;
-    ACanvas.Brush.Style := bsSolid;
-    ACanvas.Pen.Style := psSolid;
-    ACanvas.Pen.Width := 1;
-  end;
-  if Layer is TScreenLayoutShapeLayer then
-  begin
-    ShapeLayer := TScreenLayoutShapeLayer(Layer);
-    LineStrokeWidth := VectArtLineThumbnailStrokeWidth(
-      ShapeLayer.StrokeWidth);
-    ShapeContours := VectArtShapeThumbnailContours(ShapeLayer.Contours,
-      ThumbnailRect, LineStrokeWidth);
-    ACanvas.Brush.Style := bsSolid;
-    if Layer.Visible then
-    begin
-      ACanvas.Brush.Color := BlendThumbnailColor(ShapeLayer.FillColor,
-        ShapeLayer.Opacity);
-      ACanvas.Pen.Color := BlendThumbnailColor(ShapeLayer.StrokeColor,
-        ShapeLayer.Opacity);
-    end
-    else
-    begin
-      ACanvas.Brush.Color := BlendThumbnailColor(ShapeLayer.FillColor,
-        ShapeLayer.Opacity * 0.35);
-      ACanvas.Pen.Color := BlendThumbnailColor(ShapeLayer.StrokeColor,
-        ShapeLayer.Opacity * 0.35);
-    end;
-    ACanvas.Pen.Width := LineStrokeWidth;
-    if ShapeLayer.StrokeStyle <> vssSolid then
-      ACanvas.Pen.Style := psDash
-    else
-      ACanvas.Pen.Style := psSolid;
-    for ContourIndex := 0 to High(ShapeContours) do
-      if Length(ShapeContours[ContourIndex]) >= 3 then
-        ACanvas.Polygon(ShapeContours[ContourIndex]);
-    ACanvas.Pen.Style := psSolid;
-    ACanvas.Pen.Width := 1;
-  end;
-  if Layer is TVectArtImageLayer then
-    DrawImageThumbnail(ACanvas, ThumbnailRect,
-      TVectArtImageLayer(Layer));
+  if not (Layer is TVectArtCanvasLayer) then
+    DrawRenderedLayerThumbnail(ACanvas, ThumbnailRect, Layer);
   ACanvas.Brush.Style := bsClear;
   ACanvas.Pen.Color := COLOR_THUMB_BORDER;
   ACanvas.FrameRect(ThumbnailRect);
@@ -1445,44 +571,23 @@ begin
   if FDocument = Value then
     Exit;
   FDocument := Value;
-  FImageThumbnails.Clear;
+  FRenderedThumbnails.Clear;
   FScrollOffset := 0;
   FLastSelectedIndex := -2;
   FThumbnailRevision := -1;
 end;
 
 procedure TVectArtLayerRenderer.SyncThumbnailCache;
-var
-  CachedLayer: TVectArtImageLayer;
-  CurrentLayer: TVectArtLayer;
-  I: Integer;
-  IsCurrent: Boolean;
-  Keys: TArray<TVectArtImageLayer>;
 begin
   if FDocument = nil then
   begin
-    FImageThumbnails.Clear;
+    FRenderedThumbnails.Clear;
     FThumbnailRevision := -1;
     Exit;
   end;
   if FThumbnailRevision = FDocument.Revision then
     Exit;
-  Keys := FImageThumbnails.Keys.ToArray;
-  for CachedLayer in Keys do
-  begin
-    IsCurrent := False;
-    for I := 1 to FDocument.LayerCount - 1 do
-    begin
-      CurrentLayer := FDocument[I];
-      if CurrentLayer = CachedLayer then
-      begin
-        IsCurrent := True;
-        Break;
-      end;
-    end;
-    if not IsCurrent then
-      FImageThumbnails.Remove(CachedLayer);
-  end;
+  FRenderedThumbnails.Clear;
   FThumbnailRevision := FDocument.Revision;
 end;
 

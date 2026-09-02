@@ -5,7 +5,7 @@ unit ScreenLayoutRenderer;
 interface
 
 uses
-  System.SysUtils, ScreenLayoutDocument;
+  System.SysUtils, System.Types, ScreenLayoutDocument;
 
 type
   TVectArtRgbaPixel = packed record
@@ -40,6 +40,9 @@ type
 procedure RenderVectArtDocument(Document: TVectArtDocument;
   Target: TVectArtRenderBuffer; Width, Height: Integer;
   MinimumStrokeWidth: Single = 0.0);
+// 単体レイヤーまたはグループ子孫を、通常描画と同じ処理でサムネイルへ収める。
+procedure RenderVectArtLayerThumbnail(Layer: TVectArtLayer;
+  Target: TVectArtRenderBuffer; Width, Height: Integer);
 // ストレートアルファRGBA8同士をSource-overで合成する。
 procedure CompositeVectArtRgba(const Source: TVectArtRenderBuffer;
   Destination: PVectArtRgbaPixel; Width, Height: Integer);
@@ -47,11 +50,10 @@ procedure CompositeVectArtRgba(const Source: TVectArtRenderBuffer;
 implementation
 
 uses
-  System.Generics.Collections, System.Math, System.Skia, System.Types,
-  System.UITypes,
+  System.Generics.Collections, System.Math, System.Skia, System.UITypes,
   TextRendererSkiaRuntime, Vcl.Graphics, Winapi.Windows,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
-  ScreenLayoutShapePath, ScreenLayoutTextGeometry;
+  ScreenLayoutLayerGeometry, ScreenLayoutShapePath, ScreenLayoutTextGeometry;
 
 const
   MAX_RENDER_DIMENSION = 16384;
@@ -252,9 +254,112 @@ begin
   SetLength(FPixels, NativeInt(Count));
 end;
 
+procedure RenderVectArtLayers(const RenderLayers: TArray<TVectArtLayer>;
+  Target: TVectArtRenderBuffer; Width, Height: Integer;
+  const LogicalBounds: TRectF; MinimumStrokeWidth,
+  OpacityMultiplier: Single); forward;
+
 procedure RenderVectArtDocument(Document: TVectArtDocument;
   Target: TVectArtRenderBuffer; Width, Height: Integer;
   MinimumStrokeWidth: Single);
+var
+  CanvasLayer: TVectArtCanvasLayer;
+  LogicalBounds: TRectF;
+begin
+  if Document = nil then
+    raise EArgumentNilException.Create('Document');
+  CanvasLayer := Document.CanvasLayer;
+  if CanvasLayer = nil then
+    raise EInvalidOp.Create('Document canvas is missing');
+  LogicalBounds := TRectF.Create(-CanvasLayer.Width * 0.5,
+    -CanvasLayer.Height * 0.5, CanvasLayer.Width * 0.5,
+    CanvasLayer.Height * 0.5);
+  RenderVectArtLayers(ScreenLayoutRenderLayers(Document), Target, Width,
+    Height, LogicalBounds, MinimumStrokeWidth, 1.0);
+end;
+
+function FitScreenLayoutThumbnailBounds(const ContentBounds: TRectF;
+  Width, Height: Integer; Margin: Integer; out LogicalBounds: TRectF;
+  out Scale: Single): Boolean;
+var
+  AvailableHeight: Integer;
+  AvailableWidth: Integer;
+  Center: TPointF;
+  ContentHeight: Single;
+  ContentWidth: Single;
+  LogicalHeight: Single;
+  LogicalWidth: Single;
+begin
+  Result := False;
+  AvailableWidth := Width - Margin * 2;
+  AvailableHeight := Height - Margin * 2;
+  if (AvailableWidth <= 0) or (AvailableHeight <= 0) then
+    Exit;
+  ContentWidth := Max(ContentBounds.Width, 1.0);
+  ContentHeight := Max(ContentBounds.Height, 1.0);
+  Scale := Min(AvailableWidth / ContentWidth,
+    AvailableHeight / ContentHeight);
+  if Scale <= 0 then
+    Exit;
+  LogicalWidth := Width / Scale;
+  LogicalHeight := Height / Scale;
+  Center := ContentBounds.CenterPoint;
+  LogicalBounds := TRectF.Create(Center.X - LogicalWidth * 0.5,
+    Center.Y - LogicalHeight * 0.5, Center.X + LogicalWidth * 0.5,
+    Center.Y + LogicalHeight * 0.5);
+  Result := True;
+end;
+
+procedure RenderVectArtLayerThumbnail(Layer: TVectArtLayer;
+  Target: TVectArtRenderBuffer; Width, Height: Integer);
+const
+  THUMBNAIL_MARGIN = 5;
+  THUMBNAIL_MINIMUM_STROKE_WIDTH = 1.0;
+var
+  ContentBounds: TRectF;
+  GroupLayer: TScreenLayoutGroupLayer;
+  I: Integer;
+  Layers: TList<TVectArtLayer>;
+  LogicalBounds: TRectF;
+  OpacityMultiplier: Single;
+  Scale: Single;
+begin
+  if Layer = nil then
+    raise EArgumentNilException.Create('Layer');
+  if Target = nil then
+    raise EArgumentNilException.Create('Target');
+  Target.SetSize(Width, Height);
+  Target.Clear;
+  if not TryGetScreenLayoutLayerBounds(Layer, ContentBounds) or
+    not FitScreenLayoutThumbnailBounds(ContentBounds, Width, Height,
+      THUMBNAIL_MARGIN, LogicalBounds, Scale) then
+    Exit;
+  Layers := TList<TVectArtLayer>.Create;
+  try
+    if Layer is TScreenLayoutGroupLayer then
+    begin
+      GroupLayer := TScreenLayoutGroupLayer(Layer);
+      for I := 0 to GroupLayer.ChildCount - 1 do
+        AppendScreenLayoutRenderLayers(GroupLayer[I], Layers);
+    end
+    else
+      Layers.Add(Layer);
+    if Layer.Visible then
+      OpacityMultiplier := 1.0
+    else
+      OpacityMultiplier := 0.35;
+    RenderVectArtLayers(Layers.ToArray, Target, Width, Height,
+      LogicalBounds, THUMBNAIL_MINIMUM_STROKE_WIDTH / Scale,
+      OpacityMultiplier);
+  finally
+    Layers.Free;
+  end;
+end;
+
+procedure RenderVectArtLayers(const RenderLayers: TArray<TVectArtLayer>;
+  Target: TVectArtRenderBuffer; Width, Height: Integer;
+  const LogicalBounds: TRectF; MinimumStrokeWidth,
+  OpacityMultiplier: Single);
 var
   ArcEndPoint: TPointF;
   ArcEndTangent: TPointF;
@@ -262,7 +367,6 @@ var
   ArcStartPoint: TPointF;
   ArcStartTangent: TPointF;
   Canvas: ISkCanvas;
-  CanvasLayer: TVectArtCanvasLayer;
   DashIntervals: TArray<Single>;
   EllipseLayer: TScreenLayoutEllipseLayer;
   EllipseLine: TScreenLayoutEllipseLineLayer;
@@ -287,7 +391,6 @@ var
   RectangleLayer: TVectArtRectangleLayer;
   RectangleLine: TScreenLayoutRectangleLineLayer;
   RectangleLineCorners: TVectArtQuad;
-  RenderLayers: TArray<TVectArtLayer>;
   RoundedRectangleLayer: TScreenLayoutRoundedRectangleLayer;
   RoundedRectangleLine: TScreenLayoutRoundedRectangleLineLayer;
   ScaleX: Single;
@@ -300,17 +403,14 @@ var
   TextLayout: TScreenLayoutTextLayout;
 
 begin
-  if Document = nil then
-    raise EArgumentNilException.Create('Document');
   if Target = nil then
     raise EArgumentNilException.Create('Target');
   if not TTextRendererSkiaRuntime.IsAcquired then
     raise EInvalidOp.Create('Skia runtime is not acquired');
-  CanvasLayer := Document.CanvasLayer;
-  if CanvasLayer = nil then
-    raise EInvalidOp.Create('Document canvas is missing');
   if (Width <= 0) or (Height <= 0) then
     raise EArgumentOutOfRangeException.Create('Render dimensions must be positive');
+  if (LogicalBounds.Width <= 0) or (LogicalBounds.Height <= 0) then
+    raise EArgumentOutOfRangeException.Create('Logical bounds must be positive');
 
   Target.SetSize(Width, Height);
   Target.Clear;
@@ -322,9 +422,10 @@ begin
     raise EInvalidOp.Create('Cannot create VectArt raster surface');
   Canvas := Surface.Canvas;
   Canvas.Clear(TAlphaColorRec.Null);
-  ScaleX := Width / Max(CanvasLayer.Width, 1);
-  ScaleY := Height / Max(CanvasLayer.Height, 1);
+  ScaleX := Width / LogicalBounds.Width;
+  ScaleY := Height / LogicalBounds.Height;
   MinimumStrokeWidth := Max(MinimumStrokeWidth, 0.0);
+  OpacityMultiplier := EnsureRange(OpacityMultiplier, 0.0, 1.0);
   Paint := TSkPaint.Create(TSkPaintStyle.Fill);
   Paint.AntiAlias := True;
   StrokePaint := TSkPaint.Create(TSkPaintStyle.Stroke);
@@ -332,13 +433,10 @@ begin
   ImagePaint := TSkPaint.Create;
   ImagePaint.AntiAlias := True;
   Canvas.Scale(ScaleX, ScaleY);
-  Canvas.Translate(CanvasLayer.Width * 0.5, CanvasLayer.Height * 0.5);
-  RenderLayers := ScreenLayoutRenderLayers(Document);
+  Canvas.Translate(-LogicalBounds.Left, -LogicalBounds.Top);
   for I := 0 to High(RenderLayers) do
   begin
     Layer := RenderLayers[I];
-    if not Layer.Visible then
-      Continue;
     if Layer is TVectArtImageLayer then
     begin
       ImageLayer := TVectArtImageLayer(Layer);
@@ -361,7 +459,8 @@ begin
       RotationDegrees := RadToDeg(ArcTan2(
         ImageLayer.Points[1].Y - ImageLayer.Points[0].Y,
         ImageLayer.Points[1].X - ImageLayer.Points[0].X));
-      ImagePaint.AlphaF := EnsureRange(ImageLayer.Opacity, 0.0, 1.0);
+      ImagePaint.AlphaF := EnsureRange(ImageLayer.Opacity *
+        OpacityMultiplier, 0.0, 1.0);
       Canvas.Save;
       try
         Canvas.Translate(ImageLayer.Points[0].X, ImageLayer.Points[0].Y);
@@ -387,7 +486,7 @@ begin
       Font := CreateScreenLayoutTextFont(TextLayer.FontFamily,
         TextLayer.FontSize);
       Paint.Color := VclColorToAlphaColor(TextLayer.FillColor,
-        TextLayer.Opacity);
+        TextLayer.Opacity * OpacityMultiplier);
       Paint.Style := TSkPaintStyle.Fill;
       Canvas.Save;
       try
@@ -411,14 +510,14 @@ begin
       Path := BuildScreenLayoutShapePath(ShapeLayer);
       Paint.AntiAlias := True;
       Paint.Color := VclColorToAlphaColor(ShapeLayer.FillColor,
-        ShapeLayer.Opacity);
+        ShapeLayer.Opacity * OpacityMultiplier);
       Canvas.DrawPath(Path, Paint);
       if ShapeLayer.StrokeWidth > 0 then
       begin
         StrokeWidth := Max(ShapeLayer.StrokeWidth, MinimumStrokeWidth);
         StrokePaint.AntiAlias := True;
         StrokePaint.Color := VclColorToAlphaColor(ShapeLayer.StrokeColor,
-          ShapeLayer.Opacity);
+          ShapeLayer.Opacity * OpacityMultiplier);
         StrokePaint.StrokeWidth := StrokeWidth;
         DashIntervals := VectArtStrokeDashIntervals(ShapeLayer.StrokeStyle,
           StrokeWidth);
@@ -459,7 +558,7 @@ begin
       end;
       StrokeWidth := Max(RectangleLine.StrokeWidth, MinimumStrokeWidth);
       StrokePaint.Color := VclColorToAlphaColor(RectangleLine.StrokeColor,
-        RectangleLine.Opacity);
+        RectangleLine.Opacity * OpacityMultiplier);
       StrokePaint.StrokeWidth := StrokeWidth;
       StrokePaint.StrokeCap := TSkStrokeCap.Butt;
       DashIntervals := VectArtStrokeDashIntervals(RectangleLine.StrokeStyle,
@@ -490,7 +589,7 @@ begin
       Path := BuildScreenLayoutArcPath(ArcLayer);
       StrokeWidth := Max(ArcLayer.StrokeWidth, MinimumStrokeWidth);
       StrokePaint.Color := VclColorToAlphaColor(ArcLayer.StrokeColor,
-        ArcLayer.Opacity);
+        ArcLayer.Opacity * OpacityMultiplier);
       StrokePaint.StrokeWidth := StrokeWidth;
       DashIntervals := VectArtStrokeDashIntervals(ArcLayer.StrokeStyle,
         StrokeWidth);
@@ -562,7 +661,7 @@ begin
       Path := PathBuilder.Detach;
       StrokeWidth := Max(PathLayer.StrokeWidth, MinimumStrokeWidth);
       StrokePaint.Color := VclColorToAlphaColor(PathLayer.StrokeColor,
-        PathLayer.Opacity);
+        PathLayer.Opacity * OpacityMultiplier);
       StrokePaint.StrokeWidth := StrokeWidth;
       DashIntervals := VectArtStrokeDashIntervals(PathLayer.MifStrokeStyle,
         StrokeWidth);
@@ -590,7 +689,7 @@ begin
       EllipseArcShape := TScreenLayoutEllipseArcShapeLayer(Layer);
       Paint.AntiAlias := True;
       Paint.Color := VclColorToAlphaColor(EllipseArcShape.FillColor,
-        EllipseArcShape.Opacity);
+        EllipseArcShape.Opacity * OpacityMultiplier);
       Canvas.DrawPath(BuildScreenLayoutEllipseArcShapePath(EllipseArcShape),
         Paint);
       Continue;
@@ -600,7 +699,7 @@ begin
       EllipseLayer := TScreenLayoutEllipseLayer(Layer);
       Paint.AntiAlias := True;
       Paint.Color := VclColorToAlphaColor(EllipseLayer.FillColor,
-        EllipseLayer.Opacity);
+        EllipseLayer.Opacity * OpacityMultiplier);
       Canvas.DrawPath(BuildScreenLayoutEllipsePath(EllipseLayer), Paint);
       Continue;
     end;
@@ -609,7 +708,7 @@ begin
       RoundedRectangleLayer := TScreenLayoutRoundedRectangleLayer(Layer);
       Paint.AntiAlias := True;
       Paint.Color := VclColorToAlphaColor(RoundedRectangleLayer.FillColor,
-        RoundedRectangleLayer.Opacity);
+        RoundedRectangleLayer.Opacity * OpacityMultiplier);
       Canvas.Save;
       try
         Canvas.Rotate(RoundedRectangleLayer.RotationDegrees,
@@ -629,7 +728,7 @@ begin
     RectangleLayer := TVectArtRectangleLayer(Layer);
     Paint.AntiAlias := True;
     Paint.Color := VclColorToAlphaColor(RectangleLayer.FillColor,
-      RectangleLayer.Opacity);
+      RectangleLayer.Opacity * OpacityMultiplier);
     Canvas.Save;
     try
       Canvas.Rotate(RectangleLayer.RotationDegrees,
