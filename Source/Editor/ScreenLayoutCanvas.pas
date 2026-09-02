@@ -5,14 +5,38 @@ unit ScreenLayoutCanvas;
 interface
 
 uses
-  System.Classes, System.SysUtils, System.Types, Vcl.Controls, Vcl.Direct2D,
-  Vcl.Forms, Vcl.Graphics, Vcl.StdCtrls,
+  System.Classes, System.SysUtils, System.Types, Winapi.Messages,
+  Winapi.Windows, Vcl.Controls, Vcl.Direct2D, Vcl.Forms, Vcl.Graphics,
+  Vcl.StdCtrls,
   ScreenLayoutCanvasInteraction,
   ScreenLayoutDocument, ScreenLayoutEditHistory,
   ScreenLayoutEditorState, ScreenLayoutSelectionGeometry,
   ScreenLayoutShapeCreation, ScreenLayoutRenderer;
 
 type
+  TScreenLayoutCommittedTextEvent = procedure(Sender: TObject;
+    const Text: string) of object;
+  TScreenLayoutCompositionEvent = procedure(Sender: TObject;
+    const Text: string; CursorPosition: Integer; Active: Boolean) of object;
+
+  TScreenLayoutImeEdit = class(TEdit)
+  private
+    FOnCommittedText: TScreenLayoutCommittedTextEvent;
+    FOnComposition: TScreenLayoutCompositionEvent;
+    procedure WMChar(var Message: TWMChar); message WM_CHAR;
+    procedure WMImeComposition(var Message: TMessage);
+      message WM_IME_COMPOSITION;
+    procedure WMImeEndComposition(var Message: TMessage);
+      message WM_IME_ENDCOMPOSITION;
+    procedure WMImeStartComposition(var Message: TMessage);
+      message WM_IME_STARTCOMPOSITION;
+  public
+    property OnCommittedText: TScreenLayoutCommittedTextEvent
+      read FOnCommittedText write FOnCommittedText;
+    property OnComposition: TScreenLayoutCompositionEvent
+      read FOnComposition write FOnComposition;
+  end;
+
   TVectArtCanvasControl = class(TCustomControl)
   private
     FCanvasBounds: TRect;
@@ -27,11 +51,16 @@ type
     FRenderedRevision: Int64;
     FShapeCreation: TVectArtShapeCreation;
     FTextBeforeSelection: TArray<Integer>;
+    FTextBuffer: string;
+    FTextCaretIndex: Integer;
+    FTextCompositionActive: Boolean;
+    FTextCompositionCursor: Integer;
+    FTextCompositionLabel: TLabel;
     FTextDragActive: Boolean;
     FTextDragCurrent: TPoint;
     FTextDragStart: TPoint;
     FTextEditing: Boolean;
-    FTextEditor: TMemo;
+    FTextEditor: TScreenLayoutImeEdit;
     FTextEnding: Boolean;
     FTextGuideBounds: TRectF;
     FTextLayerIndex: Integer;
@@ -61,14 +90,15 @@ type
     procedure DrawTextEditingOverlayDirect2D(ACanvas: TDirect2DCanvas);
     procedure FinishTextEdit(Cancel: Boolean;
       RestoreCanvasFocus: Boolean = True);
-    procedure TextEditorChange(Sender: TObject);
+    procedure TextEditorCommittedText(Sender: TObject; const Text: string);
+    procedure TextEditorComposition(Sender: TObject; const Text: string;
+      CursorPosition: Integer; Active: Boolean);
     procedure TextEditorExit(Sender: TObject);
     procedure TextEditorKeyDown(Sender: TObject; var Key: Word;
       Shift: TShiftState);
-    procedure TextEditorKeyUp(Sender: TObject; var Key: Word;
-      Shift: TShiftState);
-    procedure UpdateTextEditorPosition;
-    procedure UpdateTextLayerFromEditor;
+    procedure UpdateTextEditorBackground;
+    procedure UpdateTextEditorBounds;
+    procedure UpdateTextLayerFromBuffer;
   protected
     procedure DblClick; override;
     function DoMouseWheel(Shift: TShiftState; WheelDelta: Integer;
@@ -106,7 +136,7 @@ const
 implementation
 
 uses
-  System.Math, Winapi.D2D1, Winapi.Imm, Winapi.Windows,
+  System.Math, Winapi.D2D1, Winapi.Imm,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry, ScreenLayoutPathOperations,
   ScreenLayoutShapeOperations, ScreenLayoutTextCommands,
   ScreenLayoutTextGeometry, ScreenLayoutLayerNaming;
@@ -128,6 +158,7 @@ const
   DEFAULT_TEXT_FONT_SIZE = 32.0;
   DEFAULT_TEXT_GUIDE_WIDTH = 320;
   DEFAULT_TEXT_GUIDE_HEIGHT = 80;
+  TEXT_INPUT_EDIT_WIDTH = 4;
   // Falseにすると編集ビューの細線補正を一括で無効化する。
   ENABLE_THIN_STROKE_PREVIEW = True;
   MIN_PREVIEW_STROKE_WIDTH_PIXELS = 1.0;
@@ -146,6 +177,60 @@ begin
   AlphaBlend(Target.Handle, Bounds.Left, Bounds.Top,
     Bounds.Width, Bounds.Height, Bitmap.Canvas.Handle,
     0, 0, Bitmap.Width, Bitmap.Height, Blend);
+end;
+
+procedure TScreenLayoutImeEdit.WMChar(var Message: TWMChar);
+begin
+  if (Message.CharCode >= 32) and Assigned(FOnCommittedText) then
+    FOnCommittedText(Self, string(WideChar(Message.CharCode)));
+  // 確定文字はDocument側へ渡し、Edit自身の文字列には残さない。
+  Message.Result := 0;
+end;
+
+procedure TScreenLayoutImeEdit.WMImeComposition(var Message: TMessage);
+var
+  ByteCount: Integer;
+  CompositionCursor: Integer;
+  CompositionText: string;
+  InputContext: HIMC;
+begin
+  CompositionText := '';
+  CompositionCursor := 0;
+  InputContext := ImmGetContext(Handle);
+  if InputContext <> 0 then
+  try
+    ByteCount := ImmGetCompositionStringW(InputContext, GCS_COMPSTR,
+      nil, 0);
+    if ByteCount > 0 then
+    begin
+      SetLength(CompositionText, ByteCount div SizeOf(Char));
+      ImmGetCompositionStringW(InputContext, GCS_COMPSTR,
+        PChar(CompositionText), ByteCount);
+    end;
+    CompositionCursor := ImmGetCompositionStringW(InputContext,
+      GCS_CURSORPOS, nil, 0);
+    if CompositionCursor < 0 then
+      CompositionCursor := 0;
+  finally
+    ImmReleaseContext(Handle, InputContext);
+  end;
+  inherited;
+  if Assigned(FOnComposition) then
+    FOnComposition(Self, CompositionText, CompositionCursor, True);
+end;
+
+procedure TScreenLayoutImeEdit.WMImeEndComposition(var Message: TMessage);
+begin
+  inherited;
+  if Assigned(FOnComposition) then
+    FOnComposition(Self, '', 0, False);
+end;
+
+procedure TScreenLayoutImeEdit.WMImeStartComposition(var Message: TMessage);
+begin
+  inherited;
+  if Assigned(FOnComposition) then
+    FOnComposition(Self, '', 0, True);
 end;
 
 type
@@ -469,21 +554,26 @@ begin
   FRenderedPreviewStrokeWidth := -1.0;
   FRenderedRevision := -1;
   FShapeCreation := TVectArtShapeCreation.Create;
-  FTextEditor := TMemo.Create(Self);
+  FTextEditor := TScreenLayoutImeEdit.Create(Self);
   FTextEditor.Parent := Self;
   FTextEditor.BorderStyle := bsNone;
-  FTextEditor.Color := COLOR_EDITOR_SURROUND;
+  FTextEditor.Color := TColor($00303030);
   FTextEditor.Ctl3D := False;
-  FTextEditor.ScrollBars := ssNone;
-  FTextEditor.TabStop := False;
+  FTextEditor.HideSelection := False;
+  FTextEditor.TabStop := True;
   FTextEditor.Visible := False;
-  FTextEditor.WantReturns := True;
-  FTextEditor.WordWrap := False;
   FTextEditor.SetBounds(0, 0, 1, 1);
-  FTextEditor.OnChange := TextEditorChange;
+  FTextEditor.OnCommittedText := TextEditorCommittedText;
+  FTextEditor.OnComposition := TextEditorComposition;
   FTextEditor.OnExit := TextEditorExit;
   FTextEditor.OnKeyDown := TextEditorKeyDown;
-  FTextEditor.OnKeyUp := TextEditorKeyUp;
+  FTextCompositionLabel := TLabel.Create(Self);
+  FTextCompositionLabel.Parent := Self;
+  FTextCompositionLabel.AutoSize := True;
+  FTextCompositionLabel.Font.Color := clWhite;
+  FTextCompositionLabel.Font.Style := [fsUnderline];
+  FTextCompositionLabel.Transparent := True;
+  FTextCompositionLabel.Visible := False;
   FPanOffset := TPointF.Zero;
   FViewZoom := 1.0;
   CalculateCanvasBounds;
@@ -491,6 +581,7 @@ end;
 
 destructor TVectArtCanvasControl.Destroy;
 begin
+  FTextCompositionLabel.Free;
   FTextEditor.Free;
   FRenderBuffer.Free;
   FRenderedDocument.Free;
@@ -525,17 +616,22 @@ begin
   FDocument.SetSelectedLayers([FTextLayerIndex]);
   FTextGuideBounds := GuideBounds;
   FTextNewLayer := True;
+  FTextBuffer := '';
+  FTextCaretIndex := 0;
+  FTextCompositionActive := False;
+  FTextCompositionCursor := 0;
+  FTextCompositionLabel.Caption := '';
+  FTextCompositionLabel.Visible := False;
   FTextEditor.Text := '';
   FTextEditor.Font.Name := Data.FontFamily;
   FTextEditor.Font.Size := Round(Data.FontSize);
   FTextEditor.Font.Color := Data.TextColor;
   FTextEditing := True;
-  UpdateTextLayerFromEditor;
+  UpdateTextLayerFromBuffer;
+  UpdateTextEditorBackground;
   FTextEditor.Visible := True;
   FTextEditor.BringToFront;
   FTextEditor.SetFocus;
-  FTextEditor.SelStart := 0;
-  UpdateTextEditorPosition;
 end;
 
 procedure TVectArtCanvasControl.BeginExistingTextEdit(Index: Integer);
@@ -555,19 +651,24 @@ begin
   FTextOriginalData := CaptureScreenLayoutTextData(Layer);
   FTextGuideBounds := TRectF.Create(Layer.Bounds.Left, Layer.Bounds.Top,
     Layer.Bounds.Left + Max(Layer.WrapWidth, Layer.Bounds.Width),
-    Layer.Bounds.Bottom);
+    Layer.Bounds.Top + Max(Layer.Bounds.Height, DEFAULT_TEXT_GUIDE_HEIGHT));
   FTextNewLayer := False;
-  FTextEditor.Text := Layer.Text;
+  FTextBuffer := Layer.Text;
+  FTextCaretIndex := Length(FTextBuffer);
+  FTextCompositionActive := False;
+  FTextCompositionCursor := 0;
+  FTextCompositionLabel.Caption := '';
+  FTextCompositionLabel.Visible := False;
+  FTextEditor.Text := '';
   FTextEditor.Font.Name := Layer.FontFamily;
   FTextEditor.Font.Size := Round(Layer.FontSize);
   FTextEditor.Font.Color := Layer.FillColor;
   FTextEditing := True;
-  UpdateTextLayerFromEditor;
+  UpdateTextLayerFromBuffer;
+  UpdateTextEditorBackground;
   FTextEditor.Visible := True;
   FTextEditor.BringToFront;
   FTextEditor.SetFocus;
-  FTextEditor.SelStart := Length(FTextEditor.Text);
-  UpdateTextEditorPosition;
 end;
 
 procedure TVectArtCanvasControl.DblClick;
@@ -585,13 +686,7 @@ end;
 procedure TVectArtCanvasControl.DrawTextEditingOverlay(
   ACanvas: TCanvas);
 var
-  CaretBottom: TPointF;
-  CaretLayout: TScreenLayoutTextLayout;
-  CaretTop: TPointF;
   GuideRect: TRect;
-  LastLine: Integer;
-  Layer: TScreenLayoutTextLayer;
-  Prefix: string;
 begin
   if FTextDragActive then
   begin
@@ -606,51 +701,12 @@ begin
     ACanvas.FrameRect(GuideRect);
     ACanvas.Pen.Style := psSolid;
   end;
-  if not FTextEditing or (FDocument = nil) or
-    (FTextLayerIndex <= 0) or (FTextLayerIndex >= FDocument.LayerCount) or
-    not (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
-    Exit;
-  Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
-  GuideRect := Rect(ToScreenX(FTextGuideBounds.Left),
-    ToScreenY(FTextGuideBounds.Top), ToScreenX(FTextGuideBounds.Right),
-    ToScreenY(Max(FTextGuideBounds.Bottom,
-      FTextGuideBounds.Top + Layer.Bounds.Height)));
-  ACanvas.Pen.Color := TColor($00808080);
-  ACanvas.Pen.Style := psDot;
-  ACanvas.Brush.Style := bsClear;
-  ACanvas.FrameRect(GuideRect);
-  ACanvas.Pen.Style := psSolid;
-
-  Prefix := Copy(FTextEditor.Text, 1, FTextEditor.SelStart);
-  CaretLayout := BuildScreenLayoutTextLayout(Prefix, Layer.FontFamily,
-    Layer.FontSize, Layer.WrapWidth);
-  LastLine := Max(High(CaretLayout.Lines), 0);
-  CaretTop := TPointF.Create(Layer.Bounds.Left,
-    Layer.Bounds.Top + LastLine * CaretLayout.LineHeight);
-  if Length(CaretLayout.Lines) > 0 then
-    CaretTop.X := CaretTop.X + CreateScreenLayoutTextFont(Layer.FontFamily,
-      Layer.FontSize).MeasureText(CaretLayout.Lines[LastLine]);
-  CaretBottom := TPointF.Create(CaretTop.X,
-    CaretTop.Y + CaretLayout.LineHeight);
-  CaretTop := RotatePointAround(CaretTop, Layer.Bounds.CenterPoint,
-    Layer.RotationDegrees);
-  CaretBottom := RotatePointAround(CaretBottom, Layer.Bounds.CenterPoint,
-    Layer.RotationDegrees);
-  ACanvas.Pen.Color := clWhite;
-  ACanvas.MoveTo(ToScreenX(CaretTop.X), ToScreenY(CaretTop.Y));
-  ACanvas.LineTo(ToScreenX(CaretBottom.X), ToScreenY(CaretBottom.Y));
 end;
 
 procedure TVectArtCanvasControl.DrawTextEditingOverlayDirect2D(
   ACanvas: TDirect2DCanvas);
 var
-  CaretBottom: TPointF;
-  CaretLayout: TScreenLayoutTextLayout;
-  CaretTop: TPointF;
   GuideRect: TRect;
-  LastLine: Integer;
-  Layer: TScreenLayoutTextLayer;
-  Prefix: string;
 begin
   if FTextDragActive then
   begin
@@ -665,39 +721,6 @@ begin
     ACanvas.FrameRect(GuideRect);
     ACanvas.Pen.Style := psSolid;
   end;
-  if not FTextEditing or (FDocument = nil) or
-    (FTextLayerIndex <= 0) or (FTextLayerIndex >= FDocument.LayerCount) or
-    not (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
-    Exit;
-  Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
-  GuideRect := Rect(ToScreenX(FTextGuideBounds.Left),
-    ToScreenY(FTextGuideBounds.Top), ToScreenX(FTextGuideBounds.Right),
-    ToScreenY(Max(FTextGuideBounds.Bottom,
-      FTextGuideBounds.Top + Layer.Bounds.Height)));
-  ACanvas.Pen.Color := TColor($00808080);
-  ACanvas.Pen.Style := psDot;
-  ACanvas.Brush.Style := bsClear;
-  ACanvas.FrameRect(GuideRect);
-  ACanvas.Pen.Style := psSolid;
-
-  Prefix := Copy(FTextEditor.Text, 1, FTextEditor.SelStart);
-  CaretLayout := BuildScreenLayoutTextLayout(Prefix, Layer.FontFamily,
-    Layer.FontSize, Layer.WrapWidth);
-  LastLine := Max(High(CaretLayout.Lines), 0);
-  CaretTop := TPointF.Create(Layer.Bounds.Left,
-    Layer.Bounds.Top + LastLine * CaretLayout.LineHeight);
-  if Length(CaretLayout.Lines) > 0 then
-    CaretTop.X := CaretTop.X + CreateScreenLayoutTextFont(Layer.FontFamily,
-      Layer.FontSize).MeasureText(CaretLayout.Lines[LastLine]);
-  CaretBottom := TPointF.Create(CaretTop.X,
-    CaretTop.Y + CaretLayout.LineHeight);
-  CaretTop := RotatePointAround(CaretTop, Layer.Bounds.CenterPoint,
-    Layer.RotationDegrees);
-  CaretBottom := RotatePointAround(CaretBottom, Layer.Bounds.CenterPoint,
-    Layer.RotationDegrees);
-  ACanvas.Pen.Color := clWhite;
-  ACanvas.MoveTo(ToScreenX(CaretTop.X), ToScreenY(CaretTop.Y));
-  ACanvas.LineTo(ToScreenX(CaretBottom.X), ToScreenY(CaretBottom.Y));
 end;
 
 procedure TVectArtCanvasControl.FinishTextEdit(Cancel,
@@ -751,6 +774,13 @@ begin
     FTextEditing := False;
     FTextLayerIndex := -1;
     FTextNewLayer := False;
+    FTextBuffer := '';
+    FTextCaretIndex := 0;
+    FTextCompositionActive := False;
+    FTextCompositionCursor := 0;
+    FTextCompositionLabel.Caption := '';
+    FTextCompositionLabel.Visible := False;
+    FTextEditor.Text := '';
     if RestoreCanvasFocus and
       not (csDestroying in ComponentState) and
       (Parent <> nil) and not (csDestroying in Parent.ComponentState) and
@@ -762,10 +792,36 @@ begin
   end;
 end;
 
-procedure TVectArtCanvasControl.TextEditorChange(Sender: TObject);
+procedure TVectArtCanvasControl.TextEditorCommittedText(Sender: TObject;
+  const Text: string);
 begin
-  if FTextEditing and not FTextEnding then
-    UpdateTextLayerFromEditor;
+  if not FTextEditing or FTextEnding or (Text = '') then
+    Exit;
+  FTextCompositionActive := False;
+  FTextCompositionCursor := 0;
+  FTextCompositionLabel.Caption := '';
+  FTextCompositionLabel.Visible := False;
+  Insert(Text, FTextBuffer, FTextCaretIndex + 1);
+  Inc(FTextCaretIndex, Length(Text));
+  UpdateTextLayerFromBuffer;
+end;
+
+procedure TVectArtCanvasControl.TextEditorComposition(Sender: TObject;
+  const Text: string; CursorPosition: Integer; Active: Boolean);
+begin
+  if not FTextEditing or FTextEnding then
+    Exit;
+  FTextCompositionActive := Active;
+  FTextCompositionCursor := EnsureRange(CursorPosition, 0, Length(Text));
+  FTextCompositionLabel.Caption := Text;
+  FTextCompositionLabel.Visible := Active and (Text <> '');
+  UpdateTextEditorBounds;
+  if FTextCompositionLabel.Visible then
+  begin
+    FTextCompositionLabel.BringToFront;
+    FTextEditor.BringToFront;
+  end;
+  Invalidate;
 end;
 
 procedure TVectArtCanvasControl.TextEditorExit(Sender: TObject);
@@ -776,31 +832,159 @@ end;
 
 procedure TVectArtCanvasControl.TextEditorKeyDown(Sender: TObject;
   var Key: Word; Shift: TShiftState);
-begin
-  if Key = VK_ESCAPE then
-  begin
-    Key := 0;
-    FinishTextEdit(True);
-  end;
-end;
-
-procedure TVectArtCanvasControl.TextEditorKeyUp(Sender: TObject;
-  var Key: Word; Shift: TShiftState);
-begin
-  if FTextEditing and not FTextEnding then
-  begin
-    UpdateTextEditorPosition;
-    Invalidate;
-  end;
-end;
-
-procedure TVectArtCanvasControl.UpdateTextEditorPosition;
 var
-  CandidateForm: TCandidateForm;
+  DeleteCount: Integer;
+begin
+  case Key of
+    VK_ESCAPE:
+      begin
+        Key := 0;
+        FinishTextEdit(True);
+      end;
+    VK_RETURN:
+      begin
+        Key := 0;
+        Insert(sLineBreak, FTextBuffer, FTextCaretIndex + 1);
+        Inc(FTextCaretIndex, Length(sLineBreak));
+        UpdateTextLayerFromBuffer;
+      end;
+    VK_BACK:
+      begin
+        Key := 0;
+        if FTextCaretIndex <= 0 then
+          Exit;
+        DeleteCount := 1;
+        if (FTextCaretIndex >= 2) and
+          (FTextBuffer[FTextCaretIndex - 1] = #13) and
+          (FTextBuffer[FTextCaretIndex] = #10) then
+          DeleteCount := 2
+        else if (FTextCaretIndex >= 2) and
+          (Ord(FTextBuffer[FTextCaretIndex - 1]) >= $D800) and
+          (Ord(FTextBuffer[FTextCaretIndex - 1]) <= $DBFF) and
+          (Ord(FTextBuffer[FTextCaretIndex]) >= $DC00) and
+          (Ord(FTextBuffer[FTextCaretIndex]) <= $DFFF) then
+          DeleteCount := 2;
+        Delete(FTextBuffer, FTextCaretIndex - DeleteCount + 1,
+          DeleteCount);
+        Dec(FTextCaretIndex, DeleteCount);
+        UpdateTextLayerFromBuffer;
+      end;
+    VK_DELETE:
+      begin
+        Key := 0;
+        if FTextCaretIndex >= Length(FTextBuffer) then
+          Exit;
+        DeleteCount := 1;
+        if (FTextCaretIndex + 2 <= Length(FTextBuffer)) and
+          (FTextBuffer[FTextCaretIndex + 1] = #13) and
+          (FTextBuffer[FTextCaretIndex + 2] = #10) then
+          DeleteCount := 2
+        else if (FTextCaretIndex + 2 <= Length(FTextBuffer)) and
+          (Ord(FTextBuffer[FTextCaretIndex + 1]) >= $D800) and
+          (Ord(FTextBuffer[FTextCaretIndex + 1]) <= $DBFF) and
+          (Ord(FTextBuffer[FTextCaretIndex + 2]) >= $DC00) and
+          (Ord(FTextBuffer[FTextCaretIndex + 2]) <= $DFFF) then
+          DeleteCount := 2;
+        Delete(FTextBuffer, FTextCaretIndex + 1, DeleteCount);
+        UpdateTextLayerFromBuffer;
+      end;
+    VK_LEFT:
+      begin
+        Key := 0;
+        if FTextCaretIndex > 0 then
+          Dec(FTextCaretIndex);
+        if (FTextCaretIndex > 0) and
+          (Ord(FTextBuffer[FTextCaretIndex]) >= $D800) and
+          (Ord(FTextBuffer[FTextCaretIndex]) <= $DBFF) then
+          Dec(FTextCaretIndex);
+        if (FTextCaretIndex > 0) and
+          (FTextBuffer[FTextCaretIndex] = #13) and
+          (FTextBuffer[FTextCaretIndex + 1] = #10) then
+          Dec(FTextCaretIndex);
+        UpdateTextEditorBounds;
+        Invalidate;
+      end;
+    VK_RIGHT:
+      begin
+        Key := 0;
+        if FTextCaretIndex < Length(FTextBuffer) then
+          Inc(FTextCaretIndex);
+        if (FTextCaretIndex < Length(FTextBuffer)) and
+          (Ord(FTextBuffer[FTextCaretIndex]) >= $D800) and
+          (Ord(FTextBuffer[FTextCaretIndex]) <= $DBFF) then
+          Inc(FTextCaretIndex);
+        if (FTextCaretIndex < Length(FTextBuffer)) and
+          (FTextBuffer[FTextCaretIndex] = #13) and
+          (FTextBuffer[FTextCaretIndex + 1] = #10) then
+          Inc(FTextCaretIndex);
+        UpdateTextEditorBounds;
+        Invalidate;
+      end;
+    VK_HOME:
+      begin
+        Key := 0;
+        FTextCaretIndex := 0;
+        UpdateTextEditorBounds;
+        Invalidate;
+      end;
+    VK_END:
+      begin
+        Key := 0;
+        FTextCaretIndex := Length(FTextBuffer);
+        UpdateTextEditorBounds;
+        Invalidate;
+      end;
+  end;
+end;
+
+procedure TVectArtCanvasControl.UpdateTextEditorBackground;
+var
+  BlueTotal: Integer;
+  ColorValue: COLORREF;
+  EditorRect: TRect;
+  GreenTotal: Integer;
+  I: Integer;
+  J: Integer;
+  RedTotal: Integer;
+  SampleCount: Integer;
+  SampleX: Integer;
+  SampleY: Integer;
+begin
+  EditorRect := Rect(ToScreenX(FTextGuideBounds.Left),
+    ToScreenY(FTextGuideBounds.Top), ToScreenX(FTextGuideBounds.Right),
+    ToScreenY(FTextGuideBounds.Bottom));
+  RedTotal := 0;
+  GreenTotal := 0;
+  BlueTotal := 0;
+  SampleCount := 0;
+  for J := 0 to 2 do
+    for I := 0 to 2 do
+    begin
+      SampleX := EditorRect.Left +
+        (EditorRect.Width * (I + 1)) div 4;
+      SampleY := EditorRect.Top +
+        (EditorRect.Height * (J + 1)) div 4;
+      if not PtInRect(ClientRect, Point(SampleX, SampleY)) then
+        Continue;
+      ColorValue := GetPixel(Canvas.Handle, SampleX, SampleY);
+      if ColorValue = CLR_INVALID then
+        Continue;
+      Inc(RedTotal, GetRValue(ColorValue));
+      Inc(GreenTotal, GetGValue(ColorValue));
+      Inc(BlueTotal, GetBValue(ColorValue));
+      Inc(SampleCount);
+    end;
+  if SampleCount > 0 then
+    FTextEditor.Color := RGB(RedTotal div SampleCount,
+      GreenTotal div SampleCount, BlueTotal div SampleCount)
+  else
+    FTextEditor.Color := TColor($00303030);
+end;
+
+procedure TVectArtCanvasControl.UpdateTextEditorBounds;
+var
   CaretLayout: TScreenLayoutTextLayout;
   CaretPoint: TPointF;
-  CompositionForm: TCompositionForm;
-  InputContext: HIMC;
   LastLine: Integer;
   Layer: TScreenLayoutTextLayer;
   Prefix: string;
@@ -811,44 +995,35 @@ begin
     not (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
     Exit;
   Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
-  Prefix := Copy(FTextEditor.Text, 1, FTextEditor.SelStart);
+  FTextEditor.Font.Name := Layer.FontFamily;
+  FTextEditor.Font.Height := -Max(Round(Layer.FontSize * FZoom), 1);
+  FTextEditor.Font.Color := Layer.FillColor;
+  Prefix := Copy(FTextBuffer, 1, FTextCaretIndex);
   CaretLayout := BuildScreenLayoutTextLayout(Prefix, Layer.FontFamily,
     Layer.FontSize, Layer.WrapWidth);
   LastLine := Max(High(CaretLayout.Lines), 0);
-  CaretPoint := TPointF.Create(Layer.Bounds.Left,
-    Layer.Bounds.Top + LastLine * CaretLayout.LineHeight);
+  CaretPoint := TPointF.Create(FTextGuideBounds.Left,
+    FTextGuideBounds.Top + LastLine * CaretLayout.LineHeight);
   if Length(CaretLayout.Lines) > 0 then
     CaretPoint.X := CaretPoint.X + CreateScreenLayoutTextFont(
       Layer.FontFamily, Layer.FontSize).MeasureText(
       CaretLayout.Lines[LastLine]);
-  CaretPoint := RotatePointAround(CaretPoint, Layer.Bounds.CenterPoint,
-    Layer.RotationDegrees);
   ScreenPoint := Point(ToScreenX(CaretPoint.X), ToScreenY(CaretPoint.Y));
-  // 入力コントロールを親の原点へ固定し、IMEへ渡す座標系を
-  // キャンバスのクライアント座標と一致させる。
-  FTextEditor.SetBounds(0, 0, 1, 1);
-  if not FTextEditor.HandleAllocated then
-    Exit;
-  InputContext := ImmGetContext(FTextEditor.Handle);
-  if InputContext = 0 then
-    Exit;
-  try
-    CompositionForm := Default(TCompositionForm);
-    CompositionForm.dwStyle := CFS_FORCE_POSITION;
-    CompositionForm.ptCurrentPos := ScreenPoint;
-    ImmSetCompositionWindow(InputContext, @CompositionForm);
-    CandidateForm := Default(TCandidateForm);
-    CandidateForm.dwIndex := 0;
-    CandidateForm.dwStyle := CFS_CANDIDATEPOS;
-    CandidateForm.ptCurrentPos := Point(ScreenPoint.X, ScreenPoint.Y +
-      Max(Round(CaretLayout.LineHeight * FZoom), 1));
-    ImmSetCandidateWindow(InputContext, @CandidateForm);
-  finally
-    ImmReleaseContext(FTextEditor.Handle, InputContext);
-  end;
+  ScreenPoint.X := EnsureRange(ScreenPoint.X, FCanvasBounds.Left,
+    Max(FCanvasBounds.Right - TEXT_INPUT_EDIT_WIDTH, FCanvasBounds.Left));
+  ScreenPoint.Y := EnsureRange(ScreenPoint.Y, FCanvasBounds.Top,
+    Max(FCanvasBounds.Bottom - 1, FCanvasBounds.Top));
+  FTextEditor.SetBounds(ScreenPoint.X, ScreenPoint.Y,
+    TEXT_INPUT_EDIT_WIDTH,
+    Max(Round(CaretLayout.LineHeight * FZoom), 1));
+  FTextCompositionLabel.Font.Name := Layer.FontFamily;
+  FTextCompositionLabel.Font.Height := FTextEditor.Font.Height;
+  FTextCompositionLabel.Font.Color := Layer.FillColor;
+  FTextCompositionLabel.Left := ScreenPoint.X + TEXT_INPUT_EDIT_WIDTH;
+  FTextCompositionLabel.Top := ScreenPoint.Y;
 end;
 
-procedure TVectArtCanvasControl.UpdateTextLayerFromEditor;
+procedure TVectArtCanvasControl.UpdateTextLayerFromBuffer;
 var
   Data: TScreenLayoutTextData;
   Layout: TScreenLayoutTextLayout;
@@ -859,7 +1034,7 @@ begin
     Exit;
   Data := CaptureScreenLayoutTextData(
     TScreenLayoutTextLayer(FDocument[FTextLayerIndex]));
-  Data.Text := FTextEditor.Text;
+  Data.Text := FTextBuffer;
   Data.WrapWidth := Max(FTextGuideBounds.Width, 1.0);
   Layout := BuildScreenLayoutTextLayout(Data.Text, Data.FontFamily,
     Data.FontSize, Data.WrapWidth);
@@ -867,7 +1042,7 @@ begin
     FTextGuideBounds.Left + Max(Layout.Width, 1.0),
     FTextGuideBounds.Top + Max(Layout.Height, Data.FontSize));
   FDocument.SetTextData(FTextLayerIndex, Data);
-  UpdateTextEditorPosition;
+  UpdateTextEditorBounds;
   Invalidate;
 end;
 
@@ -922,6 +1097,8 @@ begin
     (ControlHeight - DisplayHeight) div 2 + Round(FPanOffset.Y),
     (ControlWidth + DisplayWidth) div 2 + Round(FPanOffset.X),
     (ControlHeight + DisplayHeight) div 2 + Round(FPanOffset.Y));
+  if FTextEditing then
+    UpdateTextEditorBounds;
 end;
 
 function TVectArtCanvasControl.ToScreenX(Value: Single): Integer;
