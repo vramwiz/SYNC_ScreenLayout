@@ -16,12 +16,16 @@ type
     FArcEndAngleEdit: TEdit;
     FArcStartAngleEdit: TEdit;
     FColorEdit: TEdit;
+    FColorControlsVisible: Boolean;
     FDocument: TVectArtDocument;
     FEditHistory: TVectArtEditHistory;
     FEditorState: TVectArtEditorState;
+    FGeometryControlsVisible: Boolean;
     FHeightEdit: TEdit;
     FOpacityEdit: TEdit;
+    FOpacityControlsVisible: Boolean;
     FStrokeColorEdit: TEdit;
+    FStrokePropertyControlsVisible: Boolean;
     FMifStrokeStyleCombo: TVectArtMifStrokeStyleCombo;
     FPathLineCapButtons: array[TVectArtLineCap] of TVectArtLineCapButton;
     FStrokeWidthEdit: TEdit;
@@ -49,6 +53,10 @@ type
     function NewDarkCombo: TVectArtMifStrokeStyleCombo;
     function SelectedBounds(out Bounds: TRectF): Boolean;
     procedure SetDocument(const Value: TVectArtDocument);
+    procedure SetColorControlsVisible(Value: Boolean);
+    procedure SetGeometryControlsVisible(Value: Boolean);
+    procedure SetOpacityControlsVisible(Value: Boolean);
+    procedure SetStrokePropertyControlsVisible(Value: Boolean);
     procedure SetEditorsEnabled(Value: Boolean);
     procedure SetPathStyleControlsVisible(Value: Boolean);
     procedure SetStrokeControlsVisible(Value: Boolean);
@@ -56,13 +64,25 @@ type
     procedure Paint; override;
     procedure Resize; override;
   public
+    // 旧属性UIを生成する。各表示フラグにより専用Frameへ移した項目を除外できる。
     constructor Create(AOwner: TComponent); override;
+    // 現在選択から表示対象と値を再判定し、変更イベントを発生させずに同期する。
     procedure RefreshFromDocument;
+    // Document、履歴、編集状態は非所有参照として接続する。
     property Document: TVectArtDocument read FDocument write SetDocument;
     property EditHistory: TVectArtEditHistory read FEditHistory
       write FEditHistory;
     property EditorState: TVectArtEditorState read FEditorState
       write FEditorState;
+    // 専用Frameへ移した項目を非表示にし、残る項目を上へ詰めるための表示フラグ。
+    property GeometryControlsVisible: Boolean read FGeometryControlsVisible
+      write SetGeometryControlsVisible;
+    property ColorControlsVisible: Boolean read FColorControlsVisible
+      write SetColorControlsVisible;
+    property OpacityControlsVisible: Boolean read FOpacityControlsVisible
+      write SetOpacityControlsVisible;
+    property StrokePropertyControlsVisible: Boolean
+      read FStrokePropertyControlsVisible write SetStrokePropertyControlsVisible;
   end;
 
 implementation
@@ -121,6 +141,10 @@ var
   LineCap: TVectArtLineCap;
 begin
   inherited Create(AOwner);
+  FColorControlsVisible := True;
+  FGeometryControlsVisible := True;
+  FOpacityControlsVisible := True;
+  FStrokePropertyControlsVisible := True;
   Color := COLOR_BACKGROUND;
   ParentBackground := False;
   DoubleBuffered := True;
@@ -925,10 +949,13 @@ end;
 
 procedure TVectArtObjectPropertiesControl.Paint;
 var
+  ColorOffset: Integer;
   ColorValue: TColor;
   HeaderText: string;
   HexValue: Integer;
   IsLineSelection: Boolean;
+  OpacityOffset: Integer;
+  SectionOffset: Integer;
   SwatchRect: TRect;
 begin
   Canvas.Brush.Color := COLOR_BACKGROUND;
@@ -951,43 +978,66 @@ begin
   Canvas.Font.Color := COLOR_TEXT;
   Canvas.TextOut(12, 12, HeaderText);
   Canvas.Font.Color := COLOR_LABEL;
-  Canvas.TextOut(12, 43, 'X');
-  Canvas.TextOut((ClientWidth div 2) + 4, 43, 'Y');
+  if FGeometryControlsVisible then
+  begin
+    Canvas.TextOut(12, 43, 'X');
+    Canvas.TextOut((ClientWidth div 2) + 4, 43, 'Y');
+  end;
   IsLineSelection := (FDocument <> nil) and
     (FDocument.SelectionCount = 1) and
     (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) and
     not TVectArtPathLayer(FDocument[FDocument.SelectedIndex]).Closed and
     ScreenLayoutPathIsStraightLine(TVectArtPathLayer(
       FDocument[FDocument.SelectedIndex]).Vertices);
-  if IsLineSelection then
+  if FGeometryControlsVisible and IsLineSelection then
   begin
     Canvas.TextOut(12, 91, 'Length');
     Canvas.TextOut((ClientWidth div 2) + 4, 91, 'Angle (deg)');
   end
-  else
+  else if FGeometryControlsVisible then
   begin
     Canvas.TextOut(12, 91, 'Width');
     Canvas.TextOut((ClientWidth div 2) + 4, 91, 'Height');
   end;
+  if FGeometryControlsVisible then
+    SectionOffset := 0
+  else
+    SectionOffset := -96;
+  if FColorControlsVisible then
+    ColorOffset := 0
+  else
+    ColorOffset := -49;
+  if FOpacityControlsVisible then
+    OpacityOffset := 0
+  else
+    OpacityOffset := -49;
   if FColorEdit.Visible then
-    Canvas.TextOut(12, 139, 'Fill color');
+    Canvas.TextOut(12, 139 + SectionOffset, 'Fill color');
   if FArcStartAngleEdit.Visible then
   begin
-    Canvas.TextOut(12, 139, 'Start angle');
-    Canvas.TextOut((ClientWidth div 2) + 4, 139, 'End angle');
+    Canvas.TextOut(12, 139 + SectionOffset, 'Start angle');
+    Canvas.TextOut((ClientWidth div 2) + 4, 139 + SectionOffset,
+      'End angle');
   end;
   if FStrokeColorEdit.Visible then
+    Canvas.TextOut(12, 190 + SectionOffset, 'Stroke color');
+  if FStrokeWidthEdit.Visible then
   begin
-    Canvas.TextOut(12, 190, 'Stroke color');
-    Canvas.TextOut(12, 239, 'Stroke width (0 = none)');
-    Canvas.TextOut((ClientWidth div 2) + 4, 239, 'Stroke style');
+    Canvas.TextOut(12, 239 + SectionOffset + ColorOffset,
+      'Stroke width (0 = none)');
+    Canvas.TextOut((ClientWidth div 2) + 4,
+      239 + SectionOffset + ColorOffset,
+      'Stroke style');
   end;
-  Canvas.TextOut(12, 288, 'Opacity (%)');
+  if FOpacityEdit.Visible then
+    Canvas.TextOut(12, 288 + SectionOffset + ColorOffset, 'Opacity (%)');
   if FPathLineCapButtons[vlcSquare].Visible then
-    Canvas.TextOut(12, 337, 'Line cap');
+    Canvas.TextOut(12, 337 + SectionOffset + ColorOffset + OpacityOffset,
+      'Line cap');
   if FColorEdit.Visible then
   begin
-    SwatchRect := Rect(ClientWidth - 42, 158, ClientWidth - 12, 183);
+    SwatchRect := Rect(ClientWidth - 42, 158 + SectionOffset,
+      ClientWidth - 12, 183 + SectionOffset);
     ColorValue := COLOR_EDIT;
     if TryStrToInt('$' + StringReplace(Trim(FColorEdit.Text), '#', '', []),
       HexValue) and (HexValue >= 0) and (HexValue <= $FFFFFF) then
@@ -1000,7 +1050,8 @@ begin
   end;
   if FStrokeColorEdit.Visible then
   begin
-    SwatchRect := Rect(ClientWidth - 42, 207, ClientWidth - 12, 232);
+    SwatchRect := Rect(ClientWidth - 42, 207 + SectionOffset,
+      ClientWidth - 12, 232 + SectionOffset);
     ColorValue := COLOR_EDIT;
     if TryStrToInt('$' + StringReplace(Trim(FStrokeColorEdit.Text), '#', '', []),
       HexValue) and (HexValue >= 0) and (HexValue <= $FFFFFF) then
@@ -1369,6 +1420,19 @@ begin
       SetEditorsEnabled(False);
     end;
   finally
+    if not FColorControlsVisible then
+    begin
+      FColorEdit.Visible := False;
+      FStrokeColorEdit.Visible := False;
+    end;
+    if not FOpacityControlsVisible then
+      FOpacityEdit.Visible := False;
+    if not FStrokePropertyControlsVisible then
+    begin
+      FStrokeWidthEdit.Visible := False;
+      FMifStrokeStyleCombo.Visible := False;
+      SetPathStyleControlsVisible(False);
+    end;
     FUpdating := False;
   end;
   Invalidate;
@@ -1407,30 +1471,65 @@ end;
 procedure TVectArtObjectPropertiesControl.Resize;
 var
   ButtonWidth: Integer;
+  ColorOffset: Integer;
   ColumnWidth: Integer;
+  OpacityOffset: Integer;
+  SectionOffset: Integer;
 begin
   inherited Resize;
+  if FGeometryControlsVisible then
+    SectionOffset := 0
+  else
+    SectionOffset := -96;
+  if FColorControlsVisible then
+    ColorOffset := 0
+  else
+    ColorOffset := -49;
+  if FOpacityControlsVisible then
+    OpacityOffset := 0
+  else
+    OpacityOffset := -49;
   ColumnWidth := Max((ClientWidth - 36) div 2, 48);
   FXEdit.SetBounds(12, 59, ColumnWidth, EDIT_HEIGHT);
   FYEdit.SetBounds((ClientWidth div 2) + 4, 59, ColumnWidth, EDIT_HEIGHT);
   FWidthEdit.SetBounds(12, 107, ColumnWidth, EDIT_HEIGHT);
   FHeightEdit.SetBounds((ClientWidth div 2) + 4, 107, ColumnWidth,
     EDIT_HEIGHT);
-  FArcStartAngleEdit.SetBounds(12, 158, ColumnWidth, EDIT_HEIGHT);
-  FArcEndAngleEdit.SetBounds((ClientWidth div 2) + 4, 158, ColumnWidth,
+  FArcStartAngleEdit.SetBounds(12, 158 + SectionOffset, ColumnWidth,
     EDIT_HEIGHT);
-  FColorEdit.SetBounds(12, 158, Max(ClientWidth - 66, 48), EDIT_HEIGHT);
-  FStrokeColorEdit.SetBounds(12, 207, Max(ClientWidth - 66, 48), EDIT_HEIGHT);
-  FStrokeWidthEdit.SetBounds(12, 256, ColumnWidth, EDIT_HEIGHT);
-  FMifStrokeStyleCombo.SetBounds((ClientWidth div 2) + 4, 256, ColumnWidth,
+  FArcEndAngleEdit.SetBounds((ClientWidth div 2) + 4,
+    158 + SectionOffset, ColumnWidth, EDIT_HEIGHT);
+  FColorEdit.SetBounds(12, 158 + SectionOffset,
+    Max(ClientWidth - 66, 48), EDIT_HEIGHT);
+  FStrokeColorEdit.SetBounds(12, 207 + SectionOffset,
+    Max(ClientWidth - 66, 48), EDIT_HEIGHT);
+  FStrokeWidthEdit.SetBounds(12, 256 + SectionOffset + ColorOffset,
+    ColumnWidth,
     EDIT_HEIGHT);
-  FOpacityEdit.SetBounds(12, 305, Max(ClientWidth - 24, 48), EDIT_HEIGHT);
+  FMifStrokeStyleCombo.SetBounds((ClientWidth div 2) + 4,
+    256 + SectionOffset + ColorOffset, ColumnWidth, EDIT_HEIGHT);
+  FOpacityEdit.SetBounds(12, 305 + SectionOffset + ColorOffset,
+    Max(ClientWidth - 24, 48), EDIT_HEIGHT);
   ButtonWidth := Max((ClientWidth - 40) div 3, 32);
-  FPathLineCapButtons[vlcSquare].SetBounds(12, 354, ButtonWidth, 30);
-  FPathLineCapButtons[vlcRound].SetBounds(16 + ButtonWidth, 354,
+  FPathLineCapButtons[vlcSquare].SetBounds(12,
+    354 + SectionOffset + ColorOffset + OpacityOffset,
     ButtonWidth, 30);
-  FPathLineCapButtons[vlcTriangle].SetBounds(20 + ButtonWidth * 2, 354,
+  FPathLineCapButtons[vlcRound].SetBounds(16 + ButtonWidth,
+    354 + SectionOffset + ColorOffset + OpacityOffset,
     ButtonWidth, 30);
+  FPathLineCapButtons[vlcTriangle].SetBounds(20 + ButtonWidth * 2,
+    354 + SectionOffset + ColorOffset + OpacityOffset, ButtonWidth, 30);
+end;
+
+procedure TVectArtObjectPropertiesControl.SetColorControlsVisible(
+  Value: Boolean);
+begin
+  if FColorControlsVisible = Value then
+    Exit;
+  FColorControlsVisible := Value;
+  RefreshFromDocument;
+  Resize;
+  Invalidate;
 end;
 
 procedure TVectArtObjectPropertiesControl.SetDocument(
@@ -1440,6 +1539,31 @@ begin
     Exit;
   FDocument := Value;
   RefreshFromDocument;
+end;
+
+procedure TVectArtObjectPropertiesControl.SetGeometryControlsVisible(
+  Value: Boolean);
+begin
+  if FGeometryControlsVisible = Value then
+    Exit;
+  FGeometryControlsVisible := Value;
+  FXEdit.Visible := Value;
+  FYEdit.Visible := Value;
+  FWidthEdit.Visible := Value;
+  FHeightEdit.Visible := Value;
+  Resize;
+  Invalidate;
+end;
+
+procedure TVectArtObjectPropertiesControl.SetOpacityControlsVisible(
+  Value: Boolean);
+begin
+  if FOpacityControlsVisible = Value then
+    Exit;
+  FOpacityControlsVisible := Value;
+  RefreshFromDocument;
+  Resize;
+  Invalidate;
 end;
 
 procedure TVectArtObjectPropertiesControl.SetEditorsEnabled(Value: Boolean);
@@ -1472,9 +1596,20 @@ end;
 procedure TVectArtObjectPropertiesControl.SetStrokeControlsVisible(
   Value: Boolean);
 begin
-  FStrokeColorEdit.Visible := Value;
-  FStrokeWidthEdit.Visible := Value;
-  FMifStrokeStyleCombo.Visible := Value;
+  FStrokeColorEdit.Visible := Value and FColorControlsVisible;
+  FStrokeWidthEdit.Visible := Value and FStrokePropertyControlsVisible;
+  FMifStrokeStyleCombo.Visible := Value and FStrokePropertyControlsVisible;
+end;
+
+procedure TVectArtObjectPropertiesControl.SetStrokePropertyControlsVisible(
+  Value: Boolean);
+begin
+  if FStrokePropertyControlsVisible = Value then
+    Exit;
+  FStrokePropertyControlsVisible := Value;
+  RefreshFromDocument;
+  Resize;
+  Invalidate;
 end;
 
 end.
