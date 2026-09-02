@@ -31,6 +31,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
+        <DCC_UnitSearchPath>Lib\VerticalScrollBar;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <GenDll>true</GenDll>
         <SanitizedProjectName>SYNC_ScreenLayout_Filter</SanitizedProjectName>
     </PropertyGroup>
@@ -57,6 +58,7 @@
         <DCCReference Include="Lib\ShortcutAction\ShortcutAction.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas"/>
+        <DCCReference Include="Lib\VerticalScrollBar\VerticalScrollBarControl.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutMainForm.pas">
             <Form>MainForm</Form>
         </DCCReference>

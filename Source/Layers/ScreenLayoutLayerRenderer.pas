@@ -21,9 +21,11 @@ type
     FImageThumbnails: TObjectDictionary<TVectArtImageLayer,
       TVectArtImageThumbnailCacheEntry>;
     FOpenGroup: TScreenLayoutGroupLayer;
+    FLastSelectedIndex: Integer;
     FScrollOffset: Integer;
     FThumbnailRevision: Int64;
     procedure EnsureSelectionVisible(const Bounds: TRect);
+    procedure ClampScrollOffset(const Bounds: TRect);
     function ImageDataSignature(const Data: TBytes): UInt64;
     function ImageThumbnail(ImageLayer: TVectArtImageLayer): TPngImage;
     procedure SetDocument(const Value: TVectArtDocument);
@@ -56,11 +58,15 @@ type
       const Bounds: TRect); overload;
     function LayerIndexAt(const Bounds: TRect; Y: Integer): Integer;
     function LayerItemRect(const Bounds: TRect; Index: Integer): TRect;
+    function MaximumScrollOffset(const Bounds: TRect): Integer;
+    function ScrollStep: Integer;
+    procedure SetScrollOffset(Value: Integer);
     function LockButtonRect(const ItemRect: TRect): TRect;
     function VisibilityButtonRect(const ItemRect: TRect): TRect;
     property Document: TVectArtDocument read FDocument write SetDocument;
     property OpenGroup: TScreenLayoutGroupLayer read FOpenGroup
       write FOpenGroup;
+    property ScrollOffset: Integer read FScrollOffset write SetScrollOffset;
   end;
 
 function VectArtLineThumbnailStrokeWidth(StrokeWidth: Single): Integer;
@@ -320,6 +326,7 @@ begin
   FImageThumbnails := TObjectDictionary<TVectArtImageLayer,
     TVectArtImageThumbnailCacheEntry>.Create([doOwnsValues]);
   FThumbnailRevision := -1;
+  FLastSelectedIndex := -2;
 end;
 
 destructor TVectArtLayerRenderer.Destroy;
@@ -334,7 +341,6 @@ var
   ContentBottom: Integer;
   ContentTop: Integer;
   ItemRect: TRect;
-  LastItemTop: Integer;
   MaximumOffset: Integer;
   SelectedIndex: Integer;
 begin
@@ -345,10 +351,7 @@ begin
   end;
   ContentTop := Bounds.Top + LAYER_LIST_PADDING;
   ContentBottom := Bounds.Bottom - LAYER_LIST_PADDING;
-  LastItemTop := Bounds.Bottom - LAYER_LIST_PADDING -
-    (FDocument.LayerCount - 2) * (LAYER_ROW_HEIGHT + LAYER_GAP) -
-    LAYER_ROW_HEIGHT;
-  MaximumOffset := Max(ContentTop - LastItemTop, 0);
+  MaximumOffset := MaximumScrollOffset(Bounds);
   FScrollOffset := EnsureRange(FScrollOffset, 0, MaximumOffset);
   SelectedIndex := FDocument.SelectedIndex;
   if SelectedIndex <= 0 then
@@ -359,6 +362,12 @@ begin
   else if ItemRect.Bottom > ContentBottom then
     Dec(FScrollOffset, ItemRect.Bottom - ContentBottom);
   FScrollOffset := EnsureRange(FScrollOffset, 0, MaximumOffset);
+end;
+
+procedure TVectArtLayerRenderer.ClampScrollOffset(const Bounds: TRect);
+begin
+  FScrollOffset := EnsureRange(FScrollOffset, 0,
+    MaximumScrollOffset(Bounds));
 end;
 
 destructor TVectArtImageThumbnailCacheEntry.Destroy;
@@ -1438,6 +1447,7 @@ begin
   FDocument := Value;
   FImageThumbnails.Clear;
   FScrollOffset := 0;
+  FLastSelectedIndex := -2;
   FThumbnailRevision := -1;
 end;
 
@@ -1483,7 +1493,13 @@ var
   ItemRect: TRect;
 begin
   SyncThumbnailCache;
-  EnsureSelectionVisible(Bounds);
+  ClampScrollOffset(Bounds);
+  if (FDocument <> nil) and
+    (FLastSelectedIndex <> FDocument.SelectedIndex) then
+  begin
+    EnsureSelectionVisible(Bounds);
+    FLastSelectedIndex := FDocument.SelectedIndex;
+  end;
   ACanvas.Brush.Style := bsSolid;
   ACanvas.Brush.Color := COLOR_LIST_BACKGROUND;
   ACanvas.FillRect(Bounds);
@@ -1508,7 +1524,13 @@ var
   ItemRect: TRect;
 begin
   SyncThumbnailCache;
-  EnsureSelectionVisible(Bounds);
+  ClampScrollOffset(Bounds);
+  if (FDocument <> nil) and
+    (FLastSelectedIndex <> FDocument.SelectedIndex) then
+  begin
+    EnsureSelectionVisible(Bounds);
+    FLastSelectedIndex := FDocument.SelectedIndex;
+  end;
   ACanvas.Brush.Style := bsSolid;
   ACanvas.Brush.Color := COLOR_LIST_BACKGROUND;
   ACanvas.FillRect(Bounds);
@@ -1574,6 +1596,32 @@ begin
   Result := Rect(Bounds.Left + LAYER_LIST_PADDING,
     ItemBottom - LAYER_ROW_HEIGHT,
     Bounds.Right - LAYER_LIST_PADDING, ItemBottom);
+end;
+
+function TVectArtLayerRenderer.MaximumScrollOffset(
+  const Bounds: TRect): Integer;
+var
+  ContentHeight: Integer;
+  ItemCount: Integer;
+begin
+  if FDocument = nil then
+    Exit(0);
+  ItemCount := Max(FDocument.LayerCount - 1, 0);
+  if ItemCount = 0 then
+    Exit(0);
+  ContentHeight := ItemCount * LAYER_ROW_HEIGHT +
+    Max(ItemCount - 1, 0) * LAYER_GAP + 2 * LAYER_LIST_PADDING;
+  Result := Max(ContentHeight - Bounds.Height, 0);
+end;
+
+function TVectArtLayerRenderer.ScrollStep: Integer;
+begin
+  Result := LAYER_ROW_HEIGHT + LAYER_GAP;
+end;
+
+procedure TVectArtLayerRenderer.SetScrollOffset(Value: Integer);
+begin
+  FScrollOffset := Max(Value, 0);
 end;
 
 function TVectArtLayerRenderer.LockButtonRect(

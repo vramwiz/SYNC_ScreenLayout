@@ -6,7 +6,7 @@ interface
 uses
   System.Classes, System.Types, Vcl.Controls, Vcl.Direct2D, ScreenLayoutDocument,
   ScreenLayoutEditCommands, ScreenLayoutEditHistory, ScreenLayoutEditorState,
-  ScreenLayoutLayerRenderer;
+  ScreenLayoutLayerRenderer, VerticalScrollBarControl;
 
 type
   TVectArtLayerListControl = class(TCustomControl)
@@ -21,16 +21,25 @@ type
     FDragTargetIndex: Integer;
     FRenderer: TVectArtLayerRenderer;
     FSelectionAnchorIndex: Integer;
+    FScrollBar: TVerticalScrollBarControl;
+    FUpdatingScrollBar: Boolean;
+    function LayerBounds: TRect;
+    function ScrollBarWidth: Integer;
+    procedure ScrollBarChanged(Sender: TObject);
+    procedure UpdateScrollBar;
     procedure PaintDirect2D;
     procedure PaintGDI;
     procedure SetDocument(const Value: TVectArtDocument);
   protected
+    function DoMouseWheel(Shift: TShiftState; WheelDelta: Integer;
+      MousePos: TPoint): Boolean; override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState;
       X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState;
       X, Y: Integer); override;
     procedure Paint; override;
+    procedure Resize; override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -44,12 +53,15 @@ type
 implementation
 
 uses
-  System.Math, Vcl.Graphics, ScreenLayoutLayerStructureCommands;
+  System.Math, Winapi.Windows, Vcl.Graphics,
+  ScreenLayoutLayerStructureCommands;
 
 const
   COLOR_LIST_BACKGROUND = TColor($001A1A1A);
   COLOR_DROP_TARGET = TColor($00D69C4A);
   LAYER_DRAG_THRESHOLD = 5;
+  LAYER_SCROLL_BAR_WIDTH = 14;
+  LAYER_WHEEL_ROWS = 3;
 
 constructor TVectArtLayerListControl.Create(AOwner: TComponent);
 begin
@@ -60,9 +72,45 @@ begin
   TabStop := True;
   FDirect2DEnabled := TDirect2DCanvas.Supported;
   FRenderer := TVectArtLayerRenderer.Create;
+  FScrollBar := TVerticalScrollBarControl.Create(Self);
+  FScrollBar.Parent := Self;
+  FScrollBar.Visible := False;
+  FScrollBar.OnChange := ScrollBarChanged;
   FSelectionAnchorIndex := -1;
   FDragCandidateIndex := -1;
   FDragTargetIndex := -1;
+end;
+
+function TVectArtLayerListControl.DoMouseWheel(Shift: TShiftState;
+  WheelDelta: Integer; MousePos: TPoint): Boolean;
+var
+  Delta: Integer;
+begin
+  UpdateScrollBar;
+  Result := FScrollBar.Visible and (WheelDelta <> 0);
+  if Result then
+  begin
+    Delta := MulDiv(WheelDelta,
+      FRenderer.ScrollStep * LAYER_WHEEL_ROWS, WHEEL_DELTA);
+    FRenderer.ScrollOffset := FRenderer.ScrollOffset + Delta;
+    UpdateScrollBar;
+    Invalidate;
+  end
+  else
+    Result := inherited DoMouseWheel(Shift, WheelDelta, MousePos);
+end;
+
+function TVectArtLayerListControl.LayerBounds: TRect;
+begin
+  Result := ClientRect;
+  if (FScrollBar <> nil) and FScrollBar.Visible then
+    Result.Right := Max(Result.Left,
+      Result.Right - FScrollBar.Width - 1);
+end;
+
+function TVectArtLayerListControl.ScrollBarWidth: Integer;
+begin
+  Result := MulDiv(LAYER_SCROLL_BAR_WIDTH, CurrentPPI, 96);
 end;
 
 destructor TVectArtLayerListControl.Destroy;
@@ -83,10 +131,10 @@ begin
   begin
     if CanFocus then
       SetFocus;
-    Index := FRenderer.LayerIndexAt(ClientRect, Y);
+    Index := FRenderer.LayerIndexAt(LayerBounds, Y);
     if Index >= 0 then
     begin
-      ItemRect := FRenderer.LayerItemRect(ClientRect, Index);
+      ItemRect := FRenderer.LayerItemRect(LayerBounds, Index);
       Layer := FDocument[Index];
       if (ssDouble in Shift) and (Layer is TScreenLayoutGroupLayer) and
         (FEditorState <> nil) then
@@ -165,7 +213,7 @@ begin
       FDraggingLayer := True;
     if FDraggingLayer then
     begin
-      Index := FRenderer.LayerIndexAt(ClientRect, Y);
+      Index := FRenderer.LayerIndexAt(LayerBounds, Y);
       if Index > 0 then
         FDragTargetIndex := Index;
       Cursor := crSizeAll;
@@ -213,6 +261,7 @@ end;
 
 procedure TVectArtLayerListControl.Paint;
 begin
+  UpdateScrollBar;
   if FEditorState <> nil then
     FRenderer.OpenGroup := FEditorState.RootOpenGroup
   else
@@ -220,11 +269,13 @@ begin
   if FDirect2DEnabled then
     try
       PaintDirect2D;
+      UpdateScrollBar;
       Exit;
     except
       FDirect2DEnabled := False;
     end;
   PaintGDI;
+  UpdateScrollBar;
 end;
 
 procedure TVectArtLayerListControl.PaintDirect2D;
@@ -233,15 +284,15 @@ var
   IndicatorY: Integer;
   TargetRect: TRect;
 begin
-  Direct2DCanvas := TDirect2DCanvas.Create(Canvas, ClientRect);
+  Direct2DCanvas := TDirect2DCanvas.Create(Canvas, LayerBounds);
   try
     Direct2DCanvas.BeginDraw;
     try
-      FRenderer.DrawLayers(Direct2DCanvas, ClientRect);
+      FRenderer.DrawLayers(Direct2DCanvas, LayerBounds);
       if FDraggingLayer and (FDragTargetIndex > 0) and
         (FDragTargetIndex <> FDragCandidateIndex) then
       begin
-        TargetRect := FRenderer.LayerItemRect(ClientRect,
+        TargetRect := FRenderer.LayerItemRect(LayerBounds,
           FDragTargetIndex);
         if FDragTargetIndex > FDragCandidateIndex then
           IndicatorY := TargetRect.Top
@@ -266,11 +317,11 @@ var
   IndicatorY: Integer;
   TargetRect: TRect;
 begin
-  FRenderer.DrawLayers(Canvas, ClientRect);
+  FRenderer.DrawLayers(Canvas, LayerBounds);
   if FDraggingLayer and (FDragTargetIndex > 0) and
     (FDragTargetIndex <> FDragCandidateIndex) then
   begin
-    TargetRect := FRenderer.LayerItemRect(ClientRect, FDragTargetIndex);
+    TargetRect := FRenderer.LayerItemRect(LayerBounds, FDragTargetIndex);
     if FDragTargetIndex > FDragCandidateIndex then
       IndicatorY := TargetRect.Top
     else
@@ -281,6 +332,25 @@ begin
     Canvas.LineTo(TargetRect.Right, IndicatorY);
     Canvas.Pen.Width := 1;
   end;
+end;
+
+procedure TVectArtLayerListControl.Resize;
+begin
+  inherited;
+  if FScrollBar <> nil then
+  begin
+    FScrollBar.SetBounds(Max(ClientWidth - ScrollBarWidth, 0), 0,
+      ScrollBarWidth, ClientHeight);
+    UpdateScrollBar;
+  end;
+end;
+
+procedure TVectArtLayerListControl.ScrollBarChanged(Sender: TObject);
+begin
+  if FUpdatingScrollBar then
+    Exit;
+  FRenderer.ScrollOffset := FScrollBar.Maximum - FScrollBar.Position;
+  Invalidate;
 end;
 
 procedure TVectArtLayerListControl.SetDocument(
@@ -294,7 +364,36 @@ begin
   FDragTargetIndex := -1;
   FDraggingLayer := False;
   FRenderer.Document := Value;
+  UpdateScrollBar;
   Invalidate;
+end;
+
+procedure TVectArtLayerListControl.UpdateScrollBar;
+var
+  Bounds: TRect;
+  MaximumOffset: Integer;
+begin
+  if (FScrollBar = nil) or (FRenderer = nil) then
+    Exit;
+  Bounds := ClientRect;
+  MaximumOffset := FRenderer.MaximumScrollOffset(Bounds);
+  FUpdatingScrollBar := True;
+  try
+    FScrollBar.Visible := MaximumOffset > 0;
+    FScrollBar.SetBounds(Max(ClientWidth - ScrollBarWidth, 0), 0,
+      ScrollBarWidth, ClientHeight);
+    Bounds := LayerBounds;
+    MaximumOffset := FRenderer.MaximumScrollOffset(Bounds);
+    FRenderer.ScrollOffset := EnsureRange(FRenderer.ScrollOffset, 0,
+      MaximumOffset);
+    FScrollBar.SmallChange := FRenderer.ScrollStep;
+    FScrollBar.LargeChange := Max(Bounds.Height -
+      FRenderer.ScrollStep, FRenderer.ScrollStep);
+    FScrollBar.SetRange(MaximumOffset, Max(Bounds.Height, 1));
+    FScrollBar.Position := MaximumOffset - FRenderer.ScrollOffset;
+  finally
+    FUpdatingScrollBar := False;
+  end;
 end;
 
 end.
