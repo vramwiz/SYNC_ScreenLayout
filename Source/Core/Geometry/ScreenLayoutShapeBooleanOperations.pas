@@ -11,7 +11,7 @@ type
   TScreenLayoutShapeBooleanOperation = (slsboUnion, slsboSubtract,
     slsboIntersect, slsboXor);
 
-// 未ロックのShape／Rectangle／角丸Rectangle／楕円が2個以上選択されている場合にTrueを返す。
+// 未ロックのShape／Rectangle／角丸Rectangle／楕円／楕円弧図形が2個以上選択されている場合にTrueを返す。
 function CanExecuteScreenLayoutShapeBoolean(
   Document: TVectArtDocument): Boolean;
 // 減算はアクティブ図形、それ以外は最背面図形を基準に選択図形を結果Shapeへ置換する。
@@ -91,7 +91,8 @@ begin
   for Index in SelectedIndices do
     if (Index <= 0) or (Index >= Document.LayerCount) or
       not ((Document[Index] is TScreenLayoutShapeLayer) or
-        (Document[Index] is TVectArtRectangleLayer)) or
+        ((Document[Index] is TVectArtRectangleLayer) and
+          not (Document[Index] is TScreenLayoutTextLayer))) or
       Document[Index].Locked then
       Exit;
   Result := True;

@@ -68,6 +68,7 @@
         <DCCReference Include="Source\Core\Model\ScreenLayoutDocument.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutEllipseGeometry.pas"/>
+        <DCCReference Include="Source\Core\Geometry\ScreenLayoutTextGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutPathOperations.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutShapeOperations.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutShapeBooleanGeometry.pas"/>
@@ -79,6 +80,7 @@
         <DCCReference Include="Source\Core\Commands\ScreenLayoutEditCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutShapeEditCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutShapeBooleanCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\ScreenLayoutTextCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutLayerStructureCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutLayerBatchCommands.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutEditHistory.pas"/>
@@ -92,6 +94,7 @@
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutShapeInteraction.pas"/>
         <DCCReference Include="Source\Editor\Creation\ScreenLayoutShapeCreation.pas"/>
         <DCCReference Include="Source\Editor\Creation\ScreenLayoutLayerNaming.pas"/>
+        <DCCReference Include="Source\Editor\Creation\ScreenLayoutImageImport.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutKeyboardMovement.pas"/>
         <DCCReference Include="Source\Editor\ScreenLayoutEditorWorkspaceFrame.pas">
             <Form>EditorWorkspaceFrame</Form>

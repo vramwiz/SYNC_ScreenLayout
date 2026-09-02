@@ -98,7 +98,7 @@ type
     procedure EnableStandaloneFileActions;
     // 外部ホストが編集メニュー内のキャンバス設定項目を表示するか切り替える。
     procedure SetCanvasSettingsVisible(const Value: Boolean);
-    // 外部ホストがファイルドロップを確認し、ドロップ名をタイトルへ一時表示する。
+    // ウィンドウへドロップされた画像ファイルの配置を有効化する。
     procedure SetFileDropCaptionEnabled(const Value: Boolean);
     // プラグインホストが編集中だけ表示する参照背景を設定する。
     procedure SetReferenceBackgroundRgba(const Pixels: TBytes;
@@ -113,10 +113,11 @@ var
 implementation
 
 uses
-  System.IniFiles, System.IOUtils, System.Math,
+  System.IniFiles, System.IOUtils, System.Math, System.Types,
   TextRendererSkiaBootstrap, TextRendererSkiaRuntime,
   ScreenLayoutCanvasSettingsDialog,
-  ScreenLayoutDocumentJson, ScreenLayoutKeyboardMovement,
+  ScreenLayoutDocumentJson, ScreenLayoutImageImport,
+  ScreenLayoutKeyboardMovement,
   Vcl.Dialogs, Winapi.Dwmapi;
 
 {$R *.dfm}
@@ -297,6 +298,7 @@ end;
 
 procedure TMainForm.EnableStandaloneFileActions;
 begin
+  SetFileDropCaptionEnabled(True);
   if FFileMenu <> nil then
     Exit;
   FEditActionsUI.Menu.Button.Left := 56;
@@ -396,6 +398,10 @@ begin
       '): click at least three vertices, then click ' +
       'the first point or double-click/right-click to close   Canvas: ' +
       CanvasSize
+  else if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetText) then
+    lblStatus.Caption := 'Text: drag an input guide, type, click outside to ' +
+      'finish   Canvas: ' + CanvasSize
   else
     lblStatus.Caption := 'Ready   Tool: Select   Canvas: ' + CanvasSize;
 end;
@@ -653,6 +659,12 @@ begin
     procedure
     begin
       ActivateToolShortcut(vetShape);
+    end,
+    ToolShortcutEnabled);
+  FShortcuts.Add(Ord('T'), [],
+    procedure
+    begin
+      ActivateToolShortcut(vetText);
     end,
     ToolShortcutEnabled);
   FShortcuts.Add(Ord('V'), [],
@@ -916,19 +928,55 @@ end;
 
 procedure TMainForm.WMDropFiles(var Message: TWMDropFiles);
 var
-  DroppedFileName: string;
+  CanvasClientPoint: TPoint;
+  DropPoint: TPoint;
+  DropScreenPoint: TPoint;
+  DroppedFileNames: TArray<string>;
+  ErrorMessage: string;
+  FileCount: UINT;
+  FileIndex: UINT;
   FileNameLength: UINT;
+  ImportedCount: Integer;
+  LogicalDropPoint: TPointF;
 begin
   Message.Result := 0;
   try
-    FileNameLength := DragQueryFile(Message.Drop, 0, nil, 0);
-    if FileNameLength = 0 then
+    FileCount := DragQueryFile(Message.Drop, $FFFFFFFF, nil, 0);
+    if FileCount = 0 then
       Exit;
-    SetLength(DroppedFileName, FileNameLength);
-    DragQueryFile(Message.Drop, 0, PChar(DroppedFileName),
-      FileNameLength + 1);
-    Caption := FFileDropCaptionBase + ' - ' +
-      ExtractFileName(DroppedFileName);
+    SetLength(DroppedFileNames, FileCount);
+    for FileIndex := 0 to FileCount - 1 do
+    begin
+      FileNameLength := DragQueryFile(Message.Drop, FileIndex, nil, 0);
+      SetLength(DroppedFileNames[FileIndex], FileNameLength);
+      DragQueryFile(Message.Drop, FileIndex,
+        PChar(DroppedFileNames[FileIndex]), FileNameLength + 1);
+    end;
+
+    LogicalDropPoint := TPointF.Zero;
+    if DragQueryPoint(Message.Drop, DropPoint) and
+      (FEditorFrame <> nil) and (FEditorFrame.CanvasControl <> nil) then
+    begin
+      DropScreenPoint := ClientToScreen(DropPoint);
+      CanvasClientPoint := FEditorFrame.CanvasControl.ScreenToClient(
+        DropScreenPoint);
+      FEditorFrame.CanvasControl.TryClientPointToLogical(CanvasClientPoint,
+        LogicalDropPoint);
+    end;
+    ImportedCount := ImportScreenLayoutImageFiles(FDocument, FEditHistory,
+      DroppedFileNames, LogicalDropPoint, ErrorMessage);
+    if ImportedCount > 0 then
+    begin
+      FEditorState.CurrentTool := vetSelect;
+      lblStatus.Caption := Format('%d image(s) imported', [ImportedCount]);
+      if ErrorMessage <> '' then
+        lblStatus.Caption := lblStatus.Caption + '  ' + ErrorMessage;
+      if FFileDropCaptionEnabled and (Length(DroppedFileNames) = 1) then
+        Caption := FFileDropCaptionBase + ' - ' +
+          ExtractFileName(DroppedFileNames[0]);
+    end
+    else if ErrorMessage <> '' then
+      lblStatus.Caption := 'Image import failed: ' + ErrorMessage;
   finally
     DragFinish(Message.Drop);
   end;

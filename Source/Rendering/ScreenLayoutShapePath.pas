@@ -18,7 +18,7 @@ function BuildScreenLayoutEllipseLinePath(
 function BuildScreenLayoutArcPath(ArcLayer: TScreenLayoutArcLayer): ISkPath;
 function BuildScreenLayoutEllipseArcShapePath(
   ShapeLayer: TScreenLayoutEllipseArcShapeLayer): ISkPath;
-// Shape、Rectangle、角丸Rectangle、楕円を塗り領域の論理演算Pathへ変換する。
+// Shape、Rectangle、角丸Rectangle、楕円、楕円弧図形を塗り領域の論理演算Pathへ変換する。
 function BuildScreenLayoutBooleanPath(Layer: TVectArtLayer): ISkPath;
 
 implementation
@@ -371,6 +371,10 @@ function BuildScreenLayoutBooleanPath(Layer: TVectArtLayer): ISkPath;
 begin
   if Layer is TScreenLayoutShapeLayer then
     Exit(BuildScreenLayoutShapePath(TScreenLayoutShapeLayer(Layer)));
+  // 楕円弧図形はRectangle系の基底クラスなので、四角形より先に判定する。
+  if Layer is TScreenLayoutEllipseArcShapeLayer then
+    Exit(BuildScreenLayoutEllipseArcShapePath(
+      TScreenLayoutEllipseArcShapeLayer(Layer)));
   if Layer is TScreenLayoutRoundedRectangleLayer then
     Exit(BuildScreenLayoutRoundedRectanglePath(
       TScreenLayoutRoundedRectangleLayer(Layer)));

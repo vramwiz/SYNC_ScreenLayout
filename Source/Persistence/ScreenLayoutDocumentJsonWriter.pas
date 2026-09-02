@@ -57,6 +57,8 @@ var
   Shape: TScreenLayoutShapeLayer;
   ShapeContours: TArray<TScreenLayoutContour>;
   ShapeJson: TJSONObject;
+  TextLayer: TScreenLayoutTextLayer;
+  TextJson: TJSONObject;
   VertexIndex: Integer;
   VertexJson: TJSONObject;
   VerticesJson: TJSONArray;
@@ -84,6 +86,32 @@ begin
     for I := 1 to Document.LayerCount - 1 do
     begin
       Layer := Document.Layers[I];
+      if Layer is TScreenLayoutTextLayer then
+      begin
+        TextLayer := TScreenLayoutTextLayer(Layer);
+        TextJson := TJSONObject.Create;
+        TextJson.AddPair('type', 'text');
+        TextJson.AddPair('name', TextLayer.Name);
+        TextJson.AddPair('text', TextLayer.Text);
+        TextJson.AddPair('fontFamily', TextLayer.FontFamily);
+        TextJson.AddPair('fontSize', TJSONNumber.Create(TextLayer.FontSize));
+        TextJson.AddPair('wrapWidth', TJSONNumber.Create(TextLayer.WrapWidth));
+        TextJson.AddPair('left', TJSONNumber.Create(TextLayer.Bounds.Left));
+        TextJson.AddPair('top', TJSONNumber.Create(TextLayer.Bounds.Top));
+        TextJson.AddPair('right', TJSONNumber.Create(TextLayer.Bounds.Right));
+        TextJson.AddPair('bottom', TJSONNumber.Create(TextLayer.Bounds.Bottom));
+        TextJson.AddPair('rotation',
+          TJSONNumber.Create(TextLayer.RotationDegrees));
+        TextJson.AddPair('textColor',
+          TJSONNumber.Create(Integer(TextLayer.FillColor)));
+        TextJson.AddPair('opacity', TJSONNumber.Create(TextLayer.Opacity));
+        TextJson.AddPair('visible', TJSONBool.Create(TextLayer.Visible));
+        TextJson.AddPair('locked', TJSONBool.Create(TextLayer.Locked));
+        LayersJson.AddElement(TextJson);
+        if I = Document.SelectedIndex then
+          SerializedSelectedIndex := LayersJson.Count;
+        Continue;
+      end;
       if Layer is TVectArtImageLayer then
       begin
         Image := TVectArtImageLayer(Layer);
@@ -490,4 +518,3 @@ begin
 end;
 
 end.
-

@@ -6,7 +6,7 @@ interface
 uses
   System.Classes, ScreenLayoutDocument, ScreenLayoutEditHistory;
 
-// 矢印キーを選択Rectangleまたは楕円弧の移動として処理した場合にTrueを返す。
+// 矢印キーを選択した矩形系・楕円弧・画像の移動として処理した場合にTrueを返す。
 function HandleSelectionNudge(ADocument: TVectArtDocument;
   AEditHistory: TVectArtEditHistory; Key: Word;
   Shift: TShiftState): Boolean;
@@ -25,12 +25,18 @@ function HandleSelectionNudge(ADocument: TVectArtDocument;
   AEditHistory: TVectArtEditHistory; Key: Word;
   Shift: TShiftState): Boolean;
 var
+  Command: TVectArtCompoundCommand;
   Distance: Single;
   DX: Single;
   DY: Single;
   I: Integer;
+  ImageIndex: Integer;
+  ImageIndices: TList<Integer>;
+  ImagePointIndex: Integer;
   Indices: TList<Integer>;
+  NewImagePoints: TArray<TVectArtImagePoints>;
   NewBounds: TArray<TRectF>;
+  OldImagePoints: TArray<TVectArtImagePoints>;
   OldBounds: TArray<TRectF>;
 begin
   Result := False;
@@ -51,6 +57,7 @@ begin
   end;
 
   Indices := TList<Integer>.Create;
+  ImageIndices := TList<Integer>.Create;
   try
     for I := 1 to ADocument.LayerCount - 1 do
       if ADocument.IsLayerSelected(I) then
@@ -61,37 +68,69 @@ begin
         if (ADocument[I] is TScreenLayoutRectangleLineLayer) or
           (ADocument[I] is TVectArtRectangleLayer) or
           (ADocument[I] is TScreenLayoutArcLayer) then
-          Indices.Add(I);
+          Indices.Add(I)
+        else if ADocument[I] is TVectArtImageLayer then
+          ImageIndices.Add(I);
       end;
-    if Indices.Count = 0 then
+    if (Indices.Count = 0) and (ImageIndices.Count = 0) then
       Exit;
 
     SetLength(OldBounds, Indices.Count);
     SetLength(NewBounds, Indices.Count);
-    for I := 0 to Indices.Count - 1 do
-    begin
-      if ADocument[Indices[I]] is TScreenLayoutRectangleLineLayer then
-        OldBounds[I] := TScreenLayoutRectangleLineLayer(
-          ADocument[Indices[I]]).Bounds
-      else if ADocument[Indices[I]] is TScreenLayoutArcLayer then
-        OldBounds[I] := TScreenLayoutArcLayer(
-          ADocument[Indices[I]]).Bounds
-      else
-        OldBounds[I] := TVectArtRectangleLayer(
-          ADocument[Indices[I]]).Bounds;
-      NewBounds[I] := OldBounds[I];
-      NewBounds[I].Offset(DX, DY);
-      if ADocument[Indices[I]] is TScreenLayoutRectangleLineLayer then
-        ADocument.SetRectangleLineBounds(Indices[I], NewBounds[I])
-      else if ADocument[Indices[I]] is TScreenLayoutArcLayer then
-        ADocument.SetArcBounds(Indices[I], NewBounds[I])
-      else
-        ADocument.SetRectangleBounds(Indices[I], NewBounds[I]);
+    SetLength(OldImagePoints, ImageIndices.Count);
+    SetLength(NewImagePoints, ImageIndices.Count);
+    Command := TVectArtCompoundCommand.Create;
+    try
+      ADocument.BeginUpdate;
+      try
+        for I := 0 to Indices.Count - 1 do
+        begin
+          if ADocument[Indices[I]] is TScreenLayoutRectangleLineLayer then
+            OldBounds[I] := TScreenLayoutRectangleLineLayer(
+              ADocument[Indices[I]]).Bounds
+          else if ADocument[Indices[I]] is TScreenLayoutArcLayer then
+            OldBounds[I] := TScreenLayoutArcLayer(
+              ADocument[Indices[I]]).Bounds
+          else
+            OldBounds[I] := TVectArtRectangleLayer(
+              ADocument[Indices[I]]).Bounds;
+          NewBounds[I] := OldBounds[I];
+          NewBounds[I].Offset(DX, DY);
+          if ADocument[Indices[I]] is TScreenLayoutRectangleLineLayer then
+            ADocument.SetRectangleLineBounds(Indices[I], NewBounds[I])
+          else if ADocument[Indices[I]] is TScreenLayoutArcLayer then
+            ADocument.SetArcBounds(Indices[I], NewBounds[I])
+          else
+            ADocument.SetRectangleBounds(Indices[I], NewBounds[I]);
+        end;
+        for ImageIndex := 0 to ImageIndices.Count - 1 do
+        begin
+          OldImagePoints[ImageIndex] := TVectArtImageLayer(
+            ADocument[ImageIndices[ImageIndex]]).Points;
+          NewImagePoints[ImageIndex] := OldImagePoints[ImageIndex];
+          for ImagePointIndex := 0 to High(NewImagePoints[ImageIndex]) do
+            NewImagePoints[ImageIndex][ImagePointIndex].Offset(DX, DY);
+          ADocument.SetImagePoints(ImageIndices[ImageIndex],
+            NewImagePoints[ImageIndex]);
+        end;
+      finally
+        ADocument.EndUpdate;
+      end;
+      if Indices.Count > 0 then
+        Command.Add(TVectArtBoundsCommand.Create(ADocument,
+          Indices.ToArray, OldBounds, NewBounds));
+      for ImageIndex := 0 to ImageIndices.Count - 1 do
+        Command.Add(TVectArtImagePointsCommand.Create(ADocument,
+          ImageIndices[ImageIndex], OldImagePoints[ImageIndex],
+          NewImagePoints[ImageIndex]));
+      AEditHistory.AddApplied(Command);
+      Command := nil;
+      Result := True;
+    finally
+      Command.Free;
     end;
-    AEditHistory.AddApplied(TVectArtBoundsCommand.Create(ADocument,
-      Indices.ToArray, OldBounds, NewBounds));
-    Result := True;
   finally
+    ImageIndices.Free;
     Indices.Free;
   end;
 end;

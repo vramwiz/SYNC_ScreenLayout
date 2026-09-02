@@ -15,7 +15,7 @@ implementation
 uses
   System.Classes, System.Generics.Collections, System.SysUtils, System.Types,
   ScreenLayoutEditCommands, ScreenLayoutLayerBatchCommands,
-  ScreenLayoutLayerStructureCommands;
+  ScreenLayoutLayerStructureCommands, ScreenLayoutTextCommands;
 
 const
   DUPLICATE_OFFSET = 24;
@@ -32,6 +32,7 @@ var
   HasRectangleLines: Boolean;
   HasRoundedRectangles: Boolean;
   HasRoundedRectangleLines: Boolean;
+  HasTexts: Boolean;
   I: Integer;
 begin
   Result := (ADocument <> nil) and (ADocument.SelectionCount > 0);
@@ -47,6 +48,7 @@ begin
   HasRectangleLines := False;
   HasRoundedRectangles := False;
   HasRoundedRectangleLines := False;
+  HasTexts := False;
   for I := 0 to ADocument.LayerCount - 1 do
     if ADocument.IsLayerSelected(I) and
       ((I = 0) or ADocument[I].Locked) then
@@ -67,6 +69,8 @@ begin
         HasEllipses := True
       else if ADocument[I] is TScreenLayoutRoundedRectangleLayer then
         HasRoundedRectangles := True
+      else if ADocument[I] is TScreenLayoutTextLayer then
+        HasTexts := True
       else if ADocument[I] is TVectArtRectangleLayer then
         HasRectangles := True
       else if ADocument[I] is TVectArtImageLayer then
@@ -79,7 +83,7 @@ begin
         Ord(HasRoundedRectangleLines) +
         Ord(HasRectangleLines) + Ord(HasRectangles) +
         Ord(HasRoundedRectangles) + Ord(HasEllipses) +
-        Ord(HasArcs) + Ord(HasImages) + Ord(HasPaths) > 1 then
+        Ord(HasArcs) + Ord(HasImages) + Ord(HasPaths) + Ord(HasTexts) > 1 then
         Exit(False);
     end;
 end;
@@ -149,6 +153,10 @@ var
   RoundedLineLayer: TScreenLayoutRoundedRectangleLineLayer;
   RoundedLineValue: TScreenLayoutRoundedRectangleLineData;
   StartIndex: Integer;
+  TextData: TArray<TScreenLayoutTextData>;
+  TextDataList: TList<TScreenLayoutTextData>;
+  TextLayer: TScreenLayoutTextLayer;
+  TextValue: TScreenLayoutTextData;
   UsedNames: TStringList;
 begin
   if not CanDuplicateSelectedLayers(ADocument) then
@@ -164,6 +172,7 @@ begin
   RoundedDataList := TList<TScreenLayoutRoundedRectangleData>.Create;
   RectangleLineDataList := TList<TScreenLayoutRectangleLineData>.Create;
   RoundedLineDataList := TList<TScreenLayoutRoundedRectangleLineData>.Create;
+  TextDataList := TList<TScreenLayoutTextData>.Create;
   NewIndices := TList<Integer>.Create;
   UsedNames := TStringList.Create;
   try
@@ -281,6 +290,15 @@ begin
           RoundedValue.RotationDegrees := RoundedLayer.RotationDegrees;
           RoundedValue.Visible := RoundedLayer.Visible;
           RoundedDataList.Add(RoundedValue);
+        end
+        else if ADocument[I] is TScreenLayoutTextLayer then
+        begin
+          TextLayer := TScreenLayoutTextLayer(ADocument[I]);
+          TextValue := CaptureScreenLayoutTextData(TextLayer);
+          TextValue.Bounds.Offset(DUPLICATE_OFFSET, DUPLICATE_OFFSET);
+          TextValue.Locked := False;
+          TextValue.Name := CopyName(TextLayer.Name, UsedNames);
+          TextDataList.Add(TextValue);
         end
         else if ADocument[I] is TVectArtImageLayer then
         begin
@@ -420,6 +438,15 @@ begin
         NewIndices.Add(Index);
       end;
     end
+    else if TextDataList.Count > 0 then
+    begin
+      TextData := TextDataList.ToArray;
+      for I := 0 to High(TextData) do
+      begin
+        Index := ADocument.InsertText(ADocument.LayerCount, TextData[I]);
+        NewIndices.Add(Index);
+      end;
+    end
     else
     begin
       Data := DataList.ToArray;
@@ -503,6 +530,15 @@ begin
       else if ImageDataList.Count > 0 then
         AEditHistory.AddApplied(TVectArtInsertImagesCommand.Create(
           ADocument, StartIndex, ImageData, BeforeSelection, AfterSelection))
+      else if TextDataList.Count > 0 then
+      begin
+        CompoundCommand := TVectArtCompoundCommand.Create;
+        for I := 0 to High(TextData) do
+          CompoundCommand.Add(TScreenLayoutInsertTextCommand.Create(
+            ADocument, StartIndex + I, TextData[I], BeforeSelection,
+            AfterSelection));
+        AEditHistory.AddApplied(CompoundCommand);
+      end
       else
         AEditHistory.AddApplied(TVectArtInsertRectanglesCommand.Create(
           ADocument, StartIndex, Data, BeforeSelection, AfterSelection));
@@ -518,6 +554,7 @@ begin
     RoundedDataList.Free;
     PathDataList.Free;
     ImageDataList.Free;
+    TextDataList.Free;
     DataList.Free;
   end;
 end;

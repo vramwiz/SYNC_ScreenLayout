@@ -10,7 +10,7 @@ type
   TVectArtEditorTool = (vetSelect, vetRectangleLine, vetRectangle,
     vetRoundedRectangleLine, vetRoundedRectangle,
     vetEllipseLine, vetEllipse, vetArc, vetArcShape, vetLine, vetPath,
-    vetShape);
+    vetShape, vetText);
 
   TVectArtEditorState = class
   private

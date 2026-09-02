@@ -8,11 +8,13 @@ uses
 
 type
   TScreenLayoutShapeBooleanOriginalKind = (slsbokRectangle,
-    slsbokRoundedRectangle, slsbokEllipse, slsbokShape);
+    slsbokRoundedRectangle, slsbokEllipse, slsbokEllipseArcShape,
+    slsbokShape);
 
   TScreenLayoutShapeBooleanOriginal = record
     Kind: TScreenLayoutShapeBooleanOriginalKind;             // Undoで復元するレイヤー型。
     EllipseData: TScreenLayoutEllipseData;                   // 楕円だった場合の全属性。
+    EllipseArcShapeData: TScreenLayoutEllipseArcShapeData;   // 楕円弧図形だった場合の全属性。
     RectangleData: TVectArtRectangleData;                    // 四角だった場合の全属性。
     RoundedRectangleData: TScreenLayoutRoundedRectangleData; // 角丸四角だった場合の全属性。
     ShapeData: TScreenLayoutShapeData;                        // Shapeだった場合の全属性と輪郭群。
@@ -58,12 +60,32 @@ end;
 procedure TScreenLayoutShapeBooleanCommand.CaptureOriginal(Index: Integer;
   out Original: TScreenLayoutShapeBooleanOriginal);
 var
+  ArcShapeLayer: TScreenLayoutEllipseArcShapeLayer;
   EllipseLayer: TScreenLayoutEllipseLayer;
   RectangleLayer: TVectArtRectangleLayer;
   RoundedLayer: TScreenLayoutRoundedRectangleLayer;
   ShapeLayer: TScreenLayoutShapeLayer;
 begin
   Original := Default(TScreenLayoutShapeBooleanOriginal);
+  // 楕円弧図形はRectangle系の基底クラスなので、四角形より先に判定する。
+  if FDocument[Index] is TScreenLayoutEllipseArcShapeLayer then
+  begin
+    Original.Kind := slsbokEllipseArcShape;
+    ArcShapeLayer := TScreenLayoutEllipseArcShapeLayer(FDocument[Index]);
+    Original.EllipseArcShapeData.Bounds := ArcShapeLayer.Bounds;
+    Original.EllipseArcShapeData.FillColor := ArcShapeLayer.FillColor;
+    Original.EllipseArcShapeData.Locked := ArcShapeLayer.Locked;
+    Original.EllipseArcShapeData.Name := ArcShapeLayer.Name;
+    Original.EllipseArcShapeData.Opacity := ArcShapeLayer.Opacity;
+    Original.EllipseArcShapeData.RotationDegrees :=
+      ArcShapeLayer.RotationDegrees;
+    Original.EllipseArcShapeData.StartAngleDegrees :=
+      ArcShapeLayer.StartAngleDegrees;
+    Original.EllipseArcShapeData.SweepAngleDegrees :=
+      ArcShapeLayer.SweepAngleDegrees;
+    Original.EllipseArcShapeData.Visible := ArcShapeLayer.Visible;
+    Exit;
+  end;
   if FDocument[Index] is TScreenLayoutEllipseLayer then
   begin
     Original.Kind := slsbokEllipse;
@@ -166,6 +188,7 @@ end;
 
 procedure TScreenLayoutShapeBooleanCommand.RemoveOriginals;
 var
+  EllipseArcShapeData: TScreenLayoutEllipseArcShapeData;
   EllipseData: TScreenLayoutEllipseData;
   I: Integer;
   RectangleData: TVectArtRectangleData;
@@ -182,6 +205,9 @@ begin
           RoundedRectangleData);
       slsbokEllipse:
         FDocument.RemoveEllipse(FOriginalIndices[I], EllipseData);
+      slsbokEllipseArcShape:
+        FDocument.RemoveEllipseArcShape(FOriginalIndices[I],
+          EllipseArcShapeData);
       slsbokShape:
         FDocument.RemoveShape(FOriginalIndices[I], RemovedData);
     end;
@@ -210,6 +236,9 @@ begin
         slsbokEllipse:
           FOriginalIndices[I] := FDocument.InsertEllipse(
             FOriginalIndices[I], FOriginalData[I].EllipseData);
+        slsbokEllipseArcShape:
+          FOriginalIndices[I] := FDocument.InsertEllipseArcShape(
+            FOriginalIndices[I], FOriginalData[I].EllipseArcShapeData);
         slsbokShape:
           FOriginalIndices[I] := FDocument.InsertShape(
             FOriginalIndices[I], FOriginalData[I].ShapeData);

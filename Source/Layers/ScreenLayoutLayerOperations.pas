@@ -38,7 +38,7 @@ uses
   System.Math, System.SysUtils, Vcl.Graphics,
   ScreenLayoutEditCommands,
   ScreenLayoutLayerDuplication,
-  ScreenLayoutLayerStructureCommands;
+  ScreenLayoutLayerStructureCommands, ScreenLayoutTextCommands;
 
 const
   DEFAULT_RECTANGLE_WIDTH = 320;
@@ -130,6 +130,7 @@ var
   PathData: TVectArtPathData;
   RectangleLineData: TScreenLayoutRectangleLineData;
   ShapeData: TScreenLayoutShapeData;
+  TextData: TScreenLayoutTextData;
   I: Integer;
   SelectedIndices: TArray<Integer>;
   SelectionIndex: Integer;
@@ -220,6 +221,16 @@ begin
             Command.Add(TScreenLayoutDeleteRoundedRectangleCommand.Create(
               FDocument, I, RoundedRectangleData, BeforeSelection,
               AfterSelection));
+        end;
+      end
+      else if FDocument[I] is TScreenLayoutTextLayer then
+      begin
+        if FDocument.RemoveText(I, TextData) then
+        begin
+          AfterSelection := FDocument.GetSelectedLayerIndices;
+          if Command <> nil then
+            Command.Add(TScreenLayoutDeleteTextCommand.Create(FDocument, I,
+              TextData, BeforeSelection, AfterSelection));
         end;
       end
       else if FDocument[I] is TVectArtRectangleLayer then

@@ -34,7 +34,7 @@ uses
 
 const
   BUTTON_SIZE = 46;
-  PALETTE_BUTTON_COUNT = 8;
+  PALETTE_BUTTON_COUNT = 9;
   COLOR_BACKGROUND = TColor($00252525);
   COLOR_BUTTON = TColor($002D2D2D);
   COLOR_SELECTED = TColor($0046382B);
@@ -148,8 +148,9 @@ begin
     4: Result := vetRoundedRectangle;
     5: Result := vetEllipse;
     6: Result := vetArcShape;
+    7: Result := vetShape;
   else
-    Result := vetShape;
+    Result := vetText;
   end;
 end;
 
@@ -186,6 +187,7 @@ begin
     Canvas.Brush.Color := COLOR_BUTTON;
   Canvas.FillRect(Bounds);
   Canvas.Pen.Color := COLOR_ICON;
+  Canvas.Font.Color := COLOR_ICON;
   Canvas.Pen.Width := 1;
   Canvas.Brush.Style := bsClear;
   if Tool = vetSelect then
@@ -251,6 +253,16 @@ begin
   else if Tool = vetPath then
     DrawPathKindIcon(Canvas, CenterX, CenterY, False,
       VertexKind)
+  else if Tool = vetText then
+  begin
+    Canvas.Font.Name := 'Segoe UI';
+    Canvas.Font.Height := -25;
+    Canvas.Font.Style := [fsBold];
+    Canvas.Brush.Style := bsClear;
+    Canvas.TextOut(CenterX - Canvas.TextWidth('T') div 2,
+      CenterY - Canvas.TextHeight('T') div 2, 'T');
+    Canvas.Font.Style := [];
+  end
   else
     DrawPathKindIcon(Canvas, CenterX, CenterY, True,
       VertexKind);

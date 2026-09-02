@@ -88,6 +88,7 @@ var
   DiscardedRectangleLine: TScreenLayoutRectangleLineData;
   DiscardedImage: TVectArtImageData;
   DiscardedShape: TScreenLayoutShapeData;
+  DiscardedText: TScreenLayoutTextData;
   FillRuleValue: Integer;
   I: Integer;
   ImageData: TArray<TVectArtImageData>;
@@ -118,6 +119,8 @@ var
   SegmentKind: string;
   ShapeData: TArray<TScreenLayoutShapeData>;
   ShapeValue: TScreenLayoutShapeData;
+  TextData: TArray<TScreenLayoutTextData>;
+  TextValue: TScreenLayoutTextData;
   LoadedSelectedIndex: Integer;
   SourceKind: string;
   VertexIndex: Integer;
@@ -167,6 +170,7 @@ begin
       SetLength(PathData, LayersJson.Count);
       SetLength(ImageData, LayersJson.Count);
       SetLength(ShapeData, LayersJson.Count);
+      SetLength(TextData, LayersJson.Count);
       SetLength(LayerTypes, LayersJson.Count);
       for I := 0 to LayersJson.Count - 1 do
       begin
@@ -174,6 +178,24 @@ begin
           raise EConvertError.CreateFmt('Layer %d is not a JSON object', [I]);
         LayerJson := TJSONObject(LayersJson.Items[I]);
         LayerTypes[I] := ReadString(LayerJson, 'type');
+        if LayerTypes[I] = 'text' then
+        begin
+          TextValue.Name := ReadString(LayerJson, 'name');
+          TextValue.Text := ReadString(LayerJson, 'text');
+          TextValue.FontFamily := ReadString(LayerJson, 'fontFamily');
+          TextValue.FontSize := Max(ReadSingle(LayerJson, 'fontSize'), 1.0);
+          TextValue.WrapWidth := Max(ReadSingle(LayerJson, 'wrapWidth'), 1.0);
+          TextValue.Bounds := TRectF.Create(
+            ReadSingle(LayerJson, 'left'), ReadSingle(LayerJson, 'top'),
+            ReadSingle(LayerJson, 'right'), ReadSingle(LayerJson, 'bottom'));
+          TextValue.RotationDegrees := ReadSingle(LayerJson, 'rotation');
+          TextValue.TextColor := TColor(ReadInteger(LayerJson, 'textColor'));
+          TextValue.Opacity := ReadSingle(LayerJson, 'opacity');
+          TextValue.Visible := ReadBoolean(LayerJson, 'visible');
+          TextValue.Locked := ReadBoolean(LayerJson, 'locked');
+          TextData[I] := TextValue;
+          Continue;
+        end;
         if LayerTypes[I] = 'image' then
         begin
           ImageValue.SourceFileName := '';
@@ -632,6 +654,8 @@ begin
           TScreenLayoutRoundedRectangleLayer then
           Document.RemoveRoundedRectangle(Document.LayerCount - 1,
             DiscardedRoundedRectangle)
+        else if Document[Document.LayerCount - 1] is TScreenLayoutTextLayer then
+          Document.RemoveText(Document.LayerCount - 1, DiscardedText)
         else if Document[Document.LayerCount - 1] is TVectArtRectangleLayer then
           Document.RemoveRectangle(Document.LayerCount - 1, Discarded)
         else if Document[Document.LayerCount - 1] is TVectArtPathLayer then
@@ -671,6 +695,8 @@ begin
           Document.InsertArc(Document.LayerCount, ArcData[I])
         else if LayerTypes[I] = 'image' then
           Document.InsertImage(Document.LayerCount, ImageData[I])
+        else if LayerTypes[I] = 'text' then
+          Document.InsertText(Document.LayerCount, TextData[I])
         else if LayerTypes[I] = 'path' then
           Document.InsertPath(Document.LayerCount, PathData[I])
         else if LayerTypes[I] = 'shape' then
@@ -719,4 +745,3 @@ begin
   end;
 end;
 end.
-

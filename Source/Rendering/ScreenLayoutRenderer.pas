@@ -50,7 +50,7 @@ uses
   System.Math, System.Skia, System.Types, System.UITypes,
   TextRendererSkiaRuntime, Vcl.Graphics, Winapi.Windows,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
-  ScreenLayoutShapePath;
+  ScreenLayoutShapePath, ScreenLayoutTextGeometry;
 
 const
   MAX_RENDER_DIMENSION = 16384;
@@ -237,6 +237,7 @@ var
   ImageInfo: TSkImageInfo;
   ImageLayer: TVectArtImageLayer;
   ImagePaint: ISkPaint;
+  Font: ISkFont;
   RasterImage: ISkImage;
   EdgeWidth: Single;
   SignedHeight: Single;
@@ -259,6 +260,8 @@ var
   StrokePaint: ISkPaint;
   Surface: ISkSurface;
   ShapeLayer: TScreenLayoutShapeLayer;
+  TextLayer: TScreenLayoutTextLayer;
+  TextLayout: TScreenLayoutTextLayout;
 
 begin
   if Document = nil then
@@ -330,6 +333,36 @@ begin
           SignedHeight / RasterImage.Height);
         Canvas.DrawImage(RasterImage, 0, 0, TSkSamplingOptions.Medium,
           ImagePaint);
+      finally
+        Canvas.Restore;
+      end;
+      Continue;
+    end;
+    if Layer is TScreenLayoutTextLayer then
+    begin
+      TextLayer := TScreenLayoutTextLayer(Layer);
+      if TextLayer.Text = '' then
+        Continue;
+      TextLayout := BuildScreenLayoutTextLayout(TextLayer.Text,
+        TextLayer.FontFamily, TextLayer.FontSize, TextLayer.WrapWidth);
+      if (TextLayout.Width <= 0) or (TextLayout.Height <= 0) then
+        Continue;
+      Font := CreateScreenLayoutTextFont(TextLayer.FontFamily,
+        TextLayer.FontSize);
+      Paint.Color := VclColorToAlphaColor(TextLayer.FillColor,
+        TextLayer.Opacity);
+      Paint.Style := TSkPaintStyle.Fill;
+      Canvas.Save;
+      try
+        Canvas.Rotate(TextLayer.RotationDegrees,
+          (TextLayer.Bounds.Left + TextLayer.Bounds.Right) * 0.5,
+          (TextLayer.Bounds.Top + TextLayer.Bounds.Bottom) * 0.5);
+        Canvas.Translate(TextLayer.Bounds.Left, TextLayer.Bounds.Top);
+        Canvas.Scale(TextLayer.Bounds.Width / TextLayout.Width,
+          TextLayer.Bounds.Height / TextLayout.Height);
+        for J := 0 to High(TextLayout.Lines) do
+          Canvas.DrawSimpleText(TextLayout.Lines[J], 0,
+            TextLayout.Ascent + J * TextLayout.LineHeight, Font, Paint);
       finally
         Canvas.Restore;
       end;

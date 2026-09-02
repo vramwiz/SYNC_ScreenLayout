@@ -60,7 +60,7 @@ function VectArtPathThumbnailPoints(const SourcePoints: TArray<TPointF>;
 implementation
 
 uses
-  System.Classes, System.Math, Winapi.D2D1, Winapi.Windows,
+  System.Classes, System.Math, System.Skia, Winapi.D2D1, Winapi.Windows,
   ScreenLayoutEllipseGeometry, ScreenLayoutPathOperations,
   ScreenLayoutShapeOperations;
 
@@ -175,7 +175,9 @@ end;
 function TVectArtLayerRenderer.ImageThumbnail(
   ImageLayer: TVectArtImageLayer): TPngImage;
 var
+  EncodedImage: ISkImage;
   Entry: TVectArtImageThumbnailCacheEntry;
+  PngData: TBytes;
   Signature: UInt64;
   Stream: TBytesStream;
 begin
@@ -194,17 +196,33 @@ begin
   try
     try
       Entry.Image.LoadFromStream(Stream);
-      if (Entry.Image.Width <= 0) or (Entry.Image.Height <= 0) then
-        Exit;
-      FImageThumbnails.Add(ImageLayer, Entry);
-      Result := Entry.Image;
-      Entry := nil;
     except
       on EInvalidGraphic do
-        Exit;
+      begin
+        EncodedImage := TSkImage.MakeFromEncoded(ImageLayer.PngData);
+        if EncodedImage = nil then
+          Exit;
+        PngData := EncodedImage.Encode(TSkEncodedImageFormat.PNG, 100);
+        Stream.Free;
+        Stream := TBytesStream.Create(PngData);
+        Entry.Image.LoadFromStream(Stream);
+      end;
       on EReadError do
-        Exit;
+      begin
+        EncodedImage := TSkImage.MakeFromEncoded(ImageLayer.PngData);
+        if EncodedImage = nil then
+          Exit;
+        PngData := EncodedImage.Encode(TSkEncodedImageFormat.PNG, 100);
+        Stream.Free;
+        Stream := TBytesStream.Create(PngData);
+        Entry.Image.LoadFromStream(Stream);
+      end;
     end;
+    if (Entry.Image.Width <= 0) or (Entry.Image.Height <= 0) then
+      Exit;
+    FImageThumbnails.Add(ImageLayer, Entry);
+    Result := Entry.Image;
+    Entry := nil;
   finally
     Stream.Free;
     Entry.Free;
@@ -515,7 +533,22 @@ begin
       Inc(Row);
     end;
   end;
-  if Layer is TVectArtRectangleLayer then
+  if Layer is TScreenLayoutTextLayer then
+  begin
+    ACanvas.Font.Name := TScreenLayoutTextLayer(Layer).FontFamily;
+    ACanvas.Font.Height := -32;
+    ACanvas.Font.Style := [fsBold];
+    ACanvas.Font.Color := BlendThumbnailColor(
+      TScreenLayoutTextLayer(Layer).FillColor, Layer.Opacity);
+    ACanvas.Brush.Style := bsClear;
+    ACanvas.TextOut((ThumbnailRect.Left + ThumbnailRect.Right -
+      ACanvas.TextWidth('T')) div 2,
+      (ThumbnailRect.Top + ThumbnailRect.Bottom -
+        ACanvas.TextHeight('T')) div 2, 'T');
+    ACanvas.Font.Style := [];
+  end;
+  if (Layer is TVectArtRectangleLayer) and
+    not (Layer is TScreenLayoutTextLayer) then
   begin
     RectangleLayer := TVectArtRectangleLayer(Layer);
     RectangleRect := FitThumbnailRect(ThumbnailRect,
@@ -717,6 +750,10 @@ begin
   if Layer is TVectArtCanvasLayer then
     DetailText := Format('%d x %d  %d%%', [TVectArtCanvasLayer(Layer).Width,
       TVectArtCanvasLayer(Layer).Height, Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutTextLayer then
+    DetailText := Format('Text  %spt  %d%%',
+      [FormatFloat('0.##', TScreenLayoutTextLayer(Layer).FontSize),
+       Round(Layer.Opacity * 100)])
   else if Layer is TScreenLayoutEllipseArcShapeLayer then
     DetailText := Format('Arc Shape  %d%%', [Round(Layer.Opacity * 100)])
   else if Layer is TVectArtRectangleLayer then
@@ -888,7 +925,22 @@ begin
       Inc(Row);
     end;
   end;
-  if Layer is TVectArtRectangleLayer then
+  if Layer is TScreenLayoutTextLayer then
+  begin
+    ACanvas.Font.Name := TScreenLayoutTextLayer(Layer).FontFamily;
+    ACanvas.Font.Height := -32;
+    ACanvas.Font.Style := [fsBold];
+    ACanvas.Font.Color := BlendThumbnailColor(
+      TScreenLayoutTextLayer(Layer).FillColor, Layer.Opacity);
+    ACanvas.Brush.Style := bsClear;
+    ACanvas.TextOut((ThumbnailRect.Left + ThumbnailRect.Right -
+      ACanvas.TextWidth('T')) div 2,
+      (ThumbnailRect.Top + ThumbnailRect.Bottom -
+        ACanvas.TextHeight('T')) div 2, 'T');
+    ACanvas.Font.Style := [];
+  end;
+  if (Layer is TVectArtRectangleLayer) and
+    not (Layer is TScreenLayoutTextLayer) then
   begin
     RectangleLayer := TVectArtRectangleLayer(Layer);
     RectangleRect := FitThumbnailRect(ThumbnailRect,
@@ -1090,6 +1142,10 @@ begin
   if Layer is TVectArtCanvasLayer then
     DetailText := Format('%d x %d  %d%%', [TVectArtCanvasLayer(Layer).Width,
       TVectArtCanvasLayer(Layer).Height, Round(Layer.Opacity * 100)])
+  else if Layer is TScreenLayoutTextLayer then
+    DetailText := Format('Text  %spt  %d%%',
+      [FormatFloat('0.##', TScreenLayoutTextLayer(Layer).FontSize),
+       Round(Layer.Opacity * 100)])
   else if Layer is TScreenLayoutEllipseArcShapeLayer then
     DetailText := Format('Arc Shape  %d%%', [Round(Layer.Opacity * 100)])
   else if Layer is TVectArtRectangleLayer then

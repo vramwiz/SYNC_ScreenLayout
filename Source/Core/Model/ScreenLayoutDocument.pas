@@ -11,7 +11,7 @@ uses
 type
   TVectArtLayerKind = (vlkCanvas, vlkRectangle, vlkRoundedRectangle,
     vlkPath, vlkImage, vlkShape, vlkEllipse, vlkArc, vlkRectangleLine,
-    vlkRoundedRectangleLine, vlkEllipseLine, vlkEllipseArcShape);
+    vlkRoundedRectangleLine, vlkEllipseLine, vlkEllipseArcShape, vlkText);
   TVectArtImageSourceKind = (visImage, visLogo);
   TVectArtImagePoints = array[0..3] of TPointF;
   // WebArt Designerの線種コンボとMIF vector stroke style 0..8を同順で保持する。
@@ -141,6 +141,36 @@ type
     Opacity: Single;         // 0.0..1.0のレイヤー不透明度。
     RotationDegrees: Single; // 楕円中心回りの時計回り角度。
     Visible: Boolean;        // 描画対象に含める状態。
+  end;
+
+  TScreenLayoutTextLayer = class(TVectArtRectangleLayer)
+  private
+    FFontFamily: string;
+    FFontSize: Single;
+    FText: string;
+    FWrapWidth: Single;
+  public
+    constructor Create(const AName: string; const ABounds: TRectF;
+      const AText, AFontFamily: string; AFontSize, AWrapWidth: Single;
+      ATextColor: TColor);
+    property FontFamily: string read FFontFamily write FFontFamily;
+    property FontSize: Single read FFontSize write FFontSize;
+    property Text: string read FText write FText;
+    property WrapWidth: Single read FWrapWidth write FWrapWidth;
+  end;
+
+  TScreenLayoutTextData = record
+    Bounds: TRectF;          // 文字の組版実寸または変形後の表示範囲。
+    FontFamily: string;      // Skiaへ渡す優先フォントファミリー。
+    FontSize: Single;        // 変形前の文書座標単位フォントサイズ。
+    Locked: Boolean;         // 編集を禁止する状態。
+    Name: string;            // レイヤー一覧の表示名。
+    Opacity: Single;         // 0.0..1.0のレイヤー不透明度。
+    RotationDegrees: Single; // 中心回りの時計回り角度。
+    Text: string;            // 明示改行を含むUnicode文字列。
+    TextColor: TColor;       // 本文色。基底のFillColorと同じ値を保持する。
+    Visible: Boolean;        // 描画対象に含める状態。
+    WrapWidth: Single;       // 入力時の自動折り返し幅。
   end;
 
   TScreenLayoutRectangleLineLayer = class(TVectArtLayer)
@@ -371,7 +401,7 @@ type
     Locked: Boolean;                     // 編集を禁止する状態。
     Name: string;                        // レイヤー一覧の表示名。
     Opacity: Single;                     // 0.0..1.0のレイヤー不透明度。
-    PngData: TBytes;                     // 埋め込みPNGの全バイト。
+    PngData: TBytes;                     // Skiaが読める符号化画像の全バイト。名称は旧形式互換。
     Points: TVectArtImagePoints;         // 左上から時計回りの配置4頂点。
     SourceFileName: string;              // JSONから参照する画像ファイルパス。
     SourceKind: TVectArtImageSourceKind; // MIF由来のimage／logo区分。
@@ -431,6 +461,7 @@ type
     function InsertShape(Index: Integer;
       const Data: TScreenLayoutShapeData): Integer;
     function InsertImage(Index: Integer; const Data: TVectArtImageData): Integer;
+    function InsertText(Index: Integer; const Data: TScreenLayoutTextData): Integer;
     function IsLayerSelected(Index: Integer): Boolean;
     procedure SetCanvasSize(AWidth, AHeight: Integer);
     procedure SetRectangleBounds(Index: Integer; const Value: TRectF);
@@ -456,6 +487,7 @@ type
       const Value: TScreenLayoutCornerRadii);
     procedure SetImagePoints(Index: Integer;
       const Points: TVectArtImagePoints);
+    procedure SetTextData(Index: Integer; const Data: TScreenLayoutTextData);
     procedure SetPathLineCap(Index: Integer; Value: TVectArtLineCap);
     procedure SetLayerLocked(Index: Integer; Value: Boolean);
     procedure SetLayerOpacity(Index: Integer; Value: Single);
@@ -482,6 +514,7 @@ type
     function RemoveShape(Index: Integer;
       out Data: TScreenLayoutShapeData): Boolean;
     function RemoveImage(Index: Integer; out Data: TVectArtImageData): Boolean;
+    function RemoveText(Index: Integer; out Data: TScreenLayoutTextData): Boolean;
     // Pathのアンカー、制御点、区間種別を深いコピーで置換する。
     procedure SetPathVertices(Index: Integer;
       const Vertices: TArray<TScreenLayoutVertex>);
@@ -737,6 +770,19 @@ constructor TScreenLayoutEllipseLayer.Create(const AName: string;
   const ABounds: TRectF; AFillColor: TColor);
 begin
   inherited CreateWithKind(vlkEllipse, AName, ABounds, AFillColor);
+end;
+
+{ TScreenLayoutTextLayer }
+
+constructor TScreenLayoutTextLayer.Create(const AName: string;
+  const ABounds: TRectF; const AText, AFontFamily: string;
+  AFontSize, AWrapWidth: Single; ATextColor: TColor);
+begin
+  inherited CreateWithKind(vlkText, AName, ABounds, ATextColor);
+  FText := AText;
+  FFontFamily := AFontFamily;
+  FFontSize := Max(AFontSize, 1.0);
+  FWrapWidth := Max(AWrapWidth, 1.0);
 end;
 
 { TScreenLayoutRectangleLineLayer }
@@ -1222,6 +1268,28 @@ begin
   Changed;
 end;
 
+function TVectArtDocument.InsertText(Index: Integer;
+  const Data: TScreenLayoutTextData): Integer;
+var
+  I: Integer;
+  TextLayer: TScreenLayoutTextLayer;
+begin
+  Result := EnsureRange(Index, 1, FLayers.Count);
+  TextLayer := TScreenLayoutTextLayer.Create(Data.Name, Data.Bounds,
+    Data.Text, Data.FontFamily, Data.FontSize, Data.WrapWidth, Data.TextColor);
+  TextLayer.Locked := Data.Locked;
+  TextLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  TextLayer.RotationDegrees := Data.RotationDegrees;
+  TextLayer.Visible := Data.Visible;
+  FLayers.Insert(Result, TextLayer);
+  for I := 0 to FSelectedLayers.Count - 1 do
+    if FSelectedLayers[I] >= Result then
+      FSelectedLayers[I] := FSelectedLayers[I] + 1;
+  if FSelectedIndex >= Result then
+    Inc(FSelectedIndex);
+  Changed;
+end;
+
 procedure TVectArtDocument.MoveLayer(FromIndex, ToIndex: Integer);
 var
   I: Integer;
@@ -1611,6 +1679,46 @@ begin
   Data.SourceFileName := ImageLayer.SourceFileName;
   Data.SourceKind := ImageLayer.SourceKind;
   Data.Visible := ImageLayer.Visible;
+  FLayers.Delete(Index);
+  Selection := TList<Integer>.Create;
+  try
+    for I := 0 to FSelectedLayers.Count - 1 do
+      if FSelectedLayers[I] < Index then
+        Selection.Add(FSelectedLayers[I])
+      else if FSelectedLayers[I] > Index then
+        Selection.Add(FSelectedLayers[I] - 1);
+    if (Selection.Count = 0) and (FLayers.Count > 1) then
+      Selection.Add(Min(Index, FLayers.Count - 1));
+    SetSelectedLayersCore(Selection.ToArray, False);
+  finally
+    Selection.Free;
+  end;
+  Changed;
+end;
+
+function TVectArtDocument.RemoveText(Index: Integer;
+  out Data: TScreenLayoutTextData): Boolean;
+var
+  I: Integer;
+  Selection: TList<Integer>;
+  TextLayer: TScreenLayoutTextLayer;
+begin
+  Result := (Index > 0) and (Index < FLayers.Count) and
+    (FLayers[Index] is TScreenLayoutTextLayer);
+  if not Result then
+    Exit;
+  TextLayer := TScreenLayoutTextLayer(FLayers[Index]);
+  Data.Bounds := TextLayer.Bounds;
+  Data.FontFamily := TextLayer.FontFamily;
+  Data.FontSize := TextLayer.FontSize;
+  Data.Locked := TextLayer.Locked;
+  Data.Name := TextLayer.Name;
+  Data.Opacity := TextLayer.Opacity;
+  Data.RotationDegrees := TextLayer.RotationDegrees;
+  Data.Text := TextLayer.Text;
+  Data.TextColor := TextLayer.FillColor;
+  Data.Visible := TextLayer.Visible;
+  Data.WrapWidth := TextLayer.WrapWidth;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -2114,6 +2222,29 @@ begin
     Exit;
   ImageLayer := TVectArtImageLayer(FLayers[Index]);
   ImageLayer.Points := Points;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetTextData(Index: Integer;
+  const Data: TScreenLayoutTextData);
+var
+  TextLayer: TScreenLayoutTextLayer;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TScreenLayoutTextLayer) then
+    Exit;
+  TextLayer := TScreenLayoutTextLayer(FLayers[Index]);
+  TextLayer.Bounds := Data.Bounds;
+  TextLayer.FillColor := Data.TextColor;
+  TextLayer.FontFamily := Data.FontFamily;
+  TextLayer.FontSize := Max(Data.FontSize, 1.0);
+  TextLayer.Locked := Data.Locked;
+  TextLayer.Name := Data.Name;
+  TextLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  TextLayer.RotationDegrees := Data.RotationDegrees;
+  TextLayer.Text := Data.Text;
+  TextLayer.Visible := Data.Visible;
+  TextLayer.WrapWidth := Max(Data.WrapWidth, 1.0);
   Changed;
 end;
 
