@@ -7,6 +7,49 @@ uses
   ScreenLayoutDocument, ScreenLayoutEditCommands, ScreenLayoutEditorState;
 
 type
+  // グループ内部の子レイヤーの表示／ロック状態をポインターで管理する。
+  TScreenLayoutGroupChildBooleanCommand = class(TVectArtEditCommand)
+  private
+    FDocument: TVectArtDocument;
+    FLayer: TVectArtLayer;
+    FNewValue: Boolean;
+    FOldValue: Boolean;
+    FPropertyKind: TVectArtLayerBooleanProperty;
+    procedure ApplyValue(Value: Boolean);
+  public
+    constructor Create(ADocument: TVectArtDocument; ALayer: TVectArtLayer;
+      PropertyKind: TVectArtLayerBooleanProperty; OldValue,
+      NewValue: Boolean);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  // 選択された複数レイヤーを積層順のまま同一または別コンテナへ移す。
+  TScreenLayoutReparentLayersCommand = class(TVectArtEditCommand)
+  private
+    FDestinationIndex: Integer;
+    FDestinationParent: TScreenLayoutGroupLayer;
+    FDocument: TVectArtDocument;
+    FEditorState: TVectArtEditorState;
+    FLayers: TArray<TVectArtLayer>;
+    FSourceIndices: TArray<Integer>;
+    FSourceParent: TScreenLayoutGroupLayer;
+    function ExtractLayer(Parent: TScreenLayoutGroupLayer;
+      Index: Integer): TVectArtLayer;
+    function InsertLayer(Parent: TScreenLayoutGroupLayer; Index: Integer;
+      Layer: TVectArtLayer): Integer;
+    procedure SelectLayers(Parent: TScreenLayoutGroupLayer;
+      const Indices: TArray<Integer>);
+  public
+    constructor Create(ADocument: TVectArtDocument;
+      AEditorState: TVectArtEditorState;
+      ASourceParent: TScreenLayoutGroupLayer;
+      const SourceIndices: TArray<Integer>;
+      ADestinationParent: TScreenLayoutGroupLayer; DestinationIndex: Integer);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
   // 取り外した子の所有権を履歴内で保持し、Undo時に元の位置へ戻す。
   TScreenLayoutDeleteGroupChildCommand = class(TVectArtEditCommand)
   private
@@ -152,6 +195,131 @@ type
   end;
 
 implementation
+
+uses
+  System.Math;
+
+procedure TScreenLayoutGroupChildBooleanCommand.ApplyValue(Value: Boolean);
+begin
+  case FPropertyKind of
+    vlbpVisible: FLayer.Visible := Value;
+    vlbpLocked: FLayer.Locked := Value;
+  end;
+  FDocument.Changed;
+end;
+
+constructor TScreenLayoutGroupChildBooleanCommand.Create(
+  ADocument: TVectArtDocument; ALayer: TVectArtLayer;
+  PropertyKind: TVectArtLayerBooleanProperty; OldValue,
+  NewValue: Boolean);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FLayer := ALayer;
+  FPropertyKind := PropertyKind;
+  FOldValue := OldValue;
+  FNewValue := NewValue;
+end;
+
+procedure TScreenLayoutGroupChildBooleanCommand.Execute;
+begin
+  ApplyValue(FNewValue);
+end;
+
+procedure TScreenLayoutGroupChildBooleanCommand.Undo;
+begin
+  ApplyValue(FOldValue);
+end;
+
+constructor TScreenLayoutReparentLayersCommand.Create(
+  ADocument: TVectArtDocument; AEditorState: TVectArtEditorState;
+  ASourceParent: TScreenLayoutGroupLayer;
+  const SourceIndices: TArray<Integer>;
+  ADestinationParent: TScreenLayoutGroupLayer; DestinationIndex: Integer);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FEditorState := AEditorState;
+  FSourceParent := ASourceParent;
+  FSourceIndices := Copy(SourceIndices);
+  FDestinationParent := ADestinationParent;
+  FDestinationIndex := DestinationIndex;
+  SetLength(FLayers, Length(FSourceIndices));
+end;
+
+procedure TScreenLayoutReparentLayersCommand.Execute;
+var
+  DestinationIndices: TArray<Integer>;
+  I: Integer;
+begin
+  FDocument.BeginUpdate;
+  try
+    for I := High(FSourceIndices) downto 0 do
+      FLayers[I] := ExtractLayer(FSourceParent, FSourceIndices[I]);
+    SetLength(DestinationIndices, Length(FLayers));
+    for I := 0 to High(FLayers) do
+      DestinationIndices[I] := InsertLayer(FDestinationParent,
+        FDestinationIndex + I, FLayers[I]);
+    FDocument.Changed;
+  finally
+    FDocument.EndUpdate;
+  end;
+  SelectLayers(FDestinationParent, DestinationIndices);
+end;
+
+function TScreenLayoutReparentLayersCommand.ExtractLayer(
+  Parent: TScreenLayoutGroupLayer; Index: Integer): TVectArtLayer;
+begin
+  if Parent <> nil then
+    Result := Parent.ExtractChild(Index)
+  else
+    Result := FDocument.ExtractLayer(Index);
+end;
+
+function TScreenLayoutReparentLayersCommand.InsertLayer(
+  Parent: TScreenLayoutGroupLayer; Index: Integer;
+  Layer: TVectArtLayer): Integer;
+begin
+  if Parent <> nil then
+  begin
+    Result := EnsureRange(Index, 0, Parent.ChildCount);
+    Parent.InsertChild(Result, Layer);
+  end
+  else
+    Result := FDocument.InsertLayer(Index, Layer);
+end;
+
+procedure TScreenLayoutReparentLayersCommand.SelectLayers(
+  Parent: TScreenLayoutGroupLayer; const Indices: TArray<Integer>);
+begin
+  if Parent <> nil then
+  begin
+    FEditorState.OpenGroupInDocument(FDocument, Parent);
+    FEditorState.SetOpenGroupChildren(FLayers);
+  end
+  else
+  begin
+    FEditorState.OpenGroup := nil;
+    FDocument.SetSelectedLayers(Indices);
+  end;
+end;
+
+procedure TScreenLayoutReparentLayersCommand.Undo;
+var
+  I: Integer;
+begin
+  FDocument.BeginUpdate;
+  try
+    for I := High(FLayers) downto 0 do
+      ExtractLayer(FDestinationParent, FDestinationIndex + I);
+    for I := 0 to High(FLayers) do
+      InsertLayer(FSourceParent, FSourceIndices[I], FLayers[I]);
+    FDocument.Changed;
+  finally
+    FDocument.EndUpdate;
+  end;
+  SelectLayers(FSourceParent, FSourceIndices);
+end;
 
 constructor TScreenLayoutDeleteGroupChildCommand.Create(
   ADocument: TVectArtDocument; AEditorState: TVectArtEditorState;

@@ -44,9 +44,13 @@ type
     // ツールを選択し、選択済みの組み合わせツールでは線／図形または頂点種別を切り替える。
     procedure ActivateTool(const Value: TVectArtEditorTool);
     function GetOpenGroupChildren: TArray<TVectArtLayer>;
+    function IsGroupInOpenPath(Group: TScreenLayoutGroupLayer): Boolean;
     function IsOpenGroupChildSelected(Layer: TVectArtLayer): Boolean;
     // 現在のグループ直下にある子グループへ編集対象を移す。
     procedure OpenChildGroup(Value: TScreenLayoutGroupLayer);
+    // Document内に実在する任意のグループまでの編集パスを復元する。
+    procedure OpenGroupInDocument(Document: TVectArtDocument;
+      Value: TScreenLayoutGroupLayer);
     // 最上位を1とする現在のグループ編集深度を返す。
     function OpenGroupDepth: Integer;
     // 親へ1階層戻り、最上位ではグループ編集を閉じる。
@@ -88,6 +92,26 @@ uses
 
 const
   DEFAULT_RECTANGLE_COLOR = TColor($00E2904A);
+
+function FindOpenGroupPath(Layer: TVectArtLayer;
+  Target: TScreenLayoutGroupLayer;
+  Path: TList<TScreenLayoutGroupLayer>): Boolean;
+var
+  Group: TScreenLayoutGroupLayer;
+  I: Integer;
+begin
+  Result := False;
+  if not (Layer is TScreenLayoutGroupLayer) then
+    Exit;
+  Group := TScreenLayoutGroupLayer(Layer);
+  Path.Add(Group);
+  if Group = Target then
+    Exit(True);
+  for I := 0 to Group.ChildCount - 1 do
+    if FindOpenGroupPath(Group[I], Target, Path) then
+      Exit(True);
+  Path.Delete(Path.Count - 1);
+end;
 
 constructor TVectArtEditorState.Create;
 begin
@@ -145,6 +169,48 @@ begin
         FOnChanged(Self);
       Exit;
     end;
+end;
+
+function TVectArtEditorState.IsGroupInOpenPath(
+  Group: TScreenLayoutGroupLayer): Boolean;
+begin
+  Result := (Group <> nil) and (FOpenGroupPath.IndexOf(Group) >= 0);
+end;
+
+procedure TVectArtEditorState.OpenGroupInDocument(
+  Document: TVectArtDocument; Value: TScreenLayoutGroupLayer);
+var
+  Found: Boolean;
+  I: Integer;
+  Path: TList<TScreenLayoutGroupLayer>;
+begin
+  if Value = nil then
+  begin
+    OpenGroup := nil;
+    Exit;
+  end;
+  Path := TList<TScreenLayoutGroupLayer>.Create;
+  try
+    Found := False;
+    if Document <> nil then
+      for I := 1 to Document.LayerCount - 1 do
+        if FindOpenGroupPath(Document[I], Value, Path) then
+        begin
+          Found := True;
+          Break;
+        end;
+    if not Found then
+      Exit;
+    FOpenGroupPath.Clear;
+    FOpenGroupPath.AddRange(Path);
+    FOpenGroup := Value;
+    FOpenGroupChild := nil;
+    FOpenGroupChildren.Clear;
+    if Assigned(FOnChanged) then
+      FOnChanged(Self);
+  finally
+    Path.Free;
+  end;
 end;
 
 function TVectArtEditorState.OpenGroupDepth: Integer;

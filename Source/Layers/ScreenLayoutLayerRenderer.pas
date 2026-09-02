@@ -5,13 +5,23 @@ interface
 
 uses
   System.Generics.Collections, System.SysUtils, System.Types, Vcl.Direct2D,
-  Vcl.Graphics, ScreenLayoutDocument, ScreenLayoutRenderer;
+  Vcl.Graphics, ScreenLayoutDocument, ScreenLayoutEditorState,
+  ScreenLayoutRenderer;
 
 type
+  TScreenLayoutLayerListEntry = record
+    Depth: Integer;
+    GroupRangeStart: Integer;
+    Layer: TVectArtLayer;
+    Parent: TScreenLayoutGroupLayer;
+    SourceIndex: Integer;
+  end;
+
   TVectArtLayerRenderer = class
   private
     FDocument: TVectArtDocument;
-    FOpenGroup: TScreenLayoutGroupLayer;
+    FEditorState: TVectArtEditorState;
+    FEntries: TArray<TScreenLayoutLayerListEntry>;
     FLastSelectedIndex: Integer;
     FScrollOffset: Integer;
     FRenderedThumbnails: TObjectDictionary<TVectArtLayer, TBitmap>;
@@ -20,6 +30,20 @@ type
     FThumbnailRevision: Int64;
     procedure EnsureSelectionVisible(const Bounds: TRect);
     procedure ClampScrollOffset(const Bounds: TRect);
+    function DisplayedLayerCount: Integer;
+    function DisplayedSelectedIndex: Integer;
+    procedure AppendGroupChildren(Group: TScreenLayoutGroupLayer;
+      Depth: Integer; Entries: TList<TScreenLayoutLayerListEntry>);
+    procedure AppendLayerEntry(Layer: TVectArtLayer;
+      Parent: TScreenLayoutGroupLayer; SourceIndex, Depth: Integer;
+      Entries: TList<TScreenLayoutLayerListEntry>);
+    procedure DrawGroupRanges(ACanvas: TCanvas;
+      const Bounds: TRect); overload;
+    procedure DrawGroupRanges(ACanvas: TDirect2DCanvas;
+      const Bounds: TRect); overload;
+    procedure PreserveExpandedGroupPosition(
+      const NewEntries: TArray<TScreenLayoutLayerListEntry>);
+    procedure RebuildEntries;
     procedure SetDocument(const Value: TVectArtDocument);
     procedure SyncThumbnailCache;
     procedure DrawRenderedLayerThumbnail(ACanvas: TCustomCanvas;
@@ -39,15 +63,20 @@ type
     procedure DrawLayers(ACanvas: TDirect2DCanvas;
       const Bounds: TRect); overload;
     function LayerIndexAt(const Bounds: TRect; Y: Integer): Integer;
+    function LayerAt(Index: Integer): TVectArtLayer;
+    function LayerDepthAt(Index: Integer): Integer;
+    function LayerParentAt(Index: Integer): TScreenLayoutGroupLayer;
+    function LayerSourceIndexAt(Index: Integer): Integer;
     function LayerItemRect(const Bounds: TRect; Index: Integer): TRect;
     function MaximumScrollOffset(const Bounds: TRect): Integer;
     function ScrollStep: Integer;
     procedure SetScrollOffset(Value: Integer);
     function LockButtonRect(const ItemRect: TRect): TRect;
+    function ExpandButtonRect(const ItemRect: TRect): TRect;
     function VisibilityButtonRect(const ItemRect: TRect): TRect;
     property Document: TVectArtDocument read FDocument write SetDocument;
-    property OpenGroup: TScreenLayoutGroupLayer read FOpenGroup
-      write FOpenGroup;
+    property EditorState: TVectArtEditorState read FEditorState
+      write FEditorState;
     property ScrollOffset: Integer read FScrollOffset write SetScrollOffset;
   end;
 
@@ -105,12 +134,190 @@ begin
   FLastSelectedIndex := -2;
 end;
 
+function LayerDisplayName(Layer: TVectArtLayer;
+  EditorState: TVectArtEditorState): string;
+begin
+  Result := Layer.Name;
+  if Layer is TScreenLayoutGroupLayer then
+    if (EditorState <> nil) and EditorState.IsGroupInOpenPath(
+      TScreenLayoutGroupLayer(Layer)) then
+      Result := #$25BE + '  ' + Result
+    else
+      Result := #$25B8 + '  ' + Result;
+end;
+
 destructor TVectArtLayerRenderer.Destroy;
 begin
   FThumbnailBuffer.Free;
   FThumbnailBitmap.Free;
   FRenderedThumbnails.Free;
   inherited Destroy;
+end;
+
+function TVectArtLayerRenderer.DisplayedLayerCount: Integer;
+begin
+  Result := Length(FEntries);
+end;
+
+function TVectArtLayerRenderer.DisplayedSelectedIndex: Integer;
+var
+  I: Integer;
+begin
+  Result := -1;
+  if FDocument = nil then
+    Exit;
+  for I := 0 to High(FEntries) do
+    if ((FEntries[I].Parent = nil) and
+        FDocument.IsLayerSelected(FEntries[I].SourceIndex)) or
+       ((FEditorState <> nil) and
+        (FEntries[I].Parent = FEditorState.OpenGroup) and
+        FEditorState.IsOpenGroupChildSelected(FEntries[I].Layer)) then
+      if ((FEntries[I].Parent = nil) and
+          (FDocument.SelectedIndex = FEntries[I].SourceIndex)) or
+         ((FEditorState <> nil) and
+          (FEditorState.OpenGroupChild = FEntries[I].Layer)) then
+        Exit(I + 1);
+end;
+
+procedure TVectArtLayerRenderer.AppendGroupChildren(
+  Group: TScreenLayoutGroupLayer; Depth: Integer;
+  Entries: TList<TScreenLayoutLayerListEntry>);
+var
+  I: Integer;
+begin
+  for I := 0 to Group.ChildCount - 1 do
+    AppendLayerEntry(Group[I], Group, I, Depth, Entries);
+end;
+
+procedure TVectArtLayerRenderer.AppendLayerEntry(Layer: TVectArtLayer;
+  Parent: TScreenLayoutGroupLayer; SourceIndex, Depth: Integer;
+  Entries: TList<TScreenLayoutLayerListEntry>);
+var
+  Entry: TScreenLayoutLayerListEntry;
+  Group: TScreenLayoutGroupLayer;
+begin
+  Entry.GroupRangeStart := 0;
+  if (Layer is TScreenLayoutGroupLayer) and (FEditorState <> nil) and
+    FEditorState.IsGroupInOpenPath(TScreenLayoutGroupLayer(Layer)) then
+  begin
+    Group := TScreenLayoutGroupLayer(Layer);
+    Entry.GroupRangeStart := Entries.Count + 1;
+    AppendGroupChildren(Group, Depth + 1, Entries);
+  end;
+  Entry.Depth := Depth;
+  Entry.Layer := Layer;
+  Entry.Parent := Parent;
+  Entry.SourceIndex := SourceIndex;
+  Entries.Add(Entry);
+end;
+
+procedure TVectArtLayerRenderer.RebuildEntries;
+var
+  Entries: TList<TScreenLayoutLayerListEntry>;
+  I: Integer;
+  NewEntries: TArray<TScreenLayoutLayerListEntry>;
+begin
+  Entries := TList<TScreenLayoutLayerListEntry>.Create;
+  try
+    if FDocument <> nil then
+      for I := 1 to FDocument.LayerCount - 1 do
+        AppendLayerEntry(FDocument[I], nil, I, 0, Entries);
+    NewEntries := Entries.ToArray;
+    PreserveExpandedGroupPosition(NewEntries);
+    FEntries := NewEntries;
+  finally
+    Entries.Free;
+  end;
+end;
+
+procedure TVectArtLayerRenderer.PreserveExpandedGroupPosition(
+  const NewEntries: TArray<TScreenLayoutLayerListEntry>);
+var
+  I: Integer;
+  J: Integer;
+  OldIndex: Integer;
+  NewIndex: Integer;
+begin
+  if (Length(FEntries) = 0) or (Length(NewEntries) = 0) then
+    Exit;
+  OldIndex := -1;
+  NewIndex := -1;
+  // 展開時は新しく開いたグループ、折り畳み時は閉じたグループを基準行にする。
+  for J := 0 to High(NewEntries) do
+    if NewEntries[J].GroupRangeStart > 0 then
+      for I := 0 to High(FEntries) do
+        if (FEntries[I].Layer = NewEntries[J].Layer) and
+          (FEntries[I].GroupRangeStart = 0) then
+        begin
+          OldIndex := I;
+          NewIndex := J;
+          Break;
+        end;
+  if OldIndex < 0 then
+    for I := 0 to High(FEntries) do
+      if FEntries[I].GroupRangeStart > 0 then
+        for J := 0 to High(NewEntries) do
+          if (NewEntries[J].Layer = FEntries[I].Layer) and
+            (NewEntries[J].GroupRangeStart = 0) then
+          begin
+            OldIndex := I;
+            NewIndex := J;
+            Break;
+          end;
+  if (OldIndex >= 0) and (NewIndex >= 0) then
+  begin
+    Inc(FScrollOffset, (NewIndex - OldIndex) *
+      (LAYER_ROW_HEIGHT + LAYER_GAP));
+    FLastSelectedIndex := -2;
+  end;
+end;
+
+procedure TVectArtLayerRenderer.DrawGroupRanges(ACanvas: TCanvas;
+  const Bounds: TRect);
+var
+  GroupRect: TRect;
+  I: Integer;
+  RangeRect: TRect;
+  X: Integer;
+begin
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.Pen.Color := TColor($00806A48);
+  for I := 1 to DisplayedLayerCount do
+    if FEntries[I - 1].GroupRangeStart > 0 then
+    begin
+      GroupRect := LayerItemRect(Bounds, I);
+      RangeRect := LayerItemRect(Bounds,
+        FEntries[I - 1].GroupRangeStart);
+      X := Bounds.Left + 3 + FEntries[I - 1].Depth * 3;
+      ACanvas.MoveTo(GroupRect.Left, GroupRect.Top);
+      ACanvas.LineTo(X, GroupRect.Top);
+      ACanvas.LineTo(X, RangeRect.Bottom);
+      ACanvas.LineTo(RangeRect.Left, RangeRect.Bottom);
+    end;
+end;
+
+procedure TVectArtLayerRenderer.DrawGroupRanges(
+  ACanvas: TDirect2DCanvas; const Bounds: TRect);
+var
+  GroupRect: TRect;
+  I: Integer;
+  RangeRect: TRect;
+  X: Integer;
+begin
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.Pen.Color := TColor($00806A48);
+  for I := 1 to DisplayedLayerCount do
+    if FEntries[I - 1].GroupRangeStart > 0 then
+    begin
+      GroupRect := LayerItemRect(Bounds, I);
+      RangeRect := LayerItemRect(Bounds,
+        FEntries[I - 1].GroupRangeStart);
+      X := Bounds.Left + 3 + FEntries[I - 1].Depth * 3;
+      ACanvas.MoveTo(GroupRect.Left, GroupRect.Top);
+      ACanvas.LineTo(X, GroupRect.Top);
+      ACanvas.LineTo(X, RangeRect.Bottom);
+      ACanvas.LineTo(RangeRect.Left, RangeRect.Bottom);
+    end;
 end;
 
 procedure TVectArtLayerRenderer.EnsureSelectionVisible(
@@ -122,7 +329,7 @@ var
   MaximumOffset: Integer;
   SelectedIndex: Integer;
 begin
-  if (FDocument = nil) or (FDocument.LayerCount <= 1) then
+  if DisplayedLayerCount = 0 then
   begin
     FScrollOffset := 0;
     Exit;
@@ -131,7 +338,7 @@ begin
   ContentBottom := Bounds.Bottom - LAYER_LIST_PADDING;
   MaximumOffset := MaximumScrollOffset(Bounds);
   FScrollOffset := EnsureRange(FScrollOffset, 0, MaximumOffset);
-  SelectedIndex := FDocument.SelectedIndex;
+  SelectedIndex := DisplayedSelectedIndex;
   if SelectedIndex <= 0 then
     Exit;
   ItemRect := LayerItemRect(Bounds, SelectedIndex);
@@ -230,12 +437,6 @@ begin
   ACanvas.Brush.Style := bsClear;
   ACanvas.Pen.Color := COLOR_ROW_BORDER;
   ACanvas.FrameRect(ItemRect);
-  if Layer = FOpenGroup then
-  begin
-    ACanvas.Pen.Color := TColor($00D6A04A);
-    ACanvas.FrameRect(Rect(ItemRect.Left + 2, ItemRect.Top + 2,
-      ItemRect.Right - 2, ItemRect.Bottom - 2));
-  end;
   if Active then
   begin
     ACanvas.Brush.Style := bsSolid;
@@ -302,7 +503,8 @@ begin
   ACanvas.Font.Name := 'Segoe UI';
   ACanvas.Font.Height := -13;
   ACanvas.Font.Color := COLOR_TEXT_PRIMARY;
-  ACanvas.TextOut(TextX, ItemRect.Top + 20, Layer.Name);
+  ACanvas.TextOut(TextX, ItemRect.Top + 20,
+    LayerDisplayName(Layer, FEditorState));
   if Layer is TVectArtCanvasLayer then
     DetailText := Format('%d x %d  %d%%', [TVectArtCanvasLayer(Layer).Width,
       TVectArtCanvasLayer(Layer).Height, Round(Layer.Opacity * 100)])
@@ -410,12 +612,6 @@ begin
   ACanvas.Brush.Style := bsClear;
   ACanvas.Pen.Color := COLOR_ROW_BORDER;
   ACanvas.FrameRect(ItemRect);
-  if Layer = FOpenGroup then
-  begin
-    ACanvas.Pen.Color := TColor($00D6A04A);
-    ACanvas.FrameRect(Rect(ItemRect.Left + 2, ItemRect.Top + 2,
-      ItemRect.Right - 2, ItemRect.Bottom - 2));
-  end;
   if Active then
   begin
     ACanvas.Brush.Style := bsSolid;
@@ -482,7 +678,8 @@ begin
   ACanvas.Font.Name := 'Segoe UI';
   ACanvas.Font.Height := -13;
   ACanvas.Font.Color := COLOR_TEXT_PRIMARY;
-  ACanvas.TextOut(TextX, ItemRect.Top + 20, Layer.Name);
+  ACanvas.TextOut(TextX, ItemRect.Top + 20,
+    LayerDisplayName(Layer, FEditorState));
   if Layer is TVectArtCanvasLayer then
     DetailText := Format('%d x %d  %d%%', [TVectArtCanvasLayer(Layer).Width,
       TVectArtCanvasLayer(Layer).Height, Round(Layer.Opacity * 100)])
@@ -596,30 +793,46 @@ procedure TVectArtLayerRenderer.DrawLayers(ACanvas: TCanvas;
 var
   I: Integer;
   ItemRect: TRect;
+  Layer: TVectArtLayer;
+  SelectedIndex: Integer;
 begin
+  RebuildEntries;
   SyncThumbnailCache;
   ClampScrollOffset(Bounds);
-  if (FDocument <> nil) and
-    (FLastSelectedIndex <> FDocument.SelectedIndex) then
+  SelectedIndex := DisplayedSelectedIndex;
+  if FLastSelectedIndex <> SelectedIndex then
   begin
     EnsureSelectionVisible(Bounds);
-    FLastSelectedIndex := FDocument.SelectedIndex;
+    FLastSelectedIndex := SelectedIndex;
   end;
   ACanvas.Brush.Style := bsSolid;
   ACanvas.Brush.Color := COLOR_LIST_BACKGROUND;
   ACanvas.FillRect(Bounds);
   if FDocument = nil then
     Exit;
-  for I := 1 to FDocument.LayerCount - 1 do
+  for I := 1 to DisplayedLayerCount do
   begin
     ItemRect := LayerItemRect(Bounds, I);
     if ItemRect.Top >= Bounds.Bottom then
       Continue;
     if ItemRect.Bottom <= Bounds.Top then
       Break;
-    DrawLayerItem(ACanvas, ItemRect, FDocument[I],
-      FDocument.IsLayerSelected(I), FDocument.SelectedIndex = I);
+    Layer := LayerAt(I);
+    if LayerParentAt(I) <> nil then
+      DrawLayerItem(ACanvas, ItemRect, Layer,
+        (FEditorState <> nil) and
+          (LayerParentAt(I) = FEditorState.OpenGroup) and
+          FEditorState.IsOpenGroupChildSelected(Layer),
+        (FEditorState <> nil) and
+          ((FEditorState.OpenGroupChild = Layer) or
+           (FEditorState.OpenGroup = Layer)))
+    else
+      DrawLayerItem(ACanvas, ItemRect, Layer,
+        FDocument.IsLayerSelected(LayerSourceIndexAt(I)),
+        (FDocument.SelectedIndex = LayerSourceIndexAt(I)) or
+          ((FEditorState <> nil) and (FEditorState.OpenGroup = Layer)));
   end;
+  DrawGroupRanges(ACanvas, Bounds);
 end;
 
 procedure TVectArtLayerRenderer.DrawLayers(ACanvas: TDirect2DCanvas;
@@ -627,30 +840,46 @@ procedure TVectArtLayerRenderer.DrawLayers(ACanvas: TDirect2DCanvas;
 var
   I: Integer;
   ItemRect: TRect;
+  Layer: TVectArtLayer;
+  SelectedIndex: Integer;
 begin
+  RebuildEntries;
   SyncThumbnailCache;
   ClampScrollOffset(Bounds);
-  if (FDocument <> nil) and
-    (FLastSelectedIndex <> FDocument.SelectedIndex) then
+  SelectedIndex := DisplayedSelectedIndex;
+  if FLastSelectedIndex <> SelectedIndex then
   begin
     EnsureSelectionVisible(Bounds);
-    FLastSelectedIndex := FDocument.SelectedIndex;
+    FLastSelectedIndex := SelectedIndex;
   end;
   ACanvas.Brush.Style := bsSolid;
   ACanvas.Brush.Color := COLOR_LIST_BACKGROUND;
   ACanvas.FillRect(Bounds);
   if FDocument = nil then
     Exit;
-  for I := 1 to FDocument.LayerCount - 1 do
+  for I := 1 to DisplayedLayerCount do
   begin
     ItemRect := LayerItemRect(Bounds, I);
     if ItemRect.Top >= Bounds.Bottom then
       Continue;
     if ItemRect.Bottom <= Bounds.Top then
       Break;
-    DrawLayerItem(ACanvas, ItemRect, FDocument[I],
-      FDocument.IsLayerSelected(I), FDocument.SelectedIndex = I);
+    Layer := LayerAt(I);
+    if LayerParentAt(I) <> nil then
+      DrawLayerItem(ACanvas, ItemRect, Layer,
+        (FEditorState <> nil) and
+          (LayerParentAt(I) = FEditorState.OpenGroup) and
+          FEditorState.IsOpenGroupChildSelected(Layer),
+        (FEditorState <> nil) and
+          ((FEditorState.OpenGroupChild = Layer) or
+           (FEditorState.OpenGroup = Layer)))
+    else
+      DrawLayerItem(ACanvas, ItemRect, Layer,
+        FDocument.IsLayerSelected(LayerSourceIndexAt(I)),
+        (FDocument.SelectedIndex = LayerSourceIndexAt(I)) or
+          ((FEditorState <> nil) and (FEditorState.OpenGroup = Layer)));
   end;
+  DrawGroupRanges(ACanvas, Bounds);
 end;
 
 function TVectArtLayerRenderer.FitThumbnailRect(
@@ -679,9 +908,8 @@ var
   ItemRect: TRect;
 begin
   Result := -1;
-  if FDocument = nil then
-    Exit;
-  for I := 1 to FDocument.LayerCount - 1 do
+  RebuildEntries;
+  for I := 1 to DisplayedLayerCount do
   begin
     ItemRect := LayerItemRect(Bounds, I);
     if (Y >= ItemRect.Top) and (Y < ItemRect.Bottom) then
@@ -703,15 +931,44 @@ begin
     Bounds.Right - LAYER_LIST_PADDING, ItemBottom);
 end;
 
+function TVectArtLayerRenderer.LayerAt(Index: Integer): TVectArtLayer;
+begin
+  Result := nil;
+  if (Index <= 0) or (Index > DisplayedLayerCount) then
+    Exit;
+  Result := FEntries[Index - 1].Layer;
+end;
+
+function TVectArtLayerRenderer.LayerDepthAt(Index: Integer): Integer;
+begin
+  Result := 0;
+  if (Index > 0) and (Index <= DisplayedLayerCount) then
+    Result := FEntries[Index - 1].Depth;
+end;
+
+function TVectArtLayerRenderer.LayerParentAt(
+  Index: Integer): TScreenLayoutGroupLayer;
+begin
+  Result := nil;
+  if (Index > 0) and (Index <= DisplayedLayerCount) then
+    Result := FEntries[Index - 1].Parent;
+end;
+
+function TVectArtLayerRenderer.LayerSourceIndexAt(Index: Integer): Integer;
+begin
+  Result := -1;
+  if (Index > 0) and (Index <= DisplayedLayerCount) then
+    Result := FEntries[Index - 1].SourceIndex;
+end;
+
 function TVectArtLayerRenderer.MaximumScrollOffset(
   const Bounds: TRect): Integer;
 var
   ContentHeight: Integer;
   ItemCount: Integer;
 begin
-  if FDocument = nil then
-    Exit(0);
-  ItemCount := Max(FDocument.LayerCount - 1, 0);
+  RebuildEntries;
+  ItemCount := DisplayedLayerCount;
   if ItemCount = 0 then
     Exit(0);
   ContentHeight := ItemCount * LAYER_ROW_HEIGHT +
@@ -736,6 +993,17 @@ begin
     ItemRect.Top + LOCK_BUTTON_TOP,
     ItemRect.Left + STATE_COLUMN_LEFT + STATE_BUTTON_SIZE,
     ItemRect.Top + LOCK_BUTTON_TOP + STATE_BUTTON_SIZE);
+end;
+
+function TVectArtLayerRenderer.ExpandButtonRect(
+  const ItemRect: TRect): TRect;
+var
+  TextLeft: Integer;
+begin
+  TextLeft := Min(ItemRect.Left + 30 + THUMBNAIL_WIDTH,
+    ItemRect.Right - 8) + 8;
+  Result := Rect(TextLeft, ItemRect.Top + 10, TextLeft + 20,
+    ItemRect.Top + 36);
 end;
 
 function TVectArtLayerRenderer.VisibilityButtonRect(

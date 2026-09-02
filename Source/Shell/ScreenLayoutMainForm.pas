@@ -350,6 +350,8 @@ var
 begin
   if FEditorFrame <> nil then
     FEditorFrame.CanvasControl.Invalidate;
+  if FLayerFrame <> nil then
+    FLayerFrame.RefreshFromDocument;
   if FObjectPropertiesFrame <> nil then
     FObjectPropertiesFrame.RefreshFromDocument;
   if FToolPaletteFrame <> nil then
