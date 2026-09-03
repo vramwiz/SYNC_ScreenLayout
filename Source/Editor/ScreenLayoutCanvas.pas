@@ -53,6 +53,7 @@ type
     FViewZoom: Single;
     FZoom: Single;
     procedure CalculateCanvasBounds;
+    procedure ConfigureInteraction;
     procedure EndPan;
     procedure PaintDirect2D;
     procedure PaintGDI;
@@ -1060,6 +1061,17 @@ begin
     UpdateTextEditorBounds;
 end;
 
+procedure TVectArtCanvasControl.ConfigureInteraction;
+begin
+  FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+  if FEditorState = nil then
+    FInteraction.SetVertexStructureEditing(False, False)
+  else
+    FInteraction.SetVertexStructureEditing(
+      FEditorState.CurrentTool in [vetLine, vetPath],
+      FEditorState.CurrentTool = vetShape);
+end;
+
 function TVectArtCanvasControl.ToScreenX(Value: Single): Integer;
 begin
   Result := LogicalToScreenX(Value, FCanvasBounds, FZoom,
@@ -1168,6 +1180,7 @@ var
   OpenGroupBounds: TRectF;
   SelectionGeometry: TVectArtSelectionGeometry;
   TextLayerIndex: Integer;
+  VertexCaptureNeeded: Boolean;
 begin
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
@@ -1184,7 +1197,7 @@ begin
   if Button = mbRight then
   begin
     CalculateCanvasBounds;
-    FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+    ConfigureInteraction;
     if FInteraction.MouseDown(Button, Shift, X, Y) then
     begin
       Invalidate;
@@ -1202,7 +1215,7 @@ begin
     if FTextEditing then
     begin
       CalculateCanvasBounds;
-      FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+      ConfigureInteraction;
       TextLayerIndex := FInteraction.LayerAt(X, Y);
       if TextLayerIndex = FTextLayerIndex then
       begin
@@ -1225,7 +1238,7 @@ begin
     if CanFocus then
       SetFocus;
     CalculateCanvasBounds;
-    FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+    ConfigureInteraction;
     if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
       (FEditorState.OpenGroupChild <> nil) and
       OpenGroupSelectionEditable(FEditorState) and
@@ -1324,7 +1337,7 @@ begin
     begin
       if not PtInRect(FCanvasBounds, Point(X, Y)) then
         Exit;
-      FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+      ConfigureInteraction;
       TextLayerIndex := FInteraction.LayerAt(X, Y);
       if (TextLayerIndex > 0) and
         (FDocument[TextLayerIndex] is TScreenLayoutTextLayer) then
@@ -1340,6 +1353,18 @@ begin
       FTextDragCurrent := FTextDragStart;
       MouseCapture := True;
       Cursor := crIBeam;
+      Invalidate;
+      Exit;
+    end;
+    ConfigureInteraction;
+    if (FEditorState <> nil) and
+      (FEditorState.CurrentTool in [vetLine, vetPath, vetShape]) and
+      FInteraction.MouseDownSelectedVertex(Button, Shift, X, Y,
+        VertexCaptureNeeded) then
+    begin
+      if VertexCaptureNeeded then
+        MouseCapture := True;
+      Cursor := FInteraction.CursorAt(X, Y);
       Invalidate;
       Exit;
     end;
@@ -1366,7 +1391,7 @@ begin
         Cursor := crCross;
       Exit;
     end;
-    FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+    ConfigureInteraction;
     if FInteraction.MouseDown(Button, Shift, X, Y) then
     begin
       MouseCapture := True;
@@ -1449,6 +1474,15 @@ begin
       Exit;
     end;
   end;
+  ConfigureInteraction;
+  if FInteraction.Dragging and FInteraction.MouseMove(Shift, X, Y) then
+  begin
+    if not FInteraction.Dragging then
+      MouseCapture := False;
+    Cursor := FInteraction.CursorAt(X, Y);
+    Invalidate;
+    Exit;
+  end;
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   if FShapeCreation.MouseMove(Shift, X, Y) then
@@ -1471,7 +1505,7 @@ begin
       Cursor := crCross;
     Exit;
   end;
-  FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+  ConfigureInteraction;
   if FInteraction.MouseMove(Shift, X, Y) then
   begin
     if not FInteraction.Dragging then
@@ -1544,7 +1578,7 @@ begin
   if FInteraction.MouseUp(Button) then
   begin
     MouseCapture := False;
-    FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+    ConfigureInteraction;
     Cursor := FInteraction.CursorAt(X, Y);
     Invalidate;
     Exit;
@@ -1555,7 +1589,7 @@ end;
 procedure TVectArtCanvasControl.Paint;
 begin
   CalculateCanvasBounds;
-  FInteraction.Configure(FDocument, FCanvasBounds, FZoom);
+  ConfigureInteraction;
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   UpdateRenderedDocument;

@@ -1,4 +1,4 @@
-// 埋め込みカラーピッカーと選択レイヤーの色・不透明度を双方向同期する。
+﻿// 埋め込みカラーピッカーと選択レイヤーの色・不透明度を双方向同期する。
 unit ScreenLayoutObjectColorController;
 
 interface
@@ -17,6 +17,7 @@ type
     FOpacityGestureActive: Boolean;
     FOpacityStartLayers: TArray<TVectArtLayer>;
     FOpacityStartValues: TArray<Single>;
+    FRefreshing: Boolean;
     FUpdatingColor: Boolean;
     procedure ColorChanged(Sender: TObject);
     procedure OpacityChanged(Sender: TObject);
@@ -48,7 +49,8 @@ var
   OldColor: TColor;
   Target: TScreenLayoutLayerColorTarget;
 begin
-  if FUpdatingColor or (FContext = nil) or (FContext.Document = nil) then
+  if FRefreshing or FUpdatingColor or (FContext = nil) or
+    (FContext.Document = nil) then
     Exit;
   Document := FContext.Document;
   NewColor := ColorToRGB(FFrame.SelectedColor);
@@ -108,7 +110,7 @@ var
   NewValue: Single;
   OldValue: Single;
 begin
-  if (FContext = nil) or (FContext.Document = nil) then
+  if FRefreshing or (FContext = nil) or (FContext.Document = nil) then
     Exit;
   Document := FContext.Document;
   NewValue := FFrame.Opacity / 100.0;
@@ -204,30 +206,37 @@ var
   OpacityLayers: TArray<TVectArtLayer>;
   Target: TScreenLayoutLayerColorTarget;
 begin
-  ColorLayers := ScreenLayoutSelectedColorLayers(FContext);
-  ColorEnabled := Length(ColorLayers) > 0;
-  for I := 0 to High(ColorLayers) do
-    ColorEnabled := ColorEnabled and not ColorLayers[I].Locked;
-  FFrame.ColorEnabled := ColorEnabled;
-  if (Length(ColorLayers) > 0) and
-    TryGetScreenLayoutLayerColor(ColorLayers[0], ColorValue, Target) then
-  begin
-    FUpdatingColor := True;
-    try
-      FFrame.SelectedColor := ColorValue;
-    finally
-      FUpdatingColor := False;
+  if FRefreshing then
+    Exit;
+  FRefreshing := True;
+  try
+    ColorLayers := ScreenLayoutSelectedColorLayers(FContext);
+    ColorEnabled := Length(ColorLayers) > 0;
+    for I := 0 to High(ColorLayers) do
+      ColorEnabled := ColorEnabled and not ColorLayers[I].Locked;
+    FFrame.ColorEnabled := ColorEnabled;
+    if (Length(ColorLayers) > 0) and
+      TryGetScreenLayoutLayerColor(ColorLayers[0], ColorValue, Target) then
+    begin
+      FUpdatingColor := True;
+      try
+        FFrame.SelectedColor := ColorValue;
+      finally
+        FUpdatingColor := False;
+      end;
     end;
-  end;
 
-  OpacityLayers := ScreenLayoutSelectedOpacityLayers(FContext);
-  OpacityEnabled := Length(OpacityLayers) > 0;
-  for I := 0 to High(OpacityLayers) do
-    OpacityEnabled := OpacityEnabled and not OpacityLayers[I].Locked;
-  FFrame.OpacityEnabled := OpacityEnabled;
-  if Length(OpacityLayers) > 0 then
-    FFrame.Opacity := Round(EnsureRange(OpacityLayers[0].Opacity,
-      0.0, 1.0) * 100);
+    OpacityLayers := ScreenLayoutSelectedOpacityLayers(FContext);
+    OpacityEnabled := Length(OpacityLayers) > 0;
+    for I := 0 to High(OpacityLayers) do
+      OpacityEnabled := OpacityEnabled and not OpacityLayers[I].Locked;
+    FFrame.OpacityEnabled := OpacityEnabled;
+    if Length(OpacityLayers) > 0 then
+      FFrame.Opacity := Round(EnsureRange(OpacityLayers[0].Opacity,
+        0.0, 1.0) * 100);
+  finally
+    FRefreshing := False;
+  end;
 end;
 
 procedure TScreenLayoutObjectColorController.SetContext(

@@ -145,25 +145,28 @@ end;
 function LogicalToScreenX(Value: Single; const CanvasBounds: TRect;
   Zoom, CanvasWidth: Single): Integer;
 begin
-  Result := CanvasBounds.Left + Round((Value + CanvasWidth * 0.5) * Zoom);
+  // 表示寸法は整数pxへ丸められるため、左端と論理幅から原点を再計算しない。
+  Result := Round(CanvasBounds.Left + CanvasBounds.Width div 2 +
+    Value * Zoom);
 end;
 
 function LogicalToScreenY(Value: Single; const CanvasBounds: TRect;
   Zoom, CanvasHeight: Single): Integer;
 begin
-  Result := CanvasBounds.Top + Round((Value + CanvasHeight * 0.5) * Zoom);
+  Result := Round(CanvasBounds.Top + CanvasBounds.Height div 2 +
+    Value * Zoom);
 end;
 
 function ScreenToLogicalX(Value: Single; const CanvasBounds: TRect;
   Zoom, CanvasWidth: Single): Single;
 begin
-  Result := (Value - CanvasBounds.Left) / Zoom - CanvasWidth * 0.5;
+  Result := (Value - (CanvasBounds.Left + CanvasBounds.Width div 2)) / Zoom;
 end;
 
 function ScreenToLogicalY(Value: Single; const CanvasBounds: TRect;
   Zoom, CanvasHeight: Single): Single;
 begin
-  Result := (Value - CanvasBounds.Top) / Zoom - CanvasHeight * 0.5;
+  Result := (Value - (CanvasBounds.Top + CanvasBounds.Height div 2)) / Zoom;
 end;
 
 end.

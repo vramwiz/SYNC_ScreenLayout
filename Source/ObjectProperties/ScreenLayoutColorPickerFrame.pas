@@ -1,4 +1,4 @@
-// 画面内へ埋め込む色選択UI。オブジェクトへの適用は上位側で接続する。
+﻿// 画面内へ埋め込む色選択UI。オブジェクトへの適用は上位側で接続する。
 unit ScreenLayoutColorPickerFrame;
 
 interface
@@ -20,7 +20,7 @@ type
     FOnOpacityGestureStart: TNotifyEvent;
     FOpacityLabel: TLabel;
     FOpacityTrackBar: THorizontalTrackBarControl;
-    FSelectedColorIndicator: TPaintBox;
+    FColorTargetSelector: TPaintBox;
     FSVArea: TColorPickerSVArea;
     FTitleLabel: TLabel;
     FUpdating: Boolean;
@@ -30,7 +30,7 @@ type
       Shift: TShiftState; X, Y: Integer);
     procedure OpacityMouseUp(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
-    procedure PaintSelectedColor(Sender: TObject);
+    procedure PaintColorTargetSelector(Sender: TObject);
     procedure SetSelectedColor(const Value: TColor);
     procedure SetColorEnabled(Value: Boolean);
     function GetOpacity: Integer;
@@ -74,11 +74,11 @@ const
   COLOR_BACKGROUND = TColor($00212121);
   COLOR_HEADER = TColor($00292929);
   COLOR_TEXT = TColor($00EEEEEE);
-  COLOR_PICKER_HEIGHT = 104;
-  COLOR_PICKER_MARGIN = 8;
-  HUE_BAR_WIDTH = 20;
-  INDICATOR_SIZE = 30;
-  PICKER_GAP = 5;
+  COLOR_PICKER_HEIGHT = 92;
+  COLOR_PICKER_MARGIN = 6;
+  COLOR_SELECTOR_SIZE = 26;
+  HUE_BAR_WIDTH = 16;
+  PICKER_GAP = 4;
 
 constructor TScreenLayoutColorPickerFrame.Create(AOwner: TComponent);
 begin
@@ -86,7 +86,7 @@ begin
   Color := COLOR_BACKGROUND;
   ParentBackground := False;
   DoubleBuffered := True;
-  Height := 250;
+  Height := 205;
 
   FTitleLabel := TLabel.Create(Self);
   FTitleLabel.Parent := Self;
@@ -94,22 +94,24 @@ begin
   FTitleLabel.Caption := 'Color';
   FTitleLabel.Color := COLOR_HEADER;
   FTitleLabel.Font.Name := 'Segoe UI';
-  FTitleLabel.Font.Height := -13;
+  FTitleLabel.Font.Height := -12;
   FTitleLabel.Font.Style := [fsBold];
   FTitleLabel.Font.Color := COLOR_TEXT;
   FTitleLabel.ParentColor := False;
   FTitleLabel.ParentFont := False;
   FTitleLabel.Layout := tlCenter;
 
-  FSelectedColorIndicator := TPaintBox.Create(Self);
-  FSelectedColorIndicator.Parent := Self;
-  FSelectedColorIndicator.OnPaint := PaintSelectedColor;
+  FColorTargetSelector := TPaintBox.Create(Self);
+  FColorTargetSelector.Parent := Self;
+  FColorTargetSelector.Hint := 'Fill color';
+  FColorTargetSelector.ShowHint := True;
+  FColorTargetSelector.OnPaint := PaintColorTargetSelector;
 
   FOpacityLabel := TLabel.Create(Self);
   FOpacityLabel.Parent := Self;
   FOpacityLabel.AutoSize := False;
   FOpacityLabel.Font.Name := 'Segoe UI';
-  FOpacityLabel.Font.Height := -12;
+  FOpacityLabel.Font.Height := -11;
   FOpacityLabel.Font.Color := COLOR_TEXT;
   FOpacityLabel.ParentFont := False;
 
@@ -183,22 +185,28 @@ begin
     FOnOpacityGestureEnd(Self);
 end;
 
-procedure TScreenLayoutColorPickerFrame.PaintSelectedColor(Sender: TObject);
+procedure TScreenLayoutColorPickerFrame.PaintColorTargetSelector(
+  Sender: TObject);
 var
-  IndicatorRect: TRect;
+  IconRect: TRect;
+  SelectorRect: TRect;
 begin
-  FSelectedColorIndicator.Canvas.Brush.Style := bsSolid;
-  FSelectedColorIndicator.Canvas.Brush.Color := FColor;
-  FSelectedColorIndicator.Canvas.Pen.Color := COLOR_TEXT;
-  IndicatorRect := FSelectedColorIndicator.ClientRect;
-  InflateRect(IndicatorRect, -1, -1);
-  FSelectedColorIndicator.Canvas.Ellipse(IndicatorRect);
+  SelectorRect := FColorTargetSelector.ClientRect;
+  FColorTargetSelector.Canvas.Brush.Style := bsSolid;
+  FColorTargetSelector.Canvas.Brush.Color := TColor($00443820);
+  FColorTargetSelector.Canvas.Pen.Color := TColor($00D77800);
+  FColorTargetSelector.Canvas.Rectangle(SelectorRect);
+  IconRect := SelectorRect;
+  InflateRect(IconRect, -5, -5);
+  FColorTargetSelector.Canvas.Brush.Color := FColor;
+  FColorTargetSelector.Canvas.Pen.Color := COLOR_TEXT;
+  FColorTargetSelector.Canvas.Rectangle(IconRect);
 end;
 
 procedure TScreenLayoutColorPickerFrame.Resize;
 var
   HueWidth: Integer;
-  IndicatorSize: Integer;
+  SelectorSize: Integer;
   Margin: Integer;
   PickerGap: Integer;
   PickerHeight: Integer;
@@ -208,17 +216,16 @@ begin
   Margin := MulDiv(COLOR_PICKER_MARGIN, CurrentPPI, 96);
   PickerGap := MulDiv(PICKER_GAP, CurrentPPI, 96);
   HueWidth := MulDiv(HUE_BAR_WIDTH, CurrentPPI, 96);
-  IndicatorSize := MulDiv(INDICATOR_SIZE, CurrentPPI, 96);
+  SelectorSize := MulDiv(COLOR_SELECTOR_SIZE, CurrentPPI, 96);
   PickerHeight := Min(MulDiv(COLOR_PICKER_HEIGHT, CurrentPPI, 96),
-    Max(ClientHeight - MulDiv(132, CurrentPPI, 96) - Margin, 1));
-  FTitleLabel.SetBounds(0, 0, ClientWidth, MulDiv(32, CurrentPPI, 96));
-  FOpacityLabel.SetBounds(Margin, MulDiv(35, CurrentPPI, 96),
-    Max(ClientWidth - Margin * 2, 1), MulDiv(18, CurrentPPI, 96));
-  FOpacityTrackBar.SetBounds(Margin, MulDiv(51, CurrentPPI, 96),
-    Max(ClientWidth - Margin * 2, 1), MulDiv(30, CurrentPPI, 96));
-  FSelectedColorIndicator.SetBounds(
-    Max((ClientWidth - IndicatorSize) div 2, 0),
-    MulDiv(91, CurrentPPI, 96), IndicatorSize, IndicatorSize);
+    Max(ClientHeight - MulDiv(107, CurrentPPI, 96), 1));
+  FTitleLabel.SetBounds(0, 0, ClientWidth, MulDiv(26, CurrentPPI, 96));
+  FOpacityLabel.SetBounds(Margin, MulDiv(28, CurrentPPI, 96),
+    Max(ClientWidth - Margin * 2, 1), MulDiv(15, CurrentPPI, 96));
+  FOpacityTrackBar.SetBounds(Margin, MulDiv(42, CurrentPPI, 96),
+    Max(ClientWidth - Margin * 2, 1), MulDiv(24, CurrentPPI, 96));
+  FColorTargetSelector.SetBounds(Margin, MulDiv(72, CurrentPPI, 96),
+    SelectorSize, SelectorSize);
   PickerTop := ClientHeight - Margin - PickerHeight;
   FHueBar.SetBounds(Max(ClientWidth - Margin - HueWidth, Margin),
     PickerTop, HueWidth, PickerHeight);
@@ -242,7 +249,8 @@ procedure TScreenLayoutColorPickerFrame.SetColorEnabled(Value: Boolean);
 begin
   FHueBar.Enabled := Value;
   FSVArea.Enabled := Value;
-  FSelectedColorIndicator.Enabled := Value;
+  FColorTargetSelector.Enabled := Value;
+  FColorTargetSelector.Invalidate;
 end;
 
 procedure TScreenLayoutColorPickerFrame.SetOpacityEnabled(Value: Boolean);
@@ -284,7 +292,7 @@ begin
     FHueBar.Color := HsvToColor(FCurrentHue, 1, 1);
     FSVArea.BaseColor := HsvToColor(FCurrentHue, 1, 1);
     FSVArea.Color := FColor;
-    FSelectedColorIndicator.Invalidate;
+    FColorTargetSelector.Invalidate;
   finally
     FUpdating := False;
   end;

@@ -71,7 +71,9 @@ type
     FDragStartPathVertices: TArray<TScreenLayoutVertex>;
     FDragStartShapeContours: TArray<TScreenLayoutContour>; // 単一Shapeの変更前輪郭。
     FPathInteraction: TScreenLayoutPathInteraction;
+    FPathStructureEditingEnabled: Boolean;
     FShapeInteraction: TScreenLayoutShapeInteraction;
+    FShapeStructureEditingEnabled: Boolean;
     FDragStartMouse: TPoint;
     FAxisAlignedSelection: Boolean;
     FMoveOccurred: Boolean;
@@ -137,6 +139,10 @@ type
     // 選択変更またはドラッグを開始し、マウスキャプチャが必要ならTrueを返す。
     function MouseDown(Button: TMouseButton; Shift: TShiftState;
       X, Y: Integer): Boolean; overload;
+    // 現在ツールで許可した選択頂点編集だけを処理し、操作した場合にTrueを返す。
+    function MouseDownSelectedVertex(Button: TMouseButton;
+      Shift: TShiftState; X, Y: Integer;
+      out CaptureNeeded: Boolean): Boolean;
     // 進行中のドラッグをDocumentへ反映し、再描画が必要ならTrueを返す。
     function MouseMove(Shift: TShiftState; X, Y: Integer): Boolean;
     // ドラッグ結果をUndo履歴へ確定し、操作を終了した場合にTrueを返す。
@@ -161,6 +167,8 @@ type
     // 4隅の個別半径を選択・調整するハンドルを返す。
     function RoundedRectangleCornerHandles:
       TArray<TScreenLayoutRoundedCornerHandle>;
+    // 頂点の追加・削除・種別変更を、対応する作成ツールの選択中だけ許可する。
+    procedure SetVertexStructureEditing(PathEnabled, ShapeEnabled: Boolean);
     property Dragging: Boolean read GetDragging;
     property AxisAlignedSelection: Boolean read FAxisAlignedSelection;
     property EditHistory: TVectArtEditHistory read FEditHistory
@@ -431,6 +439,7 @@ var
   Handle: TVectArtSelectionHandle;
   LayerIndex: Integer;
   SelectionRect: TRect;
+  VertexRect: TRect;
   VertexCursor: TCursor;
 begin
   Result := crDefault;
@@ -453,10 +462,24 @@ begin
     Exit(crSizeAll);
   if FDocument = nil then
     Exit;
-  if FPathInteraction.CursorAt(X, Y, VertexCursor) then
-    Exit(VertexCursor);
-  if FShapeInteraction.CursorAt(X, Y, VertexCursor) then
-    Exit(VertexCursor);
+  if FPathStructureEditingEnabled then
+  begin
+    if FPathInteraction.CursorAt(X, Y, VertexCursor) then
+      Exit(VertexCursor);
+  end
+  else
+    for VertexRect in FPathInteraction.SelectedVertexRects do
+      if PtInRect(VertexRect, Point(X, Y)) then
+        Exit(crCross);
+  if FShapeStructureEditingEnabled then
+  begin
+    if FShapeInteraction.CursorAt(X, Y, VertexCursor) then
+      Exit(VertexCursor);
+  end
+  else
+    for VertexRect in FShapeInteraction.SelectedVertexRects do
+      if PtInRect(VertexRect, Point(X, Y)) then
+        Exit(crCross);
   if SelectedArcAngleHandlesCore(ArcHandles) and
     not FDocument[FDocument.SelectedIndex].Locked and
     (PtInRect(ArcHandles.StartHandle, Point(X, Y)) or
@@ -1556,36 +1579,25 @@ var
   SelectionRect: TRect;
   ShapeBounds: TRectF;
   ShapeLayer: TScreenLayoutShapeLayer;
+  VertexCaptureNeeded: Boolean;
   WasSelected: Boolean;
 begin
   Result := False;
   if (FDocument = nil) or (FZoom <= 0) then
     Exit;
-  if Button = mbRight then
+  if MouseDownSelectedVertex(Button, Shift, X, Y,
+    VertexCaptureNeeded) then
   begin
-    if FPathInteraction.DeleteVertexAt(X, Y) then
+    // 右クリックの頂点削除はキャプチャ不要だが、Canvas側には処理済みと返して
+    // 背景パンの開始を抑止する。
+    if Button = mbRight then
       Exit(True);
-    if FShapeInteraction.DeleteVertexAt(X, Y) then
-      Exit(True);
-    Exit(False);
+    Exit(VertexCaptureNeeded);
   end;
+  if Button = mbRight then
+    Exit(False);
   if Button <> mbLeft then
     Exit;
-  if FPathInteraction.ApplyVertexKindAt(X, Y) or
-    FShapeInteraction.ApplyVertexKindAt(X, Y) then
-    Exit(False);
-  if FPathInteraction.BeginBezierHandleDragAt(X, Y) then
-  begin
-    FDragMode := vcdmPathBezierHandle;
-    FDragStartMouse := Point(X, Y);
-    Exit(True);
-  end;
-  if FShapeInteraction.BeginBezierHandleDragAt(X, Y) then
-  begin
-    FDragMode := vcdmShapeBezierHandle;
-    FDragStartMouse := Point(X, Y);
-    Exit(True);
-  end;
   if ssCtrl in Shift then
   begin
     FDragLayerIndex := HitTestLayer(X, Y);
@@ -1595,23 +1607,6 @@ begin
     // 選択だけでドラッグは開始しないため、Canvasへマウスキャプチャを要求しない。
     Exit(False);
   end;
-  if not SelectionContainsLockedLayer and
-    FPathInteraction.BeginVertexDragAt(X, Y) then
-  begin
-    FDragMode := vcdmPathVertex;
-    FDragStartMouse := Point(X, Y);
-    Exit(True);
-  end;
-  if not SelectionContainsLockedLayer and
-    FShapeInteraction.BeginVertexDragAt(X, Y) then
-  begin
-    FDragMode := vcdmShapeVertex;
-    FDragStartMouse := Point(X, Y);
-    Exit(True);
-  end;
-  if FPathInteraction.InsertVertexAt(X, Y) or
-    FShapeInteraction.InsertVertexAt(X, Y) then
-    Exit(False);
   FPathInteraction.ClearSelection;
   FShapeInteraction.ClearSelection;
   if not SelectionContainsLockedLayer and
@@ -1873,6 +1868,72 @@ begin
   end;
   FDragStartMouse := Point(X, Y);
   Result := True;
+end;
+
+function TVectArtCanvasInteraction.MouseDownSelectedVertex(
+  Button: TMouseButton; Shift: TShiftState; X, Y: Integer;
+  out CaptureNeeded: Boolean): Boolean;
+begin
+  Result := False;
+  CaptureNeeded := False;
+  if (FDocument = nil) or (FZoom <= 0) then
+    Exit;
+  if Button = mbRight then
+  begin
+    if FPathStructureEditingEnabled and
+      FPathInteraction.DeleteVertexAt(X, Y) then
+      Exit(True);
+    if FShapeStructureEditingEnabled and
+      FShapeInteraction.DeleteVertexAt(X, Y) then
+      Exit(True);
+    Exit;
+  end;
+  if (Button <> mbLeft) or (ssCtrl in Shift) then
+    Exit;
+  if FPathStructureEditingEnabled and
+    FPathInteraction.ApplyVertexKindAt(X, Y) then
+    Exit(True);
+  if FShapeStructureEditingEnabled and
+    FShapeInteraction.ApplyVertexKindAt(X, Y) then
+    Exit(True);
+  if FPathStructureEditingEnabled and
+    FPathInteraction.BeginBezierHandleDragAt(X, Y) then
+  begin
+    FDragMode := vcdmPathBezierHandle;
+    FDragStartMouse := Point(X, Y);
+    CaptureNeeded := True;
+    Exit(True);
+  end;
+  if FShapeStructureEditingEnabled and
+    FShapeInteraction.BeginBezierHandleDragAt(X, Y) then
+  begin
+    FDragMode := vcdmShapeBezierHandle;
+    FDragStartMouse := Point(X, Y);
+    CaptureNeeded := True;
+    Exit(True);
+  end;
+  if not SelectionContainsLockedLayer and
+    FPathInteraction.BeginVertexDragAt(X, Y) then
+  begin
+    FDragMode := vcdmPathVertex;
+    FDragStartMouse := Point(X, Y);
+    CaptureNeeded := True;
+    Exit(True);
+  end;
+  if not SelectionContainsLockedLayer and
+    FShapeInteraction.BeginVertexDragAt(X, Y) then
+  begin
+    FDragMode := vcdmShapeVertex;
+    FDragStartMouse := Point(X, Y);
+    CaptureNeeded := True;
+    Exit(True);
+  end;
+  if FPathStructureEditingEnabled and
+    FPathInteraction.InsertVertexAt(X, Y) then
+    Exit(True);
+  if FShapeStructureEditingEnabled and
+    FShapeInteraction.InsertVertexAt(X, Y) then
+    Exit(True);
 end;
 
 function TVectArtCanvasInteraction.MouseMove(Shift: TShiftState;
@@ -2316,8 +2377,10 @@ end;
 function TVectArtCanvasInteraction.SelectedShapeVertexKindButtons:
   TArray<TScreenLayoutVertexKindButton>;
 begin
-  Result := FPathInteraction.SelectedVertexKindButtons;
-  if Length(Result) = 0 then
+  Result := nil;
+  if FPathStructureEditingEnabled then
+    Result := FPathInteraction.SelectedVertexKindButtons;
+  if (Length(Result) = 0) and FShapeStructureEditingEnabled then
     Result := FShapeInteraction.SelectedVertexKindButtons;
 end;
 
@@ -2332,9 +2395,17 @@ end;
 function TVectArtCanvasInteraction.SelectedShapeBezierHandles(
   out Handles: TScreenLayoutBezierHandles): Boolean;
 begin
-  Result := FPathInteraction.SelectedBezierHandles(Handles);
-  if not Result then
+  Result := FPathStructureEditingEnabled and
+    FPathInteraction.SelectedBezierHandles(Handles);
+  if not Result and FShapeStructureEditingEnabled then
     Result := FShapeInteraction.SelectedBezierHandles(Handles);
+end;
+
+procedure TVectArtCanvasInteraction.SetVertexStructureEditing(
+  PathEnabled, ShapeEnabled: Boolean);
+begin
+  FPathStructureEditingEnabled := PathEnabled;
+  FShapeStructureEditingEnabled := ShapeEnabled;
 end;
 
 function TVectArtCanvasInteraction.RoundedRectangleRadiusHandle(

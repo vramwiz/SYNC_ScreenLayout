@@ -95,6 +95,18 @@ begin
       'Logical X origin is not at the canvas center');
     Check(LogicalToScreenY(0, Rect(100, 50, 300, 150), 1, 100) = 100,
       'Logical Y origin is not at the canvas center');
+    Check(LogicalToScreenX(0, Rect(32, 41, 552, 334),
+      520 / 1920, 1920) = 292,
+      '1920 canvas X origin is not at the rounded display center');
+    Check(LogicalToScreenY(0, Rect(32, 41, 552, 334),
+      520 / 1920, 1080) = 187,
+      '1080 canvas Y origin is not at the rounded display center');
+    Check(SameValue(ScreenToLogicalX(292, Rect(32, 41, 552, 334),
+      520 / 1920, 1920), 0.0),
+      'Rounded 1920 canvas center does not convert to logical X zero');
+    Check(SameValue(ScreenToLogicalY(187, Rect(32, 41, 552, 334),
+      520 / 1920, 1080), 0.0),
+      'Rounded 1080 canvas center does not convert to logical Y zero');
     Check(SameValue(ScreenToLogicalX(100,
       Rect(100, 50, 300, 150), 1, 200), -100.0),
       'Canvas left edge is not negative half width');
