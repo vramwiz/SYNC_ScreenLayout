@@ -15,6 +15,7 @@ uses
   ScreenLayoutLineToolbar,
   ScreenLayoutLayerOperations, ScreenLayoutEditActionsUI,
   ScreenLayoutGroupCommands,
+  ScreenLayoutGeometryPropertiesFrame,
   ScreenLayoutObjectPropertiesFrame, ScreenLayoutToolFrames,
   ScreenLayoutToolPaletteFrame;
 
@@ -54,6 +55,8 @@ type
     FFileDropCaptionBase: string;
     FFileDropCaptionEnabled: Boolean;
     FFileMenu: TVectArtDarkPopupMenu;
+    FGeometryPopup: TForm;
+    FGeometryPopupFrame: TScreenLayoutGeometryPropertiesFrame;
     FLayerFrame: TLayerPanelFrame;
     FLineToolbar: TVectArtLineToolbarControl;
     FObjectPropertiesFrame: TObjectPropertiesFrame;
@@ -75,6 +78,10 @@ type
     procedure FinalizeSkiaRuntime;
     procedure FileOpenClick(Sender: TObject);
     procedure FileSaveClick(Sender: TObject);
+    procedure GeometryPopupDeactivate(Sender: TObject);
+    procedure GeometryPopupKeyDown(Sender: TObject; var Key: Word;
+      Shift: TShiftState);
+    procedure GeometrySettingsRequest(Sender: TObject);
     procedure HistoryChanged(Sender: TObject);
     procedure EditorStateChanged(Sender: TObject);
     procedure InitializeSkiaRuntime;
@@ -92,6 +99,7 @@ type
     procedure ToolMenuItemClick(Sender: TObject);
     procedure ToolVisibilityChanged(Sender: TToolPlaceholderFrame);
     procedure UpdateLayoutEditMenu;
+    procedure UpdateGeometrySettingsAvailability;
     procedure UpdateToolMenuItems;
     procedure WMDropFiles(var Message: TWMDropFiles); message WM_DROPFILES;
   public
@@ -210,6 +218,7 @@ begin
   FEditActionsUI.Document := FDocument;
   FEditActionsUI.History := FEditHistory;
   FEditActionsUI.OnCanvasSettingsRequest := CanvasSettingsRequest;
+  FEditActionsUI.OnGeometrySettingsRequest := GeometrySettingsRequest;
   pnlViewMenuButton.Left := 36;
   FLineToolbar := TVectArtLineToolbarControl.CreateForHost(Self,
     pnlShortcutBar);
@@ -217,6 +226,27 @@ begin
   FLineToolbar.EditHistory := FEditHistory;
   FLineToolbar.EditorState := FEditorState;
   FLineToolbar.BringToFront;
+
+  // 低頻度の厳密配置は右ペインを占有せず、編集メニューからモデルレス表示する。
+  FGeometryPopup := TForm.CreateNew(Self);
+  FGeometryPopup.BorderIcons := [];
+  FGeometryPopup.BorderStyle := bsNone;
+  FGeometryPopup.Caption := '配置とサイズ';
+  FGeometryPopup.ClientWidth := 360;
+  FGeometryPopup.ClientHeight := 207;
+  FGeometryPopup.Color := $00212121;
+  FGeometryPopup.KeyPreview := True;
+  FGeometryPopup.OnDeactivate := GeometryPopupDeactivate;
+  FGeometryPopup.OnKeyDown := GeometryPopupKeyDown;
+  FGeometryPopup.PopupParent := Self;
+  FGeometryPopup.Position := poDesigned;
+  FGeometryPopupFrame := TScreenLayoutGeometryPropertiesFrame.Create(
+    FGeometryPopup);
+  FGeometryPopupFrame.Parent := FGeometryPopup;
+  FGeometryPopupFrame.Align := alClient;
+  FGeometryPopupFrame.Document := FDocument;
+  FGeometryPopupFrame.EditHistory := FEditHistory;
+  FGeometryPopupFrame.EditorState := FEditorState;
   FViewMenu := TVectArtDarkPopupMenu.CreateForControls(Self, Self,
     pnlViewMenuButton, pnlViewMenuPopup);
   FMenuGroup := TVectArtDarkMenuGroup.Create(Self);
@@ -279,6 +309,46 @@ begin
     FDocument.SetCanvasSize(CanvasWidth, CanvasHeight);
     EditorStateChanged(FEditorState);
   end;
+end;
+
+procedure TMainForm.GeometryPopupDeactivate(Sender: TObject);
+begin
+  if FGeometryPopup <> nil then
+    FGeometryPopup.Hide;
+end;
+
+procedure TMainForm.GeometryPopupKeyDown(Sender: TObject; var Key: Word;
+  Shift: TShiftState);
+begin
+  if Key <> VK_ESCAPE then
+    Exit;
+  // Escでは編集中の文字列をDocumentへ適用せず、確定済み値へ戻して閉じる。
+  if FGeometryPopupFrame <> nil then
+    FGeometryPopupFrame.RefreshFromDocument;
+  FGeometryPopup.Hide;
+  Key := 0;
+end;
+
+procedure TMainForm.GeometrySettingsRequest(Sender: TObject);
+var
+  PopupBounds: TRect;
+begin
+  UpdateGeometrySettingsAvailability;
+  if (FEditActionsUI = nil) or
+    not FEditActionsUI.GeometrySettingsEnabled or
+    (FGeometryPopup = nil) then
+    Exit;
+  FGeometryPopupFrame.RefreshFromDocument;
+  PopupBounds := Rect(Left + (Width - FGeometryPopup.Width) div 2,
+    Top + (Height - FGeometryPopup.Height) div 2,
+    Left + (Width + FGeometryPopup.Width) div 2,
+    Top + (Height + FGeometryPopup.Height) div 2);
+  PopupBounds := ConstrainToMonitor(PopupBounds);
+  FGeometryPopup.SetBounds(PopupBounds.Left, PopupBounds.Top,
+    PopupBounds.Width, PopupBounds.Height);
+  FGeometryPopup.Show;
+  FGeometryPopup.BringToFront;
+  FGeometryPopupFrame.FocusFirstInput;
 end;
 
 procedure TMainForm.DocumentChanged(Sender: TObject);
@@ -349,6 +419,10 @@ var
   CanvasSize: string;
   VertexMode: string;
 begin
+  UpdateGeometrySettingsAvailability;
+  if (FGeometryPopup <> nil) and FGeometryPopup.Visible and
+    (FGeometryPopupFrame <> nil) then
+    FGeometryPopupFrame.RefreshFromDocument;
   if FEditorFrame <> nil then
     FEditorFrame.CanvasControl.Invalidate;
   if FLayerFrame <> nil then
@@ -600,6 +674,8 @@ begin
     DragAcceptFiles(Handle, False);
   SaveLayoutSettings;
   FreeAndNil(FShortcuts);
+  FreeAndNil(FGeometryPopup);
+  FGeometryPopupFrame := nil;
   FreeAndNil(FLineToolbar);
   FDockManager.Free;
   if FDocument <> nil then
@@ -957,6 +1033,21 @@ begin
     FDockManager.ToolVisible(FToolPaletteFrame), 'Tools');
   FObjectPropertiesMenuItem.Caption := CheckedMenuCaption(
     FDockManager.ToolVisible(FObjectPropertiesFrame), 'Object Properties');
+end;
+
+procedure TMainForm.UpdateGeometrySettingsAvailability;
+var
+  Available: Boolean;
+begin
+  // 開いたグループでは直下の単一選択を優先し、それ以外はDocument選択を対象にする。
+  Available := (FDocument <> nil) and
+    (((FEditorState <> nil) and
+      (FEditorState.OpenGroupChildCount = 1)) or
+     (FDocument.SelectionCount > 0));
+  if FEditActionsUI <> nil then
+    FEditActionsUI.GeometrySettingsEnabled := Available;
+  if not Available and (FGeometryPopup <> nil) then
+    FGeometryPopup.Hide;
 end;
 
 procedure TMainForm.FormResize(Sender: TObject);

@@ -1,4 +1,4 @@
-﻿// Editメニューとコード描画Undo／Redoショートカットを構築・管理する。
+﻿// Editメニュー、配置ポップアップの要求、コード描画Undo／Redoショートカットを管理する。
 unit ScreenLayoutEditActionsUI;
 
 interface
@@ -25,8 +25,11 @@ type
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
     procedure Paint; override;
   public
+    // Undo／Redoと図形論理演算のコード描画ボタンを生成する。
     constructor Create(AOwner: TComponent); override;
+    // 履歴と選択状態から各ボタンの有効状態を再計算する。
     procedure RefreshState;
+    // DocumentとHistoryは非所有参照であり、交換時に表示を再同期する。
     property Document: TVectArtDocument read FDocument write SetDocument;
     property History: TVectArtEditHistory read FHistory write SetHistory;
   end;
@@ -36,31 +39,48 @@ type
     FCanvasSettingsItem: TPanel;
     FCanvasSettingsVisible: Boolean;
     FDocument: TVectArtDocument;
+    FGeometrySettingsEnabled: Boolean;
+    FGeometrySettingsItem: TPanel;
     FHistory: TVectArtEditHistory;
     FMenu: TVectArtDarkPopupMenu;
     FOnCanvasSettingsRequest: TNotifyEvent;
+    FOnGeometrySettingsRequest: TNotifyEvent;
     FRedoItem: TPanel;
     FShortcutControl: TVectArtEditShortcutControl;
     FUndoItem: TPanel;
     procedure CanvasSettingsClick(Sender: TObject);
+    procedure GeometrySettingsClick(Sender: TObject);
     function NewMenuItem(const Caption: string; Top: Integer;
       ClickHandler: TNotifyEvent): TPanel;
     procedure RedoClick(Sender: TObject);
     procedure SetDocument(const Value: TVectArtDocument);
     procedure SetHistory(const Value: TVectArtEditHistory);
     procedure SetCanvasSettingsVisible(const Value: Boolean);
+    procedure SetGeometrySettingsEnabled(const Value: Boolean);
     procedure UndoClick(Sender: TObject);
   public
+    // メニューとショートカットUIを各Hostへ生成し、初期状態を同期する。
     constructor CreateForHosts(AOwner: TComponent; AMainForm,
       AMenuBar, AShortcutHost: TWinControl);
+    // 履歴、選択、図形演算可否を各メニュー項目とショートカットへ反映する。
     procedure RefreshState;
+    // DocumentとHistoryは非所有参照であり、交換時にメニューを再同期する。
     property Document: TVectArtDocument read FDocument write SetDocument;
     property History: TVectArtEditHistory read FHistory write SetHistory;
+    // Editボタンとポップアップを所有するメニューUI。
     property Menu: TVectArtDarkPopupMenu read FMenu;
+    // 単独アプリだけが持つキャンバス設定項目の表示を切り替える。
     property CanvasSettingsVisible: Boolean read FCanvasSettingsVisible
       write SetCanvasSettingsVisible;
+    // 選択がなく配置対象を確定できない間は、配置とサイズ項目を無効化する。
+    property GeometrySettingsEnabled: Boolean read FGeometrySettingsEnabled
+      write SetGeometrySettingsEnabled;
+    // キャンバス設定Dialogを所有する呼び出し側へ表示を要求する。
     property OnCanvasSettingsRequest: TNotifyEvent
       read FOnCanvasSettingsRequest write FOnCanvasSettingsRequest;
+    // メニュー自身は編集せず、ポップアップ表示を所有する呼び出し側へ要求する。
+    property OnGeometrySettingsRequest: TNotifyEvent
+      read FOnGeometrySettingsRequest write FOnGeometrySettingsRequest;
   end;
 
 implementation
@@ -307,10 +327,13 @@ constructor TVectArtEditActionsUI.CreateForHosts(AOwner: TComponent;
 begin
   inherited Create(AOwner);
   FMenu := TVectArtDarkPopupMenu.CreateForHosts(Self, AMainForm, AMenuBar,
-    '編集', 0, 36, 190, 96);
+    '編集', 0, 36, 190, 128);
   FUndoItem := NewMenuItem('Undo    Ctrl+Z', 0, UndoClick);
   FRedoItem := NewMenuItem('Redo    Ctrl+Y', 32, RedoClick);
-  FCanvasSettingsItem := NewMenuItem('キャンバスの設定', 64,
+  FGeometrySettingsItem := NewMenuItem('配置とサイズ...', 64,
+    GeometrySettingsClick);
+  FGeometrySettingsEnabled := False;
+  FCanvasSettingsItem := NewMenuItem('キャンバスの設定', 96,
     CanvasSettingsClick);
   FCanvasSettingsVisible := True;
 
@@ -318,6 +341,14 @@ begin
   FShortcutControl.Parent := AShortcutHost;
   FShortcutControl.Align := alClient;
   FShortcutControl.ShowHint := True;
+end;
+
+procedure TVectArtEditActionsUI.GeometrySettingsClick(Sender: TObject);
+begin
+  FMenu.Close;
+  if FGeometrySettingsEnabled and
+    Assigned(FOnGeometrySettingsRequest) then
+    FOnGeometrySettingsRequest(Self);
 end;
 
 procedure TVectArtEditActionsUI.CanvasSettingsClick(Sender: TObject);
@@ -349,6 +380,11 @@ begin
   else FUndoItem.Font.Color := COLOR_DISABLED;
   if FRedoItem.Enabled then FRedoItem.Font.Color := COLOR_TEXT
   else FRedoItem.Font.Color := COLOR_DISABLED;
+  FGeometrySettingsItem.Enabled := FGeometrySettingsEnabled;
+  if FGeometrySettingsItem.Enabled then
+    FGeometrySettingsItem.Font.Color := COLOR_TEXT
+  else
+    FGeometrySettingsItem.Font.Color := COLOR_DISABLED;
 end;
 
 procedure TVectArtEditActionsUI.SetDocument(const Value: TVectArtDocument);
@@ -371,9 +407,18 @@ begin
   FCanvasSettingsVisible := Value;
   FCanvasSettingsItem.Visible := Value;
   if Value then
-    FMenu.PopupHeight := 96
+    FMenu.PopupHeight := 128
   else
-    FMenu.PopupHeight := 64;
+    FMenu.PopupHeight := 96;
+end;
+
+procedure TVectArtEditActionsUI.SetGeometrySettingsEnabled(
+  const Value: Boolean);
+begin
+  if FGeometrySettingsEnabled = Value then
+    Exit;
+  FGeometrySettingsEnabled := Value;
+  RefreshState;
 end;
 
 procedure TVectArtEditActionsUI.UndoClick(Sender: TObject);

@@ -1,4 +1,4 @@
-﻿// ツールFrameの左右ドッキング、順序、フローティングとの切替を管理する。
+﻿// ツールFrameの左右ドッキング、順序、フローティング、スプリッター幅の保存と復元を管理する。
 // 個別ツールの内容には依存せず、空スロットを残さずにドック領域を再構成する。
 unit ScreenLayoutDockManager;
 
@@ -37,10 +37,12 @@ type
     function InsertIndexAt(Side: TVectDockSide; const ScreenPoint: TPoint): Integer;
     procedure LayoutDockArea(Side: TVectDockSide);
     procedure LayoutDockAreas;
+    procedure ResizeDockArea(Side: TVectDockSide);
     function ReadToolSide(Ini: TCustomIniFile;
       Frame: TToolPlaceholderFrame): TVectDockSide;
     function ScreenRect(Control: TPanel): TRect;
     procedure SetLayoutEditing(const Value: Boolean);
+    procedure SplitterMoved(Sender: TObject);
     function ToolsForSide(Side: TVectDockSide): TList<TToolPlaceholderFrame>;
     procedure ToolDetached(Sender: TToolPlaceholderFrame);
     procedure ToolDockRequest(Sender: TToolPlaceholderFrame;
@@ -50,18 +52,28 @@ type
     procedure ToolCloseRequested(Sender: TToolPlaceholderFrame);
     procedure UpdateDropTargets(const ScreenPoint: TPoint);
   public
+    // 非所有のFormと各ドックControlを接続し、スプリッター移動の監視を開始する。
     constructor Create(AOwnerForm: TCustomForm; AWorkspace, ALeftArea,
       ARightArea, ALeftDropTarget, ARightDropTarget: TPanel;
       ALeftSplitter, ARightSplitter: TSplitter);
+    // 登録Frameのイベント参照を解除する。渡されたControlとFrameは解放しない。
     destructor Destroy; override;
+    // Frameを指定側へ登録し、所有権を取得せず専用Slotへドックする。
     procedure RegisterTool(Frame: TToolPlaceholderFrame; DefaultSide: TVectDockSide;
       DefaultIndex: Integer = -1);
+    // 現在のドック幅を主要ツールへ反映し、ドロップ領域をWorkspaceへ追従させる。
     procedure Resize;
+    // 表示、順序、フローティング位置、左右ドック幅をIniから復元する。
     procedure LoadLayout(Ini: TCustomIniFile);
+    // 現在の配置と左右ドック幅をIniへ保存する。
     procedure SaveLayout(Ini: TCustomIniFile);
+    // 登録済みFrameを直前の側と順序へ表示するか、Slotごと隠す。
     procedure SetToolVisible(Frame: TToolPlaceholderFrame; const Value: Boolean);
+    // Frameがドック済みまたはフローティング表示中ならTrueを返す。
     function ToolVisible(Frame: TToolPlaceholderFrame): Boolean;
+    // 有効時だけツールの移動、切離し、閉じる操作を許可する。
     property LayoutEditing: Boolean read FLayoutEditing write SetLayoutEditing;
+    // 表示状態の操作が完了した後、メニュー同期を呼び出し側へ通知する。
     property OnToolVisibilityChanged: TToolFrameNotifyEvent
       read FOnToolVisibilityChanged write FOnToolVisibilityChanged;
   end;
@@ -72,10 +84,11 @@ uses
   System.Math, System.SysUtils, Vcl.Controls, Vcl.Graphics;
 
 const
-  DOCK_GAP          = 4;
-  DOCK_TARGET_WIDTH = 64;
-  COLOR_TARGET_IDLE = TColor($00302A24);
-  COLOR_TARGET_HOT  = TColor($007A4A22);
+  DOCK_GAP            = 4;
+  DOCK_MIN_TOOL_WIDTH = 48; // 過度に縮めてもSlotを消失させない下限。
+  DOCK_TARGET_WIDTH   = 64;
+  COLOR_TARGET_IDLE   = TColor($00302A24);
+  COLOR_TARGET_HOT    = TColor($007A4A22);
 
 function ConstrainToolBounds(const Bounds: TRect): TRect;
 var
@@ -117,6 +130,8 @@ begin
   FRightTools := TList<TToolPlaceholderFrame>.Create;
   FLastSides := TDictionary<TToolPlaceholderFrame, TVectDockSide>.Create;
   FLastIndices := TDictionary<TToolPlaceholderFrame, Integer>.Create;
+  FLeftSplitter.OnMoved := SplitterMoved;
+  FRightSplitter.OnMoved := SplitterMoved;
   HideDropTargets;
 end;
 
@@ -124,6 +139,8 @@ destructor TVectDockManager.Destroy;
 var
   Frame: TToolPlaceholderFrame;
 begin
+  FLeftSplitter.OnMoved := nil;
+  FRightSplitter.OnMoved := nil;
   for Frame in FAllTools do
   begin
     Frame.OnDetached := nil;
@@ -240,12 +257,9 @@ procedure TVectDockManager.LayoutDockArea(Side: TVectDockSide);
 var
   Area: TPanel;
   Frame: TToolPlaceholderFrame;
-  I: Integer;
-  Slot: TPanel;
   Splitter: TSplitter;
   Tools: TList<TToolPlaceholderFrame>;
   TotalWidth: Integer;
-  X: Integer;
 begin
   Area := AreaForSide(Side);
   Tools := ToolsForSide(Side);
@@ -265,14 +279,7 @@ begin
   Area.Width := TotalWidth;
   Area.Visible := True;
   Splitter.Visible := True;
-  X := 0;
-  for I := 0 to Tools.Count - 1 do
-  begin
-    Frame := Tools[I];
-    Slot := TPanel(Frame.Parent);
-    Slot.SetBounds(X, 0, Frame.PreferredDockWidth, Area.ClientHeight);
-    Inc(X, Frame.PreferredDockWidth + DOCK_GAP);
-  end;
+  ResizeDockArea(Side);
 end;
 
 procedure TVectDockManager.LayoutDockAreas;
@@ -362,6 +369,20 @@ begin
   finally
     FRestoring := False;
   end;
+  FWorkspace.DisableAlign;
+  try
+    // Frame登録中の推奨幅再計算より、利用者が最後に決めた外枠幅を優先する。
+    if FLeftTools.Count > 0 then
+      FLeftArea.Width := Max(Ini.ReadInteger('DockAreas', 'LeftWidth',
+        FLeftArea.Width), DOCK_MIN_TOOL_WIDTH);
+    if FRightTools.Count > 0 then
+      FRightArea.Width := Max(Ini.ReadInteger('DockAreas', 'RightWidth',
+        FRightArea.Width), DOCK_MIN_TOOL_WIDTH);
+  finally
+    FWorkspace.EnableAlign;
+  end;
+  FWorkspace.Realign;
+  Resize;
   if Assigned(FOnToolVisibilityChanged) then
     for Frame in FAllTools do
       FOnToolVisibilityChanged(Frame);
@@ -392,6 +413,8 @@ var
   Section: string;
   Side: TVectDockSide;
 begin
+  Ini.WriteInteger('DockAreas', 'LeftWidth', FLeftArea.Width);
+  Ini.WriteInteger('DockAreas', 'RightWidth', FRightArea.Width);
   for Frame in FAllTools do
   begin
     Section := 'Tool.' + Frame.ToolId;
@@ -493,18 +516,56 @@ begin
 end;
 
 procedure TVectDockManager.Resize;
-var
-  Frame: TToolPlaceholderFrame;
 begin
-  for Frame in FLeftTools do
-    TPanel(Frame.Parent).Height := FLeftArea.ClientHeight;
-  for Frame in FRightTools do
-    TPanel(Frame.Parent).Height := FRightArea.ClientHeight;
+  ResizeDockArea(vdsLeft);
+  ResizeDockArea(vdsRight);
   if FLeftDropTarget.Visible then
     FLeftDropTarget.SetBounds(0, 0, DOCK_TARGET_WIDTH, FWorkspace.ClientHeight);
   if FRightDropTarget.Visible then
     FRightDropTarget.SetBounds(FWorkspace.ClientWidth - DOCK_TARGET_WIDTH, 0,
       DOCK_TARGET_WIDTH, FWorkspace.ClientHeight);
+end;
+
+procedure TVectDockManager.ResizeDockArea(Side: TVectDockSide);
+var
+  Area: TPanel;
+  FixedWidth: Integer;
+  FlexibleIndex: Integer;
+  FlexibleWidth: Integer;
+  Frame: TToolPlaceholderFrame;
+  I: Integer;
+  Slot: TPanel;
+  Tools: TList<TToolPlaceholderFrame>;
+  X: Integer;
+begin
+  Area := AreaForSide(Side);
+  Tools := ToolsForSide(Side);
+  if Tools.Count = 0 then
+    Exit;
+
+  // 外側スプリッターの増減分は、最も幅の広い主要ツールへ割り当てる。
+  FlexibleIndex := 0;
+  for I := 1 to Tools.Count - 1 do
+    if Tools[I].PreferredDockWidth > Tools[FlexibleIndex].PreferredDockWidth then
+      FlexibleIndex := I;
+  FixedWidth := DOCK_GAP * (Tools.Count - 1);
+  for I := 0 to Tools.Count - 1 do
+    if I <> FlexibleIndex then
+      Inc(FixedWidth, Tools[I].PreferredDockWidth);
+  FlexibleWidth := Max(Area.ClientWidth - FixedWidth, DOCK_MIN_TOOL_WIDTH);
+
+  X := 0;
+  for I := 0 to Tools.Count - 1 do
+  begin
+    Frame := Tools[I];
+    Slot := TPanel(Frame.Parent);
+    if I = FlexibleIndex then
+      Slot.SetBounds(X, 0, FlexibleWidth, Area.ClientHeight)
+    else
+      Slot.SetBounds(X, 0, Frame.PreferredDockWidth, Area.ClientHeight);
+    Slot.Realign;
+    Inc(X, Slot.Width + DOCK_GAP);
+  end;
 end;
 
 function TVectDockManager.ScreenRect(Control: TPanel): TRect;
@@ -539,6 +600,14 @@ begin
   end;
   for Frame in FAllTools do
     Frame.LayoutEditing := Value;
+end;
+
+procedure TVectDockManager.SplitterMoved(Sender: TObject);
+begin
+  if Sender = FLeftSplitter then
+    ResizeDockArea(vdsLeft)
+  else if Sender = FRightSplitter then
+    ResizeDockArea(vdsRight);
 end;
 
 function TVectDockManager.ToolsForSide(

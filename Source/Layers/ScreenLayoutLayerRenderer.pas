@@ -1,20 +1,20 @@
-﻿// 共通Skia描画結果をサムネイルへ合成し、レイヤー一覧の行と状態アイコンを描画する。
+﻿// 文字情報を持たないレイヤー行へ、共通Skiaサムネイルと操作用状態アイコンを描画する。
 unit ScreenLayoutLayerRenderer;
 
 interface
 
 uses
-  System.Generics.Collections, System.SysUtils, System.Types, Vcl.Direct2D,
+  System.Generics.Collections, System.Types, Vcl.Direct2D,
   Vcl.Graphics, ScreenLayoutDocument, ScreenLayoutEditorState,
   ScreenLayoutRenderer;
 
 type
   TScreenLayoutLayerListEntry = record
-    Depth: Integer;
-    GroupRangeStart: Integer;
-    Layer: TVectArtLayer;
-    Parent: TScreenLayoutGroupLayer;
-    SourceIndex: Integer;
+    Depth: Integer;                  // 範囲線のX位置に使う表示上の階層深度。
+    GroupRangeStart: Integer;        // 展開子の先頭。子を持たない行は0。
+    Layer: TVectArtLayer;            // この表示行が参照する非所有Layer。
+    Parent: TScreenLayoutGroupLayer; // 最上位行はnil、子行は直接の親Group。
+    SourceIndex: Integer;            // Parent内またはDocument内での積層位置。
   end;
 
   TVectArtLayerRenderer = class
@@ -56,34 +56,50 @@ type
     function FitThumbnailRect(const AvailableRect: TRect;
       LogicalWidth, LogicalHeight: Integer): TRect;
   public
+    // サムネイル用バッファとRevision単位のキャッシュを生成する。
     constructor Create;
+    // 非所有参照を破棄する前に、内部で所有する描画資源を解放する。
     destructor Destroy; override;
+    // 表示中の行をGDI Canvasへ下層から上層の順で描画する。
     procedure DrawLayers(ACanvas: TCanvas;
       const Bounds: TRect); overload;
+    // 表示中の行をDirect2D CanvasへGDI経路と同じ配置で描画する。
     procedure DrawLayers(ACanvas: TDirect2DCanvas;
       const Bounds: TRect); overload;
+    // Y座標にある表示行の1基点Indexを返し、行外では-1を返す。
     function LayerIndexAt(const Bounds: TRect; Y: Integer): Integer;
+    // 表示行Indexに対応する非所有Layerを返し、範囲外ではnilを返す。
     function LayerAt(Index: Integer): TVectArtLayer;
+    // 表示行のグループ深度を返す。
     function LayerDepthAt(Index: Integer): Integer;
+    // 表示行の直接の親Groupを返し、最上位行ではnilを返す。
     function LayerParentAt(Index: Integer): TScreenLayoutGroupLayer;
+    // 表示行が属するDocumentまたは親Group内の積層Indexを返す。
     function LayerSourceIndexAt(Index: Integer): Integer;
+    // スクロール量を反映した表示行の描画・当たり判定矩形を返す。
     function LayerItemRect(const Bounds: TRect; Index: Integer): TRect;
+    // 現在の行数と表示高から有効な最大スクロール量を返す。
     function MaximumScrollOffset(const Bounds: TRect): Integer;
+    // 1行と行間を合わせたホイール・ドラッグ用の移動量を返す。
     function ScrollStep: Integer;
+    // 負値を0へ丸めてスクロール量を設定する。
     procedure SetScrollOffset(Value: Integer);
+    // 各状態操作とグループ開閉で共有する当たり判定矩形を返す。
     function LockButtonRect(const ItemRect: TRect): TRect;
     function ExpandButtonRect(const ItemRect: TRect): TRect;
     function VisibilityButtonRect(const ItemRect: TRect): TRect;
+    // DocumentとEditorStateは非所有参照。Document交換時はサムネイルキャッシュを破棄する。
     property Document: TVectArtDocument read FDocument write SetDocument;
     property EditorState: TVectArtEditorState read FEditorState
       write FEditorState;
+    // 現在の先頭側へのスクロール量。
     property ScrollOffset: Integer read FScrollOffset write SetScrollOffset;
   end;
 
 implementation
 
 uses
-  System.Math, Winapi.Windows, ScreenLayoutPathOperations;
+  System.Math, Winapi.Windows;
 
 const
   COLOR_LIST_BACKGROUND   = TColor($001A1A1A);
@@ -104,24 +120,6 @@ const
   THUMBNAIL_HEIGHT        = 54;
   THUMBNAIL_WIDTH         = 96;
   VISIBILITY_BUTTON_TOP   = 17;
-function GroupLayerDetailText(GroupLayer: TScreenLayoutGroupLayer): string;
-var
-  I: Integer;
-  NameList: string;
-begin
-  NameList := '';
-  for I := 0 to Min(GroupLayer.ChildCount - 1, 2) do
-  begin
-    if NameList <> '' then
-      NameList := NameList + ' / ';
-    NameList := NameList + GroupLayer[I].Name;
-  end;
-  if GroupLayer.ChildCount > 3 then
-    NameList := NameList + ' / ...';
-  Result := Format('Group  %d layers', [GroupLayer.ChildCount]);
-  if NameList <> '' then
-    Result := Result + '  ' + NameList;
-end;
 
 constructor TVectArtLayerRenderer.Create;
 begin
@@ -132,18 +130,6 @@ begin
   FThumbnailBuffer := TVectArtRenderBuffer.Create;
   FThumbnailRevision := -1;
   FLastSelectedIndex := -2;
-end;
-
-function LayerDisplayName(Layer: TVectArtLayer;
-  EditorState: TVectArtEditorState): string;
-begin
-  Result := Layer.Name;
-  if Layer is TScreenLayoutGroupLayer then
-    if (EditorState <> nil) and EditorState.IsGroupInOpenPath(
-      TScreenLayoutGroupLayer(Layer)) then
-      Result := #$25BE + '  ' + Result
-    else
-      Result := #$25B8 + '  ' + Result;
 end;
 
 destructor TVectArtLayerRenderer.Destroy;
@@ -419,11 +405,10 @@ var
   CanvasLayer: TVectArtCanvasLayer;
   CellRect: TRect;
   Column: Integer;
-  DetailText: string;
+  ExpandPoints: array[0..2] of TPoint;
+  ExpandRect: TRect;
   LockRect: TRect;
-  PathLayer: TVectArtPathLayer;
   Row: Integer;
-  TextX: Integer;
   ThumbnailArea: TRect;
   ThumbnailRect: TRect;
   VisibilityRect: TRect;
@@ -499,71 +484,29 @@ begin
   ACanvas.Pen.Color := COLOR_THUMB_BORDER;
   ACanvas.FrameRect(ThumbnailRect);
 
-  TextX := ThumbnailArea.Right + 8;
-  ACanvas.Font.Name := 'Segoe UI';
-  ACanvas.Font.Height := -13;
-  ACanvas.Font.Color := COLOR_TEXT_PRIMARY;
-  ACanvas.TextOut(TextX, ItemRect.Top + 20,
-    LayerDisplayName(Layer, FEditorState));
-  if Layer is TVectArtCanvasLayer then
-    DetailText := Format('%d x %d  %d%%', [TVectArtCanvasLayer(Layer).Width,
-      TVectArtCanvasLayer(Layer).Height, Round(Layer.Opacity * 100)])
-  else if Layer is TScreenLayoutGroupLayer then
-    DetailText := GroupLayerDetailText(TScreenLayoutGroupLayer(Layer))
-  else if Layer is TScreenLayoutTextLayer then
-    DetailText := Format('Text  %spt  %d%%',
-      [FormatFloat('0.##', TScreenLayoutTextLayer(Layer).FontSize),
-       Round(Layer.Opacity * 100)])
-  else if Layer is TScreenLayoutEllipseArcShapeLayer then
-    DetailText := Format('Arc Shape  %d%%', [Round(Layer.Opacity * 100)])
-  else if Layer is TVectArtRectangleLayer then
-    DetailText := Format('%d x %d  %d%%',
-      [Round(TVectArtRectangleLayer(Layer).Bounds.Width),
-       Round(TVectArtRectangleLayer(Layer).Bounds.Height),
-       Round(Layer.Opacity * 100)])
-  else if Layer is TVectArtImageLayer then
-    if TVectArtImageLayer(Layer).SourceKind = visLogo then
-      DetailText := Format('Logo  %d%%', [Round(Layer.Opacity * 100)])
-    else
-      DetailText := Format('Image  %d%%', [Round(Layer.Opacity * 100)])
-  else if Layer is TScreenLayoutEllipseLineLayer then
-    DetailText := Format('Ellipse Line  %spx  %d%%',
-      [FormatFloat('0.##', TScreenLayoutEllipseLineLayer(Layer).StrokeWidth),
-       Round(Layer.Opacity * 100)])
-  else if Layer is TScreenLayoutRoundedRectangleLineLayer then
-    DetailText := Format('Rounded Rectangle Line  %spx  %d%%',
-      [FormatFloat('0.##',
-       TScreenLayoutRoundedRectangleLineLayer(Layer).StrokeWidth),
-       Round(Layer.Opacity * 100)])
-  else if Layer is TScreenLayoutRectangleLineLayer then
-    DetailText := Format('Rectangle Line  %spx  %d%%',
-      [FormatFloat('0.##',
-       TScreenLayoutRectangleLineLayer(Layer).StrokeWidth),
-       Round(Layer.Opacity * 100)])
-  else if Layer is TScreenLayoutArcLayer then
-    DetailText := Format('Arc  %spx  %d%%',
-      [FormatFloat('0.##', TScreenLayoutArcLayer(Layer).StrokeWidth),
-       Round(Layer.Opacity * 100)])
-  else if Layer is TVectArtPathLayer then
+  if Layer is TScreenLayoutGroupLayer then
   begin
-    PathLayer := TVectArtPathLayer(Layer);
-    if not PathLayer.Closed and
-      ScreenLayoutPathIsStraightLine(PathLayer.Vertices) then
-      DetailText := Format('Line  %spx  %d%%',
-        [FormatFloat('0.##', PathLayer.StrokeWidth),
-         Round(Layer.Opacity * 100)])
+    // 名称列を省いても開閉操作を失わないよう、三角だけを状態列へ残す。
+    ExpandRect := ExpandButtonRect(ItemRect);
+    if (FEditorState <> nil) and FEditorState.IsGroupInOpenPath(
+      TScreenLayoutGroupLayer(Layer)) then
+    begin
+      ExpandPoints[0] := Point(ExpandRect.Left + 5, ExpandRect.Top + 4);
+      ExpandPoints[1] := Point(ExpandRect.Right - 5, ExpandRect.Top + 4);
+      ExpandPoints[2] := Point((ExpandRect.Left + ExpandRect.Right) div 2,
+        ExpandRect.Bottom - 3);
+    end
     else
-      DetailText := Format('Path  %d%%', [Round(Layer.Opacity * 100)]);
-  end
-  else if Layer is TScreenLayoutShapeLayer then
-    DetailText := Format('Shape  %d contours  %d%%',
-      [TScreenLayoutShapeLayer(Layer).ContourCount,
-       Round(Layer.Opacity * 100)])
-  else
-    DetailText := '';
-  ACanvas.Font.Height := -11;
-  ACanvas.Font.Color := COLOR_TEXT_SECONDARY;
-  ACanvas.TextOut(TextX, ItemRect.Top + 43, DetailText);
+    begin
+      ExpandPoints[0] := Point(ExpandRect.Left + 6, ExpandRect.Top + 2);
+      ExpandPoints[1] := Point(ExpandRect.Left + 6, ExpandRect.Bottom - 2);
+      ExpandPoints[2] := Point(ExpandRect.Right - 4,
+        (ExpandRect.Top + ExpandRect.Bottom) div 2);
+    end;
+    ACanvas.Brush.Style := bsSolid;
+    ACanvas.Brush.Color := COLOR_TEXT_SECONDARY;
+    ACanvas.Polygon(ExpandPoints);
+  end;
 
   VisibilityRect := VisibilityButtonRect(ItemRect);
   LockRect := LockButtonRect(ItemRect);
@@ -594,11 +537,10 @@ var
   CanvasLayer: TVectArtCanvasLayer;
   CellRect: TRect;
   Column: Integer;
-  DetailText: string;
+  ExpandPoints: array[0..2] of TPoint;
+  ExpandRect: TRect;
   LockRect: TRect;
-  PathLayer: TVectArtPathLayer;
   Row: Integer;
-  TextX: Integer;
   ThumbnailArea: TRect;
   ThumbnailRect: TRect;
   VisibilityRect: TRect;
@@ -674,71 +616,29 @@ begin
   ACanvas.Pen.Color := COLOR_THUMB_BORDER;
   ACanvas.FrameRect(ThumbnailRect);
 
-  TextX := ThumbnailArea.Right + 8;
-  ACanvas.Font.Name := 'Segoe UI';
-  ACanvas.Font.Height := -13;
-  ACanvas.Font.Color := COLOR_TEXT_PRIMARY;
-  ACanvas.TextOut(TextX, ItemRect.Top + 20,
-    LayerDisplayName(Layer, FEditorState));
-  if Layer is TVectArtCanvasLayer then
-    DetailText := Format('%d x %d  %d%%', [TVectArtCanvasLayer(Layer).Width,
-      TVectArtCanvasLayer(Layer).Height, Round(Layer.Opacity * 100)])
-  else if Layer is TScreenLayoutGroupLayer then
-    DetailText := GroupLayerDetailText(TScreenLayoutGroupLayer(Layer))
-  else if Layer is TScreenLayoutTextLayer then
-    DetailText := Format('Text  %spt  %d%%',
-      [FormatFloat('0.##', TScreenLayoutTextLayer(Layer).FontSize),
-       Round(Layer.Opacity * 100)])
-  else if Layer is TScreenLayoutEllipseArcShapeLayer then
-    DetailText := Format('Arc Shape  %d%%', [Round(Layer.Opacity * 100)])
-  else if Layer is TVectArtRectangleLayer then
-    DetailText := Format('%d x %d  %d%%',
-      [Round(TVectArtRectangleLayer(Layer).Bounds.Width),
-       Round(TVectArtRectangleLayer(Layer).Bounds.Height),
-       Round(Layer.Opacity * 100)])
-  else if Layer is TVectArtImageLayer then
-    if TVectArtImageLayer(Layer).SourceKind = visLogo then
-      DetailText := Format('Logo  %d%%', [Round(Layer.Opacity * 100)])
-    else
-      DetailText := Format('Image  %d%%', [Round(Layer.Opacity * 100)])
-  else if Layer is TScreenLayoutEllipseLineLayer then
-    DetailText := Format('Ellipse Line  %spx  %d%%',
-      [FormatFloat('0.##', TScreenLayoutEllipseLineLayer(Layer).StrokeWidth),
-       Round(Layer.Opacity * 100)])
-  else if Layer is TScreenLayoutRoundedRectangleLineLayer then
-    DetailText := Format('Rounded Rectangle Line  %spx  %d%%',
-      [FormatFloat('0.##',
-       TScreenLayoutRoundedRectangleLineLayer(Layer).StrokeWidth),
-       Round(Layer.Opacity * 100)])
-  else if Layer is TScreenLayoutRectangleLineLayer then
-    DetailText := Format('Rectangle Line  %spx  %d%%',
-      [FormatFloat('0.##',
-       TScreenLayoutRectangleLineLayer(Layer).StrokeWidth),
-       Round(Layer.Opacity * 100)])
-  else if Layer is TScreenLayoutArcLayer then
-    DetailText := Format('Arc  %spx  %d%%',
-      [FormatFloat('0.##', TScreenLayoutArcLayer(Layer).StrokeWidth),
-       Round(Layer.Opacity * 100)])
-  else if Layer is TVectArtPathLayer then
+  if Layer is TScreenLayoutGroupLayer then
   begin
-    PathLayer := TVectArtPathLayer(Layer);
-    if not PathLayer.Closed and
-      ScreenLayoutPathIsStraightLine(PathLayer.Vertices) then
-      DetailText := Format('Line  %spx  %d%%',
-        [FormatFloat('0.##', PathLayer.StrokeWidth),
-         Round(Layer.Opacity * 100)])
+    // GDI経路と同じ当たり判定矩形を使い、描画方式で操作位置を変えない。
+    ExpandRect := ExpandButtonRect(ItemRect);
+    if (FEditorState <> nil) and FEditorState.IsGroupInOpenPath(
+      TScreenLayoutGroupLayer(Layer)) then
+    begin
+      ExpandPoints[0] := Point(ExpandRect.Left + 5, ExpandRect.Top + 4);
+      ExpandPoints[1] := Point(ExpandRect.Right - 5, ExpandRect.Top + 4);
+      ExpandPoints[2] := Point((ExpandRect.Left + ExpandRect.Right) div 2,
+        ExpandRect.Bottom - 3);
+    end
     else
-      DetailText := Format('Path  %d%%', [Round(Layer.Opacity * 100)]);
-  end
-  else if Layer is TScreenLayoutShapeLayer then
-    DetailText := Format('Shape  %d contours  %d%%',
-      [TScreenLayoutShapeLayer(Layer).ContourCount,
-       Round(Layer.Opacity * 100)])
-  else
-    DetailText := '';
-  ACanvas.Font.Height := -11;
-  ACanvas.Font.Color := COLOR_TEXT_SECONDARY;
-  ACanvas.TextOut(TextX, ItemRect.Top + 43, DetailText);
+    begin
+      ExpandPoints[0] := Point(ExpandRect.Left + 6, ExpandRect.Top + 2);
+      ExpandPoints[1] := Point(ExpandRect.Left + 6, ExpandRect.Bottom - 2);
+      ExpandPoints[2] := Point(ExpandRect.Right - 4,
+        (ExpandRect.Top + ExpandRect.Bottom) div 2);
+    end;
+    ACanvas.Brush.Style := bsSolid;
+    ACanvas.Brush.Color := COLOR_TEXT_SECONDARY;
+    ACanvas.Polygon(ExpandPoints);
+  end;
 
   VisibilityRect := VisibilityButtonRect(ItemRect);
   LockRect := LockButtonRect(ItemRect);
@@ -997,13 +897,10 @@ end;
 
 function TVectArtLayerRenderer.ExpandButtonRect(
   const ItemRect: TRect): TRect;
-var
-  TextLeft: Integer;
 begin
-  TextLeft := Min(ItemRect.Left + 30 + THUMBNAIL_WIDTH,
-    ItemRect.Right - 8) + 8;
-  Result := Rect(TextLeft, ItemRect.Top + 10, TextLeft + 20,
-    ItemRect.Top + 36);
+  Result := Rect(ItemRect.Left + STATE_COLUMN_LEFT, ItemRect.Top + 1,
+    ItemRect.Left + STATE_COLUMN_LEFT + STATE_BUTTON_SIZE,
+    ItemRect.Top + 15);
 end;
 
 function TVectArtLayerRenderer.VisibilityButtonRect(

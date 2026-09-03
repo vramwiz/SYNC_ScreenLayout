@@ -1,4 +1,4 @@
 object ScreenLayoutGeometryPropertiesFrame: TScreenLayoutGeometryPropertiesFrame
-  Height = 145
+  Height = 207
   Width = 160
 end

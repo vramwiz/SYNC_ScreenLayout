@@ -1,4 +1,4 @@
-﻿// Object Propertiesのスクロール領域と、下部固定の色選択領域を提供する。
+﻿// フィルター用スクロール領域を上側、色と不透明度の固定領域を下側に分離して提供する。
 unit ScreenLayoutObjectPropertiesFrame;
 
 interface
@@ -6,9 +6,8 @@ interface
 uses
   System.Classes, System.Types, Vcl.Controls, Vcl.ExtCtrls,
   ScreenLayoutColorPickerFrame, ScreenLayoutContext,
-  ScreenLayoutGeometryPropertiesFrame, ScreenLayoutLinePropertiesFrame,
-  ScreenLayoutObjectColorController, ScreenLayoutObjectLineController,
-  ScreenLayoutToolFrames, VerticalScrollBarControl;
+  ScreenLayoutObjectColorController, ScreenLayoutToolFrames,
+  VerticalScrollBarControl;
 
 type
   TObjectPropertiesFrame = class(TToolPlaceholderFrame)
@@ -17,9 +16,6 @@ type
     FColorPickerFrame: TScreenLayoutColorPickerFrame;
     FContentPanel: TPanel;
     FContext: IVectArtDesignerContext;
-    FGeometryFrame: TScreenLayoutGeometryPropertiesFrame;
-    FLineController: TScreenLayoutObjectLineController;
-    FLinePropertiesFrame: TScreenLayoutLinePropertiesFrame;
     FLastSelectionCount: Integer;
     FLastSelectionLayer: TObject;
     FScrollBar: TVerticalScrollBarControl;
@@ -34,13 +30,13 @@ type
       MousePos: TPoint): Boolean; override;
     procedure Resize; override;
   public
-    // 線設定と最下部の座標・サイズ設定、下部固定の色選択領域を生成する。
+    // 将来のフィルター用スクロール領域と、下部固定の色選択領域を生成する。
     constructor Create(AOwner: TComponent); override;
     // 非所有のFrameより先に属性Controllerを破棄し、イベント参照を残さない。
     destructor Destroy; override;
-    // Documentと選択状態から線、座標・サイズ、色選択を再同期する。
+    // Documentと選択状態から色選択を再同期する。
     procedure RefreshFromDocument;
-    // Contextを交換すると、各Frameと属性Controllerへ同じ編集サービスを接続する。
+    // Contextを交換すると、固定色領域のControllerへ編集サービスを接続する。
     property Context: IVectArtDesignerContext read FContext write SetContext;
   end;
 
@@ -55,10 +51,7 @@ uses
 const
   COLOR_PANEL_BACKGROUND       = TColor($00212121);
   COLOR_PICKER_PANEL_HEIGHT    = 205; // スクロールさせず下端に固定する高さ。
-  GEOMETRY_PANEL_HEIGHT        = 145; // 他の全設定より下へ置く座標とサイズの高さ。
-  LINE_PROPERTIES_PANEL_HEIGHT = 190; // 線属性Frameの論理高さ。
   OBJECT_PROPERTIES_DOCK_WIDTH = 160;
-  PANEL_GAP                    = 8;
   SCROLL_BAR_WIDTH             = 14;
   SCROLL_WHEEL_PIXELS          = 120;
 
@@ -88,19 +81,9 @@ begin
   FContentPanel.Color := COLOR_PANEL_BACKGROUND;
   FContentPanel.ParentBackground := False;
 
-  FLinePropertiesFrame := TScreenLayoutLinePropertiesFrame.Create(Self);
-  FLinePropertiesFrame.Parent := FContentPanel;
-  FLinePropertiesFrame.Visible := False;
-
-  FGeometryFrame := TScreenLayoutGeometryPropertiesFrame.Create(Self);
-  FGeometryFrame.Parent := FContentPanel;
-
   FColorController := TScreenLayoutObjectColorController.Create(
     FColorPickerFrame);
   FColorController.OnChanged := PropertyControllerChanged;
-  FLineController := TScreenLayoutObjectLineController.Create(
-    FLinePropertiesFrame);
-  FLineController.OnChanged := PropertyControllerChanged;
 
   FScrollBar := TVerticalScrollBarControl.Create(Self);
   FScrollBar.Parent := FViewport;
@@ -112,7 +95,6 @@ end;
 
 destructor TObjectPropertiesFrame.Destroy;
 begin
-  FLineController.Free;
   FColorController.Free;
   inherited Destroy;
 end;
@@ -153,9 +135,7 @@ begin
     if FScrollBar <> nil then
       FScrollBar.Position := 0;
   end;
-  FGeometryFrame.RefreshFromDocument;
   FColorController.Refresh;
-  FLineController.Refresh;
   UpdateScrollLayout;
 end;
 
@@ -176,20 +156,7 @@ procedure TObjectPropertiesFrame.SetContext(
   const Value: IVectArtDesignerContext);
 begin
   FContext := Value;
-  if FContext = nil then
-  begin
-    FGeometryFrame.EditorState := nil;
-    FGeometryFrame.EditHistory := nil;
-    FGeometryFrame.Document := nil;
-  end
-  else
-  begin
-    FGeometryFrame.Document := FContext.Document;
-    FGeometryFrame.EditHistory := FContext.EditHistory;
-    FGeometryFrame.EditorState := FContext.EditorState;
-  end;
   FColorController.SetContext(FContext);
-  FLineController.SetContext(FContext);
   RefreshFromDocument;
 end;
 
@@ -198,28 +165,15 @@ var
   BarWidth: Integer;
   ContentHeight: Integer;
   ContentWidth: Integer;
-  Gap: Integer;
-  GeometryHeight: Integer;
-  LineHeight: Integer;
   MaximumOffset: Integer;
-  NextTop: Integer;
   ScrollStep: Integer;
 begin
   // 生成途中は親Handleを使うレイアウト処理をドック登録後まで延期する。
   if (Parent = nil) or (FViewport = nil) or (FContentPanel = nil) or
     (FScrollBar = nil) then
     Exit;
-  Gap := MulDiv(PANEL_GAP, CurrentPPI, 96);
-  GeometryHeight := MulDiv(GEOMETRY_PANEL_HEIGHT, CurrentPPI, 96);
-  if FLinePropertiesFrame.Visible then
-    LineHeight := MulDiv(LINE_PROPERTIES_PANEL_HEIGHT, CurrentPPI, 96)
-  else
-    LineHeight := 0;
-
-  NextTop := LineHeight;
-  if LineHeight > 0 then
-    Inc(NextTop, Gap);
-  ContentHeight := Max(NextTop + GeometryHeight, FViewport.ClientHeight);
+  // フィルター未実装中は空領域をスクロールさせず、追加後は内容高へ置き換える。
+  ContentHeight := FViewport.ClientHeight;
   MaximumOffset := Max(ContentHeight - FViewport.ClientHeight, 0);
   BarWidth := MulDiv(SCROLL_BAR_WIDTH, CurrentPPI, 96);
   ScrollStep := MulDiv(40, CurrentPPI, 96);
@@ -240,10 +194,6 @@ begin
     FScrollBar.SetRange(MaximumOffset, Max(FViewport.ClientHeight, 1));
     FContentPanel.SetBounds(0, -FScrollBar.Position, ContentWidth,
       ContentHeight);
-
-    if LineHeight > 0 then
-      FLinePropertiesFrame.SetBounds(0, 0, ContentWidth, LineHeight);
-    FGeometryFrame.SetBounds(0, NextTop, ContentWidth, GeometryHeight);
   finally
     FUpdatingScrollBar := False;
   end;

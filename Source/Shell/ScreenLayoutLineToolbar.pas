@@ -1,4 +1,4 @@
-﻿// Lineの作成初期値と選択中Lineの装飾を詳細パネルから編集し、Documentと履歴へ同期する。
+﻿// 線幅を常設し、低頻度の線種・線端を詳細パネルから編集してDocumentと履歴へ同期する。
 unit ScreenLayoutLineToolbar;
 
 interface
@@ -64,17 +64,21 @@ type
     procedure RefreshState;
     // 詳細パネル外へフォーカスが移っていればパネルを閉じる。
     procedure UpdateDetailsPanelFocus;
+    // Documentは非所有参照。選択中の線属性の読書き対象となる。
     property Document: TVectArtDocument read FDocument write FDocument;
     // 指定した線端形状の選択ボタンを返す。戻り値の所有権はSelfが保持する。
     function LineCapButton(Value: TVectArtLineCap): TVectArtLineCapButton;
+    // UIテストとHost側の配置確認に公開する所有Control。
     property DetailsButton: TVectArtDarkButton read FDetailsButton;
     property DetailsPanel: TPanel read FDetailsPanel;
+    // EditHistoryとEditorStateは非所有参照。履歴記録と次回作成値の保持に使う。
     property EditHistory: TVectArtEditHistory read FEditHistory
       write FEditHistory;
     property EditorState: TVectArtEditorState read FEditorState
       write FEditorState;
     property MifStrokeStyleCombo: TVectArtMifStrokeStyleCombo
       read FMifStrokeStyleCombo;
+    // 線幅の常設UI。所有権はToolbarが保持する。
     property StrokeWidthTrackBar: THorizontalTrackBarControl
       read FStrokeWidthTrackBar;
     property StrokeWidthEdit: TEdit read FStrokeWidthEdit;
@@ -165,7 +169,7 @@ begin
   inherited Create(AOwner);
   Parent := AHost;
   Align := alRight;
-  Width := 230;
+  Width := 270;
   Color := COLOR_BACKGROUND;
   ParentBackground := False;
   DoubleBuffered := True;
@@ -252,23 +256,12 @@ begin
   FDetailsPanel.BevelOuter := bvRaised;
   FDetailsPanel.Color := COLOR_BACKGROUND;
   FDetailsPanel.ParentBackground := False;
-  FDetailsPanel.SetBounds(0, 0, 420, 140);
+  FDetailsPanel.SetBounds(0, 0, 420, 96);
   FDetailsPanel.Visible := False;
 
-  FStrokeWidthTrackBar.Parent := FDetailsPanel;
-  FStrokeWidthTrackBar.SetBounds(78, 3, 190, 34);
-  FStrokeWidthEdit.Parent := FDetailsPanel;
-  FStrokeWidthEdit.SetBounds(278, 8, 60, 25);
+  // 線幅は即時操作用にツールバーへ残し、低頻度項目だけを詳細へ収容する。
   FMifStrokeStyleCombo.Parent := FDetailsPanel;
-  FMifStrokeStyleCombo.SetBounds(78, 47, 260, 25);
-
-  CaptionLabel := TLabel.Create(Self);
-  CaptionLabel.Parent := FDetailsPanel;
-  CaptionLabel.Caption := UnicodeText([$592A, $3055]);
-  CaptionLabel.Font.Name := 'Segoe UI';
-  CaptionLabel.Font.Height := -12;
-  CaptionLabel.Font.Color := COLOR_LABEL;
-  CaptionLabel.SetBounds(12, 13, 40, 20);
+  FMifStrokeStyleCombo.SetBounds(78, 8, 260, 25);
 
   CaptionLabel := TLabel.Create(Self);
   CaptionLabel.Parent := FDetailsPanel;
@@ -276,7 +269,7 @@ begin
   CaptionLabel.Font.Name := 'Segoe UI';
   CaptionLabel.Font.Height := -12;
   CaptionLabel.Font.Color := COLOR_LABEL;
-  CaptionLabel.SetBounds(12, 52, 40, 20);
+  CaptionLabel.SetBounds(12, 13, 40, 20);
 
   CaptionLabel := TLabel.Create(Self);
   CaptionLabel.Parent := FDetailsPanel;
@@ -284,14 +277,14 @@ begin
   CaptionLabel.Font.Name := 'Segoe UI';
   CaptionLabel.Font.Height := -12;
   CaptionLabel.Font.Color := COLOR_LABEL;
-  CaptionLabel.SetBounds(12, 101, 60, 20);
+  CaptionLabel.SetBounds(12, 60, 60, 20);
 
   for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
   begin
     FLineCapButtons[Cap] := TVectArtLineCapButton.Create(Self);
     FLineCapButtons[Cap].Parent := FDetailsPanel;
     FLineCapButtons[Cap].LineCap := Cap;
-    FLineCapButtons[Cap].SetBounds(78 + Ord(Cap) * 46, 93, 40, 34);
+    FLineCapButtons[Cap].SetBounds(78 + Ord(Cap) * 46, 51, 40, 34);
     FLineCapButtons[Cap].OnClick := LineCapClick;
     FLineCapButtons[Cap].ShowHint := True;
   end;
@@ -598,7 +591,7 @@ begin
   Canvas.Font.Name := 'Segoe UI';
   Canvas.Font.Height := -12;
   Canvas.Font.Color := COLOR_TEXT;
-  Canvas.TextOut(10, 13, FContextText);
+  Canvas.TextOut(8, 13, UnicodeText([$592A, $3055]));
 end;
 
 procedure TVectArtLineToolbarControl.RefreshState;
@@ -736,10 +729,17 @@ begin
 end;
 
 procedure TVectArtLineToolbarControl.Resize;
+var
+  TrackWidth: Integer;
 begin
   inherited Resize;
+  TrackWidth := Max(Width - 176, 60);
+  if FStrokeWidthTrackBar <> nil then
+    FStrokeWidthTrackBar.SetBounds(40, 4, TrackWidth, 34);
+  if FStrokeWidthEdit <> nil then
+    FStrokeWidthEdit.SetBounds(Width - 128, 8, 48, 25);
   if FDetailsButton <> nil then
-    FDetailsButton.SetBounds(Width - 82, 8, 72, 25);
+    FDetailsButton.SetBounds(Width - 70, 8, 60, 25);
 end;
 
 function TVectArtLineToolbarControl.SelectedLineIndices: TArray<Integer>;
