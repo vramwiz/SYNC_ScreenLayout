@@ -4,7 +4,7 @@ unit ScreenLayoutLineStyleControls;
 interface
 
 uses
-  System.Classes, Winapi.Messages, Vcl.Controls,
+  System.Classes, Winapi.Messages, Vcl.Controls, Vcl.Graphics,
   ScreenLayoutDocument;
 
 type
@@ -42,10 +42,23 @@ type
     property Selected: Boolean read FSelected write SetSelected;
   end;
 
+  TScreenLayoutTextStyleButton = class(TVectArtDarkButton)
+  private
+    FSelected: Boolean;
+    FStyle: TFontStyle;
+    procedure SetSelected(Value: Boolean);
+  protected
+    procedure Paint; override;
+  public
+    property Selected: Boolean read FSelected write SetSelected;
+    property Style: TFontStyle read FStyle write FStyle;
+    property Font;
+  end;
+
 implementation
 
 uses
-  System.Types, Winapi.Windows, Vcl.Graphics;
+  System.Types, Winapi.Windows;
 
 const
   COLOR_BUTTON = TColor($00383838);
@@ -241,6 +254,41 @@ begin
 end;
 
 procedure TVectArtLineCapButton.SetSelected(Value: Boolean);
+begin
+  if FSelected = Value then
+    Exit;
+  FSelected := Value;
+  Invalidate;
+end;
+
+{ TScreenLayoutTextStyleButton }
+
+procedure TScreenLayoutTextStyleButton.Paint;
+var
+  Bounds: TRect;
+begin
+  inherited Paint;
+  if not FSelected then
+    Exit;
+  Bounds := ClientRect;
+  Dec(Bounds.Right);
+  Dec(Bounds.Bottom);
+  Canvas.Brush.Style := bsSolid;
+  if Enabled then
+    Canvas.Brush.Color := COLOR_BUTTON_SELECTED
+  else
+    Canvas.Brush.Color := COLOR_BUTTON_DISABLED;
+  Canvas.Pen.Color := COLOR_BUTTON_SELECTED_BORDER;
+  Canvas.Rectangle(Bounds);
+  Canvas.Brush.Style := bsClear;
+  Canvas.Font.Assign(Font);
+  if not Enabled then
+    Canvas.Font.Color := COLOR_BUTTON_BORDER;
+  DrawText(Canvas.Handle, PChar(Caption), Length(Caption), Bounds,
+    DT_CENTER or DT_VCENTER or DT_SINGLELINE);
+end;
+
+procedure TScreenLayoutTextStyleButton.SetSelected(Value: Boolean);
 begin
   if FSelected = Value then
     Exit;

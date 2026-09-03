@@ -1,11 +1,11 @@
-﻿// 線幅を常設し、低頻度の線種・線端を詳細パネルから編集してDocumentと履歴へ同期する。
+﻿// 選択種別に応じて線幅または文字フォントを常設し、Documentと履歴へ同期する。
 unit ScreenLayoutLineToolbar;
 
 interface
 
 uses
   System.Classes, System.Types, Vcl.Controls, Vcl.ExtCtrls,
-  Vcl.StdCtrls, Vcl.AppEvnts,
+  Vcl.StdCtrls, Vcl.AppEvnts, Vcl.Graphics,
   HorizontalTrackBarControl, ScreenLayoutDocument, ScreenLayoutEditHistory,
   ScreenLayoutEditorState, ScreenLayoutLineStyleControls,
   ScreenLayoutStrokeStyleCombo;
@@ -19,7 +19,10 @@ type
     FDetailsPanel: TPanel;
     FEditHistory: TVectArtEditHistory;
     FEditorState: TVectArtEditorState;
-    FContextText: string;
+    FFontFamilyCombo: TComboBox;
+    FFontStyleButtons: array[TFontStyle] of TScreenLayoutTextStyleButton;
+    FLetterSpacingEdit: TEdit;
+    FLineSpacingEdit: TEdit;
     FMifStrokeStyleCombo: TVectArtMifStrokeStyleCombo;
     FLineCapButtons: array[TVectArtLineCap] of TVectArtLineCapButton;
     FStrokeWidthTrackBar: THorizontalTrackBarControl;
@@ -37,11 +40,18 @@ type
     procedure EditExit(Sender: TObject);
     procedure EditKeyDown(Sender: TObject; var Key: Word;
       Shift: TShiftState);
+    procedure FontFamilyChanged(Sender: TObject);
+    procedure FontStyleClick(Sender: TObject);
+    procedure SpacingEditExit(Sender: TObject);
+    procedure SpacingEditKeyDown(Sender: TObject; var Key: Word;
+      Shift: TShiftState);
     procedure DetailsClick(Sender: TObject);
     function IsDetailsControl(Control: TControl): Boolean;
     procedure LineCapClick(Sender: TObject);
     function SelectedLineIndices: TArray<Integer>;
+    function SelectedTextIndices: TArray<Integer>;
     function SelectionHasLockedLine: Boolean;
+    function SelectionHasLockedText: Boolean;
     procedure StyleChanged(Sender: TObject);
     procedure TrackBarChanged(Sender: TObject);
     procedure TrackBarMouseDown(Sender: TObject; Button: TMouseButton;
@@ -60,6 +70,12 @@ type
     procedure ApplyMifStrokeStyle(Value: TVectArtMifStrokeStyle);
     // 作成初期値または選択中の全Lineへ線幅を適用する。
     procedure ApplyStrokeWidth(Value: Single);
+    // 選択中の全Textへフォントファミリーを適用する。
+    procedure ApplyFontFamily(const Value: string);
+    // 選択中の全Textへ1種類の文字装飾を追加または削除する。
+    procedure ApplyFontStyle(Style: TFontStyle; Enabled: Boolean);
+    // 選択中の全Textへ文字サイズ比率の字間または行間を適用する。
+    procedure ApplyTextSpacing(IsLetterSpacing: Boolean; Ratio: Single);
     // EditorStateと現在選択から表示値、混在状態、有効状態を再同期する。
     procedure RefreshState;
     // 詳細パネル外へフォーカスが移っていればパネルを閉じる。
@@ -78,6 +94,11 @@ type
       write FEditorState;
     property MifStrokeStyleCombo: TVectArtMifStrokeStyleCombo
       read FMifStrokeStyleCombo;
+    // Text選択時に線幅UIと入れ替えて表示するフォント一覧。
+    property FontFamilyCombo: TComboBox read FFontFamilyCombo;
+    function FontStyleButton(Style: TFontStyle): TScreenLayoutTextStyleButton;
+    property LetterSpacingEdit: TEdit read FLetterSpacingEdit;
+    property LineSpacingEdit: TEdit read FLineSpacingEdit;
     // 線幅の常設UI。所有権はToolbarが保持する。
     property StrokeWidthTrackBar: THorizontalTrackBarControl
       read FStrokeWidthTrackBar;
@@ -87,8 +108,8 @@ type
 implementation
 
 uses
-  System.Math, System.SysUtils, Winapi.Windows, Vcl.Forms, Vcl.Graphics,
-  ScreenLayoutEditCommands;
+  System.Math, System.SysUtils, Winapi.Windows, Vcl.Forms,
+  ScreenLayoutEditCommands, ScreenLayoutTextCommands;
 
 const
   COLOR_BACKGROUND = TColor($00282828);
@@ -98,6 +119,8 @@ const
   STROKE_WIDTH_SCALE = 10;
   STROKE_WIDTH_TRACK_MIN = 10;
   STROKE_WIDTH_TRACK_MAX = 1000;
+  LINE_TOOLBAR_WIDTH = 270;
+  TEXT_TOOLBAR_WIDTH = 590;
 
 function UnicodeText(const CodePoints: array of Word): string;
 var
@@ -169,7 +192,7 @@ begin
   inherited Create(AOwner);
   Parent := AHost;
   Align := alRight;
-  Width := 270;
+  Width := LINE_TOOLBAR_WIDTH;
   Color := COLOR_BACKGROUND;
   ParentBackground := False;
   DoubleBuffered := True;
@@ -208,7 +231,54 @@ var
   Cap: TVectArtLineCap;
   CaptionLabel: TLabel;
   ParentForm: TCustomForm;
+  Style: TFontStyle;
 begin
+  FFontFamilyCombo := TComboBox.Create(Self);
+  FFontFamilyCombo.Parent := Self;
+  FFontFamilyCombo.Style := csDropDownList;
+  FFontFamilyCombo.DropDownCount := 20;
+  FFontFamilyCombo.Color := COLOR_EDIT;
+  FFontFamilyCombo.Font.Color := COLOR_TEXT;
+  FFontFamilyCombo.Font.Name := 'Segoe UI';
+  FFontFamilyCombo.Font.Height := -12;
+  FFontFamilyCombo.Items.Assign(Screen.Fonts);
+  FFontFamilyCombo.Sorted := True;
+  FFontFamilyCombo.OnChange := FontFamilyChanged;
+  FFontFamilyCombo.Visible := False;
+  for Style := Low(TFontStyle) to High(TFontStyle) do
+  begin
+    FFontStyleButtons[Style] := TScreenLayoutTextStyleButton.Create(Self);
+    FFontStyleButtons[Style].Parent := Self;
+    FFontStyleButtons[Style].Style := Style;
+    FFontStyleButtons[Style].Font.Style := [Style];
+    FFontStyleButtons[Style].OnClick := FontStyleClick;
+    FFontStyleButtons[Style].Visible := False;
+  end;
+  FFontStyleButtons[fsBold].Caption := 'B';
+  FFontStyleButtons[fsItalic].Caption := 'I';
+  FFontStyleButtons[fsUnderline].Caption := 'U';
+  FFontStyleButtons[fsStrikeOut].Caption := 'S';
+
+  FLetterSpacingEdit := TEdit.Create(Self);
+  FLetterSpacingEdit.Parent := Self;
+  FLetterSpacingEdit.Color := COLOR_EDIT;
+  FLetterSpacingEdit.Font.Color := COLOR_TEXT;
+  FLetterSpacingEdit.Font.Name := 'Segoe UI';
+  FLetterSpacingEdit.Font.Height := -12;
+  FLetterSpacingEdit.OnExit := SpacingEditExit;
+  FLetterSpacingEdit.OnKeyDown := SpacingEditKeyDown;
+  FLetterSpacingEdit.Visible := False;
+
+  FLineSpacingEdit := TEdit.Create(Self);
+  FLineSpacingEdit.Parent := Self;
+  FLineSpacingEdit.Color := COLOR_EDIT;
+  FLineSpacingEdit.Font.Color := COLOR_TEXT;
+  FLineSpacingEdit.Font.Name := 'Segoe UI';
+  FLineSpacingEdit.Font.Height := -12;
+  FLineSpacingEdit.OnExit := SpacingEditExit;
+  FLineSpacingEdit.OnKeyDown := SpacingEditKeyDown;
+  FLineSpacingEdit.Visible := False;
+
   FStrokeWidthTrackBar := THorizontalTrackBarControl.Create(Self);
   FStrokeWidthTrackBar.Parent := Self;
   FStrokeWidthTrackBar.BackgroundColor := COLOR_BACKGROUND;
@@ -293,6 +363,159 @@ begin
   FLineCapButtons[vlcTriangle].Hint := UnicodeText([$4E09, $89D2, $578B]);
   FLineCapButtons[vlcSquare].Selected := True;
 
+end;
+
+procedure TVectArtLineToolbarControl.ApplyFontStyle(Style: TFontStyle;
+  Enabled: Boolean);
+var
+  Command: TVectArtCompoundCommand;
+  I: Integer;
+  Indices: TArray<Integer>;
+  NewData: TScreenLayoutTextData;
+  OldData: TScreenLayoutTextData;
+begin
+  if FUpdating then
+    Exit;
+  Indices := SelectedTextIndices;
+  if (Length(Indices) = 0) or SelectionHasLockedText then
+    Exit;
+  FUpdating := True;
+  try
+    Command := nil;
+    if FEditHistory <> nil then
+      Command := TVectArtCompoundCommand.Create;
+    FDocument.BeginUpdate;
+    try
+      for I := 0 to High(Indices) do
+      begin
+        OldData := CaptureScreenLayoutTextData(
+          TScreenLayoutTextLayer(FDocument[Indices[I]]));
+        if (Style in OldData.FontStyle) = Enabled then
+          Continue;
+        NewData := OldData;
+        if Enabled then
+          Include(NewData.FontStyle, Style)
+        else
+          Exclude(NewData.FontStyle, Style);
+        if Command <> nil then
+          Command.Add(TScreenLayoutTextDataCommand.Create(FDocument,
+            Indices[I], OldData, NewData));
+        FDocument.SetTextData(Indices[I], NewData);
+      end;
+    finally
+      FDocument.EndUpdate;
+    end;
+    if (Command <> nil) and (Command.Count > 0) then
+      FEditHistory.AddApplied(Command)
+    else
+      Command.Free;
+  finally
+    FUpdating := False;
+  end;
+  RefreshState;
+end;
+
+procedure TVectArtLineToolbarControl.ApplyTextSpacing(
+  IsLetterSpacing: Boolean; Ratio: Single);
+var
+  Command: TVectArtCompoundCommand;
+  I: Integer;
+  Indices: TArray<Integer>;
+  NewData: TScreenLayoutTextData;
+  OldData: TScreenLayoutTextData;
+begin
+  if FUpdating then
+    Exit;
+  Ratio := EnsureRange(Ratio, -0.9, 10.0);
+  Indices := SelectedTextIndices;
+  if (Length(Indices) = 0) or SelectionHasLockedText then
+    Exit;
+  FUpdating := True;
+  try
+    Command := nil;
+    if FEditHistory <> nil then
+      Command := TVectArtCompoundCommand.Create;
+    FDocument.BeginUpdate;
+    try
+      for I := 0 to High(Indices) do
+      begin
+        OldData := CaptureScreenLayoutTextData(
+          TScreenLayoutTextLayer(FDocument[Indices[I]]));
+        NewData := OldData;
+        if IsLetterSpacing then
+        begin
+          if SameValue(OldData.LetterSpacingRatio, Ratio) then
+            Continue;
+          NewData.LetterSpacingRatio := Ratio;
+        end
+        else
+        begin
+          if SameValue(OldData.LineSpacingRatio, Ratio) then
+            Continue;
+          NewData.LineSpacingRatio := Ratio;
+        end;
+        if Command <> nil then
+          Command.Add(TScreenLayoutTextDataCommand.Create(FDocument,
+            Indices[I], OldData, NewData));
+        FDocument.SetTextData(Indices[I], NewData);
+      end;
+    finally
+      FDocument.EndUpdate;
+    end;
+    if (Command <> nil) and (Command.Count > 0) then
+      FEditHistory.AddApplied(Command)
+    else
+      Command.Free;
+  finally
+    FUpdating := False;
+  end;
+  RefreshState;
+end;
+
+procedure TVectArtLineToolbarControl.ApplyFontFamily(const Value: string);
+var
+  Command: TVectArtCompoundCommand;
+  I: Integer;
+  Indices: TArray<Integer>;
+  NewData: TScreenLayoutTextData;
+  OldData: TScreenLayoutTextData;
+begin
+  if FUpdating or (Trim(Value) = '') then
+    Exit;
+  Indices := SelectedTextIndices;
+  if (Length(Indices) = 0) or SelectionHasLockedText then
+    Exit;
+  FUpdating := True;
+  try
+    Command := nil;
+    if FEditHistory <> nil then
+      Command := TVectArtCompoundCommand.Create;
+    FDocument.BeginUpdate;
+    try
+      for I := 0 to High(Indices) do
+      begin
+        OldData := CaptureScreenLayoutTextData(
+          TScreenLayoutTextLayer(FDocument[Indices[I]]));
+        if SameText(OldData.FontFamily, Value) then
+          Continue;
+        NewData := OldData;
+        NewData.FontFamily := Value;
+        if Command <> nil then
+          Command.Add(TScreenLayoutTextDataCommand.Create(FDocument,
+            Indices[I], OldData, NewData));
+        FDocument.SetTextData(Indices[I], NewData);
+      end;
+    finally
+      FDocument.EndUpdate;
+    end;
+    if (Command <> nil) and (Command.Count > 0) then
+      FEditHistory.AddApplied(Command)
+    else
+      Command.Free;
+  finally
+    FUpdating := False;
+  end;
+  RefreshState;
 end;
 
 procedure TVectArtLineToolbarControl.ApplyLineCap(Value: TVectArtLineCap);
@@ -539,6 +762,56 @@ begin
   end;
 end;
 
+procedure TVectArtLineToolbarControl.FontFamilyChanged(Sender: TObject);
+begin
+  if FUpdating or (FFontFamilyCombo.ItemIndex < 0) then
+    Exit;
+  ApplyFontFamily(FFontFamilyCombo.Items[FFontFamilyCombo.ItemIndex]);
+end;
+
+procedure TVectArtLineToolbarControl.FontStyleClick(Sender: TObject);
+var
+  Button: TScreenLayoutTextStyleButton;
+begin
+  if FUpdating or not (Sender is TScreenLayoutTextStyleButton) then
+    Exit;
+  Button := TScreenLayoutTextStyleButton(Sender);
+  ApplyFontStyle(Button.Style, not Button.Selected);
+end;
+
+function TVectArtLineToolbarControl.FontStyleButton(
+  Style: TFontStyle): TScreenLayoutTextStyleButton;
+begin
+  Result := FFontStyleButtons[Style];
+end;
+
+procedure TVectArtLineToolbarControl.SpacingEditExit(Sender: TObject);
+var
+  Value: Single;
+begin
+  if FUpdating or not (Sender is TEdit) then
+    Exit;
+  if TryStrToFloat(Trim(TEdit(Sender).Text), Value) then
+    ApplyTextSpacing(Sender = FLetterSpacingEdit, Value / 100)
+  else
+    RefreshState;
+end;
+
+procedure TVectArtLineToolbarControl.SpacingEditKeyDown(Sender: TObject;
+  var Key: Word; Shift: TShiftState);
+begin
+  if Key = VK_RETURN then
+  begin
+    SpacingEditExit(Sender);
+    Key := 0;
+  end
+  else if Key = VK_ESCAPE then
+  begin
+    RefreshState;
+    Key := 0;
+  end;
+end;
+
 procedure TVectArtLineToolbarControl.DetailsClick(Sender: TObject);
 var
   Position: TPoint;
@@ -591,12 +864,25 @@ begin
   Canvas.Font.Name := 'Segoe UI';
   Canvas.Font.Height := -12;
   Canvas.Font.Color := COLOR_TEXT;
-  Canvas.TextOut(8, 13, UnicodeText([$592A, $3055]));
+  if (FFontFamilyCombo <> nil) and FFontFamilyCombo.Visible then
+  begin
+    Canvas.TextOut(8, 13, UnicodeText([$30D5, $30A9, $30F3, $30C8]));
+    Canvas.Font.Color := COLOR_LABEL;
+    Canvas.TextOut(378, 13, UnicodeText([$5B57, $9593]));
+    Canvas.TextOut(466, 13, UnicodeText([$884C, $9593]));
+    Canvas.TextOut(458, 13, '%');
+    Canvas.TextOut(546, 13, '%');
+  end
+  else
+    Canvas.TextOut(8, 13, UnicodeText([$592A, $3055]));
 end;
 
 procedure TVectArtLineToolbarControl.RefreshState;
 var
   Color: TColor;
+  CommonFontFamily: Boolean;
+  CommonLetterSpacing: Boolean;
+  CommonLineSpacing: Boolean;
   CommonStyle: Boolean;
   CommonLineCap: Boolean;
   CommonWidth: Boolean;
@@ -611,116 +897,166 @@ var
   Locked: Boolean;
   StyleValue: TVectArtMifStrokeStyle;
   SupportsLineCap: Boolean;
+  Style: TFontStyle;
+  TextIndices: TArray<Integer>;
+  FontFamilyValue: string;
+  LetterSpacingValue: Single;
+  LineSpacingValue: Single;
   WidthValue: Single;
 begin
   if FUpdating then
     Exit;
   FUpdating := True;
   try
-    Indices := SelectedLineIndices;
-    if Length(Indices) > 0 then
+    TextIndices := SelectedTextIndices;
+    if Length(TextIndices) > 0 then
     begin
+      Width := TEXT_TOOLBAR_WIDTH;
       Visible := True;
-      if Length(Indices) = 1 then
-        if FDocument[Indices[0]] is TScreenLayoutEllipseLineLayer then
-          FContextText := 'Selected Ellipse Line'
-        else if FDocument[Indices[0]] is
-          TScreenLayoutRoundedRectangleLineLayer then
-          FContextText := 'Selected Rounded Rectangle Line'
-        else if FDocument[Indices[0]] is TScreenLayoutRectangleLineLayer then
-          FContextText := 'Selected Rectangle Line'
-        else if FDocument[Indices[0]] is TScreenLayoutArcLayer then
-          FContextText := 'Selected Arc'
-        else
-          FContextText := 'Selected Line'
-      else
-        FContextText := Format('%d Lines', [Length(Indices)]);
-      Layer := FDocument[Indices[0]];
-      ReadLineLayer(Layer, Color, WidthValue, StyleValue, LineCapValue);
-      CommonWidth := True;
-      CommonStyle := True;
-      CommonLineCap := True;
-      SupportsLineCap := not (Layer is TScreenLayoutRectangleLineLayer);
-      for I := 1 to High(Indices) do
+      FDetailsPanel.Visible := False;
+      FFontFamilyCombo.Visible := True;
+      FStrokeWidthEdit.Visible := False;
+      FStrokeWidthTrackBar.Visible := False;
+      FDetailsButton.Visible := False;
+      FLetterSpacingEdit.Visible := True;
+      FLineSpacingEdit.Visible := True;
+      for Style := Low(TFontStyle) to High(TFontStyle) do
+        FFontStyleButtons[Style].Visible := True;
+      FontFamilyValue := TScreenLayoutTextLayer(
+        FDocument[TextIndices[0]]).FontFamily;
+      LetterSpacingValue := TScreenLayoutTextLayer(
+        FDocument[TextIndices[0]]).LetterSpacingRatio;
+      LineSpacingValue := TScreenLayoutTextLayer(
+        FDocument[TextIndices[0]]).LineSpacingRatio;
+      CommonFontFamily := True;
+      CommonLetterSpacing := True;
+      CommonLineSpacing := True;
+      for I := 1 to High(TextIndices) do
       begin
-        Layer := FDocument[Indices[I]];
-        SupportsLineCap := SupportsLineCap and
-          not (Layer is TScreenLayoutRectangleLineLayer);
-        ReadLineLayer(Layer, Color, CurrentWidth, CurrentStyle,
-          CurrentLineCap);
-        CommonWidth := CommonWidth and SameValue(CurrentWidth, WidthValue);
-        CommonStyle := CommonStyle and (CurrentStyle = StyleValue);
-        CommonLineCap := CommonLineCap and
-          (CurrentLineCap = LineCapValue);
+        CommonFontFamily := CommonFontFamily and SameText(FontFamilyValue,
+          TScreenLayoutTextLayer(FDocument[TextIndices[I]]).FontFamily);
+        CommonLetterSpacing := CommonLetterSpacing and SameValue(
+          LetterSpacingValue, TScreenLayoutTextLayer(
+            FDocument[TextIndices[I]]).LetterSpacingRatio);
+        CommonLineSpacing := CommonLineSpacing and SameValue(
+          LineSpacingValue, TScreenLayoutTextLayer(
+            FDocument[TextIndices[I]]).LineSpacingRatio);
       end;
-      if CommonWidth then
+      if CommonFontFamily then
+        FFontFamilyCombo.ItemIndex :=
+          FFontFamilyCombo.Items.IndexOf(FontFamilyValue)
+      else
+        FFontFamilyCombo.ItemIndex := -1;
+      FFontFamilyCombo.Enabled := not SelectionHasLockedText;
+      if CommonLetterSpacing then
+        FLetterSpacingEdit.Text := FormatFloat('0.##',
+          LetterSpacingValue * 100)
+      else
+        FLetterSpacingEdit.Text := '';
+      if CommonLineSpacing then
+        FLineSpacingEdit.Text := FormatFloat('0.##', LineSpacingValue * 100)
+      else
+        FLineSpacingEdit.Text := '';
+      FLetterSpacingEdit.Enabled := not SelectionHasLockedText;
+      FLineSpacingEdit.Enabled := not SelectionHasLockedText;
+      for Style := Low(TFontStyle) to High(TFontStyle) do
       begin
-        FStrokeWidthEdit.Text := FormatFloat('0.##', WidthValue)
-      end
-      else
-        FStrokeWidthEdit.Text := '';
-      FStrokeWidthTrackBar.Position := EnsureRange(
-        Round(WidthValue * STROKE_WIDTH_SCALE), STROKE_WIDTH_TRACK_MIN,
-        STROKE_WIDTH_TRACK_MAX);
-      if CommonStyle then
-        FMifStrokeStyleCombo.SetPendingItemIndex(Ord(StyleValue))
-      else
-        FMifStrokeStyleCombo.SetPendingItemIndex(-1);
-      if CommonLineCap then
-        for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
-          FLineCapButtons[Cap].Selected := Cap = LineCapValue
-      else
-        for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
-          FLineCapButtons[Cap].Selected := False;
-      Locked := SelectionHasLockedLine;
-      FStrokeWidthEdit.Enabled := not Locked;
-      FStrokeWidthTrackBar.Enabled := not Locked;
-      FMifStrokeStyleCombo.Enabled := not Locked;
-      for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
-        FLineCapButtons[Cap].Enabled := not Locked and SupportsLineCap;
-    end
-    else if (FDocument <> nil) and (FDocument.SelectionCount = 0) and
-      (FEditorState <> nil) and
-      (FEditorState.CurrentTool in [vetRectangleLine,
-        vetRoundedRectangleLine, vetArc, vetLine,
-        vetEllipseLine,
-        vetPath]) then
-    begin
-      Visible := True;
-      if FEditorState.CurrentTool = vetPath then
-        FContextText := 'Next Path'
-      else if FEditorState.CurrentTool = vetRectangleLine then
-        FContextText := 'Next Rectangle Line'
-      else if FEditorState.CurrentTool = vetRoundedRectangleLine then
-        FContextText := 'Next Rounded Rectangle Line'
-      else if FEditorState.CurrentTool = vetEllipseLine then
-        FContextText := 'Next Ellipse Line'
-      else if FEditorState.CurrentTool = vetArc then
-        FContextText := 'Next Arc'
-      else
-        FContextText := 'Next Line';
-      FStrokeWidthEdit.Text := FormatFloat('0.##',
-        FEditorState.LineStrokeWidth);
-      FStrokeWidthTrackBar.Position := EnsureRange(
-        Round(FEditorState.LineStrokeWidth * STROKE_WIDTH_SCALE),
-        STROKE_WIDTH_TRACK_MIN, STROKE_WIDTH_TRACK_MAX);
-      FMifStrokeStyleCombo.SetPendingItemIndex(
-        Ord(FEditorState.LineMifStrokeStyle));
-      for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
-      begin
-        FLineCapButtons[Cap].Selected := Cap = FEditorState.LineCap;
-        FLineCapButtons[Cap].Enabled :=
-          not (FEditorState.CurrentTool in [vetRectangleLine,
-            vetRoundedRectangleLine, vetEllipseLine]);
+        FFontStyleButtons[Style].Selected := True;
+        for I := 0 to High(TextIndices) do
+          FFontStyleButtons[Style].Selected :=
+            FFontStyleButtons[Style].Selected and
+            (Style in TScreenLayoutTextLayer(
+              FDocument[TextIndices[I]]).FontStyle);
+        FFontStyleButtons[Style].Enabled := not SelectionHasLockedText;
       end;
-      FStrokeWidthEdit.Enabled := True;
-      FStrokeWidthTrackBar.Enabled := True;
-      FMifStrokeStyleCombo.Enabled := True;
     end
     else
     begin
-      Visible := False;
-      FDetailsPanel.Visible := False;
+      Width := LINE_TOOLBAR_WIDTH;
+      FFontFamilyCombo.Visible := False;
+      FLetterSpacingEdit.Visible := False;
+      FLineSpacingEdit.Visible := False;
+      for Style := Low(TFontStyle) to High(TFontStyle) do
+        FFontStyleButtons[Style].Visible := False;
+      FStrokeWidthEdit.Visible := True;
+      FStrokeWidthTrackBar.Visible := True;
+      FDetailsButton.Visible := True;
+      Indices := SelectedLineIndices;
+      if Length(Indices) > 0 then
+      begin
+        Visible := True;
+        Layer := FDocument[Indices[0]];
+        ReadLineLayer(Layer, Color, WidthValue, StyleValue, LineCapValue);
+        CommonWidth := True;
+        CommonStyle := True;
+        CommonLineCap := True;
+        SupportsLineCap := not (Layer is TScreenLayoutRectangleLineLayer);
+        for I := 1 to High(Indices) do
+        begin
+          Layer := FDocument[Indices[I]];
+          SupportsLineCap := SupportsLineCap and
+            not (Layer is TScreenLayoutRectangleLineLayer);
+          ReadLineLayer(Layer, Color, CurrentWidth, CurrentStyle,
+            CurrentLineCap);
+          CommonWidth := CommonWidth and SameValue(CurrentWidth, WidthValue);
+          CommonStyle := CommonStyle and (CurrentStyle = StyleValue);
+          CommonLineCap := CommonLineCap and
+            (CurrentLineCap = LineCapValue);
+        end;
+        if CommonWidth then
+          FStrokeWidthEdit.Text := FormatFloat('0.##', WidthValue)
+        else
+          FStrokeWidthEdit.Text := '';
+        FStrokeWidthTrackBar.Position := EnsureRange(
+          Round(WidthValue * STROKE_WIDTH_SCALE), STROKE_WIDTH_TRACK_MIN,
+          STROKE_WIDTH_TRACK_MAX);
+        if CommonStyle then
+          FMifStrokeStyleCombo.SetPendingItemIndex(Ord(StyleValue))
+        else
+          FMifStrokeStyleCombo.SetPendingItemIndex(-1);
+        if CommonLineCap then
+          for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
+            FLineCapButtons[Cap].Selected := Cap = LineCapValue
+        else
+          for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
+            FLineCapButtons[Cap].Selected := False;
+        Locked := SelectionHasLockedLine;
+        FStrokeWidthEdit.Enabled := not Locked;
+        FStrokeWidthTrackBar.Enabled := not Locked;
+        FMifStrokeStyleCombo.Enabled := not Locked;
+        for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
+          FLineCapButtons[Cap].Enabled := not Locked and SupportsLineCap;
+      end
+      else if (FDocument <> nil) and (FDocument.SelectionCount = 0) and
+        (FEditorState <> nil) and
+        (FEditorState.CurrentTool in [vetRectangleLine,
+          vetRoundedRectangleLine, vetArc, vetLine, vetEllipseLine,
+          vetPath]) then
+      begin
+        Visible := True;
+        FStrokeWidthEdit.Text := FormatFloat('0.##',
+          FEditorState.LineStrokeWidth);
+        FStrokeWidthTrackBar.Position := EnsureRange(
+          Round(FEditorState.LineStrokeWidth * STROKE_WIDTH_SCALE),
+          STROKE_WIDTH_TRACK_MIN, STROKE_WIDTH_TRACK_MAX);
+        FMifStrokeStyleCombo.SetPendingItemIndex(
+          Ord(FEditorState.LineMifStrokeStyle));
+        for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
+        begin
+          FLineCapButtons[Cap].Selected := Cap = FEditorState.LineCap;
+          FLineCapButtons[Cap].Enabled :=
+            not (FEditorState.CurrentTool in [vetRectangleLine,
+              vetRoundedRectangleLine, vetEllipseLine]);
+        end;
+        FStrokeWidthEdit.Enabled := True;
+        FStrokeWidthTrackBar.Enabled := True;
+        FMifStrokeStyleCombo.Enabled := True;
+      end
+      else
+      begin
+        Visible := False;
+        FDetailsPanel.Visible := False;
+      end;
     end;
   finally
     FUpdating := False;
@@ -730,9 +1066,22 @@ end;
 
 procedure TVectArtLineToolbarControl.Resize;
 var
+  Style: TFontStyle;
+  StyleLeft: Integer;
   TrackWidth: Integer;
 begin
   inherited Resize;
+  if FFontFamilyCombo <> nil then
+    FFontFamilyCombo.SetBounds(60, 8, 180, 25);
+  StyleLeft := 246;
+  for Style := Low(TFontStyle) to High(TFontStyle) do
+    if FFontStyleButtons[Style] <> nil then
+      FFontStyleButtons[Style].SetBounds(StyleLeft + Ord(Style) * 32,
+        6, 28, 29);
+  if FLetterSpacingEdit <> nil then
+    FLetterSpacingEdit.SetBounds(408, 8, 46, 25);
+  if FLineSpacingEdit <> nil then
+    FLineSpacingEdit.SetBounds(496, 8, 46, 25);
   TrackWidth := Max(Width - 176, 60);
   if FStrokeWidthTrackBar <> nil then
     FStrokeWidthTrackBar.SetBounds(40, 4, TrackWidth, 34);
@@ -740,6 +1089,21 @@ begin
     FStrokeWidthEdit.SetBounds(Width - 128, 8, 48, 25);
   if FDetailsButton <> nil then
     FDetailsButton.SetBounds(Width - 70, 8, 60, 25);
+end;
+
+function TVectArtLineToolbarControl.SelectedTextIndices: TArray<Integer>;
+var
+  I: Integer;
+  Selection: TArray<Integer>;
+begin
+  Result := nil;
+  if (FDocument = nil) or (FDocument.SelectionCount = 0) then
+    Exit;
+  Selection := FDocument.GetSelectedLayerIndices;
+  for I := 0 to High(Selection) do
+    if not (FDocument[Selection[I]] is TScreenLayoutTextLayer) then
+      Exit;
+  Result := Selection;
 end;
 
 function TVectArtLineToolbarControl.SelectedLineIndices: TArray<Integer>;
@@ -767,6 +1131,18 @@ var
 begin
   Result := False;
   Indices := SelectedLineIndices;
+  for I := 0 to High(Indices) do
+    if FDocument[Indices[I]].Locked then
+      Exit(True);
+end;
+
+function TVectArtLineToolbarControl.SelectionHasLockedText: Boolean;
+var
+  I: Integer;
+  Indices: TArray<Integer>;
+begin
+  Result := False;
+  Indices := SelectedTextIndices;
   for I := 0 to High(Indices) do
     if FDocument[Indices[I]].Locked then
       Exit(True);

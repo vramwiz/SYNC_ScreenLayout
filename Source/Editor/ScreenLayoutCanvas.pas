@@ -264,6 +264,7 @@ begin
   FTextEditor.Text := '';
   FTextEditor.Font.Name := Data.FontFamily;
   FTextEditor.Font.Size := Round(Data.FontSize);
+  FTextEditor.Font.Style := Data.FontStyle;
   FTextEditor.Font.Color := Data.TextColor;
   FTextEditing := True;
   UpdateTextLayerFromBuffer;
@@ -304,6 +305,7 @@ begin
   FTextEditor.Text := '';
   FTextEditor.Font.Name := Layer.FontFamily;
   FTextEditor.Font.Size := Round(Layer.FontSize);
+  FTextEditor.Font.Style := Layer.FontStyle;
   FTextEditor.Font.Color := Layer.FillColor;
   FTextEditing := True;
   UpdateTextEditorBounds;
@@ -358,12 +360,16 @@ begin
     if SelectionStart <> SelectionEnd then
     begin
       Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
-      Font := CreateScreenLayoutTextFont(Layer.FontFamily, Layer.FontSize);
-      LineHeight := Max(Font.Spacing, Layer.FontSize);
+      Font := CreateScreenLayoutTextFont(Layer.FontFamily, Layer.FontSize,
+        Layer.FontStyle);
+      LineHeight := Max(Font.Spacing + Layer.FontSize *
+        Layer.LineSpacingRatio, 1.0);
       CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
-        Layer.FontFamily, Layer.FontSize, Layer.WrapWidth);
+        Layer.FontFamily, Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
+        Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
       ACanvas.Font.Name := Layer.FontFamily;
       ACanvas.Font.Height := -Max(Round(Layer.FontSize * FZoom), 1);
+      ACanvas.Font.Style := Layer.FontStyle;
       ACanvas.Font.Color := clHighlightText;
       for I := 0 to High(CaretLines) do
       begin
@@ -376,10 +382,12 @@ begin
         SelectedText := Copy(FTextBuffer, SpanStart + 1,
           SpanEnd - SpanStart);
         SelectionRect := Rect(
-          ToScreenX(FTextGuideBounds.Left + Font.MeasureText(PrefixText)),
+          ToScreenX(FTextGuideBounds.Left + MeasureScreenLayoutText(
+            PrefixText, Font, Layer.FontSize * Layer.LetterSpacingRatio)),
           ToScreenY(FTextGuideBounds.Top + I * LineHeight),
-          ToScreenX(FTextGuideBounds.Left + Font.MeasureText(
-            PrefixText + SelectedText)),
+          ToScreenX(FTextGuideBounds.Left + MeasureScreenLayoutText(
+            PrefixText + SelectedText, Font,
+            Layer.FontSize * Layer.LetterSpacingRatio)),
           ToScreenY(FTextGuideBounds.Top + (I + 1) * LineHeight));
         ACanvas.Brush.Style := bsSolid;
         ACanvas.Brush.Color := clHighlight;
@@ -431,12 +439,16 @@ begin
     if SelectionStart <> SelectionEnd then
     begin
       Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
-      Font := CreateScreenLayoutTextFont(Layer.FontFamily, Layer.FontSize);
-      LineHeight := Max(Font.Spacing, Layer.FontSize);
+      Font := CreateScreenLayoutTextFont(Layer.FontFamily, Layer.FontSize,
+        Layer.FontStyle);
+      LineHeight := Max(Font.Spacing + Layer.FontSize *
+        Layer.LineSpacingRatio, 1.0);
       CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
-        Layer.FontFamily, Layer.FontSize, Layer.WrapWidth);
+        Layer.FontFamily, Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
+        Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
       ACanvas.Font.Name := Layer.FontFamily;
       ACanvas.Font.Height := -Max(Round(Layer.FontSize * FZoom), 1);
+      ACanvas.Font.Style := Layer.FontStyle;
       ACanvas.Font.Color := clHighlightText;
       for I := 0 to High(CaretLines) do
       begin
@@ -449,10 +461,12 @@ begin
         SelectedText := Copy(FTextBuffer, SpanStart + 1,
           SpanEnd - SpanStart);
         SelectionRect := Rect(
-          ToScreenX(FTextGuideBounds.Left + Font.MeasureText(PrefixText)),
+          ToScreenX(FTextGuideBounds.Left + MeasureScreenLayoutText(
+            PrefixText, Font, Layer.FontSize * Layer.LetterSpacingRatio)),
           ToScreenY(FTextGuideBounds.Top + I * LineHeight),
-          ToScreenX(FTextGuideBounds.Left + Font.MeasureText(
-            PrefixText + SelectedText)),
+          ToScreenX(FTextGuideBounds.Left + MeasureScreenLayoutText(
+            PrefixText + SelectedText, Font,
+            Layer.FontSize * Layer.LetterSpacingRatio)),
           ToScreenY(FTextGuideBounds.Top + (I + 1) * LineHeight));
         ACanvas.Brush.Style := bsSolid;
         ACanvas.Brush.Color := clHighlight;
@@ -599,7 +613,8 @@ var
 begin
   Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
   CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
-    Layer.FontFamily, Layer.FontSize, Layer.WrapWidth);
+    Layer.FontFamily, Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
+    Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
   if Length(CaretLines) = 0 then
     Exit;
   CurrentLine := 0;
@@ -609,16 +624,18 @@ begin
       CurrentLine := I;
   if FTextPreferredCaretX < 0 then
   begin
-    Font := CreateScreenLayoutTextFont(Layer.FontFamily, Layer.FontSize);
-    FTextPreferredCaretX := Font.MeasureText(Copy(FTextBuffer,
+    Font := CreateScreenLayoutTextFont(Layer.FontFamily, Layer.FontSize,
+      Layer.FontStyle);
+    FTextPreferredCaretX := MeasureScreenLayoutText(Copy(FTextBuffer,
       CaretLines[CurrentLine].StartIndex + 1,
-      FTextCaretIndex - CaretLines[CurrentLine].StartIndex));
+      FTextCaretIndex - CaretLines[CurrentLine].StartIndex), Font,
+      Layer.FontSize * Layer.LetterSpacingRatio);
   end;
   TargetLine := EnsureRange(CurrentLine + Direction, 0,
     High(CaretLines));
   FTextCaretIndex := ScreenLayoutTextCaretIndexAtLineX(
     CaretLines[TargetLine], Layer.FontFamily, Layer.FontSize,
-    FTextPreferredCaretX);
+    FTextPreferredCaretX, Layer.FontStyle, Layer.LetterSpacingRatio);
   if not ExtendSelection then
     FTextSelectionAnchor := FTextCaretIndex;
   UpdateTextEditorBounds;
@@ -651,13 +668,15 @@ begin
   LocalPoint := RotatePointAround(LogicalPoint, Center,
     -Layer.RotationDegrees);
   Layout := BuildScreenLayoutTextLayout(FTextBuffer, Layer.FontFamily,
-    Layer.FontSize, Layer.WrapWidth);
+    Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
+    Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
   ScaleX := Layer.Bounds.Width / Max(Layout.Width, 1.0);
   ScaleY := Layer.Bounds.Height / Max(Layout.Height, Layer.FontSize);
   FTextCaretIndex := ScreenLayoutTextCaretIndexAtPoint(FTextBuffer,
     Layer.FontFamily, Layer.FontSize, Layer.WrapWidth,
     (LocalPoint.X - Layer.Bounds.Left) / Max(ScaleX, 0.0001),
-    (LocalPoint.Y - Layer.Bounds.Top) / Max(ScaleY, 0.0001));
+    (LocalPoint.Y - Layer.Bounds.Top) / Max(ScaleY, 0.0001),
+    Layer.FontStyle, Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
   if not ExtendSelection then
     FTextSelectionAnchor := FTextCaretIndex;
   FTextPreferredCaretX := -1.0;
@@ -854,7 +873,9 @@ begin
       begin
         Key := 0;
         CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
-          Layer.FontFamily, Layer.FontSize, Layer.WrapWidth);
+          Layer.FontFamily, Layer.FontSize, Layer.WrapWidth,
+          Layer.FontStyle, Layer.LetterSpacingRatio,
+          Layer.LineSpacingRatio);
         CurrentLine := 0;
         for I := 0 to High(CaretLines) do
           if (FTextCaretIndex >= CaretLines[I].StartIndex) and
@@ -872,7 +893,9 @@ begin
       begin
         Key := 0;
         CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
-          Layer.FontFamily, Layer.FontSize, Layer.WrapWidth);
+          Layer.FontFamily, Layer.FontSize, Layer.WrapWidth,
+          Layer.FontStyle, Layer.LetterSpacingRatio,
+          Layer.LineSpacingRatio);
         CurrentLine := 0;
         for I := 0 to High(CaretLines) do
           if (FTextCaretIndex >= CaretLines[I].StartIndex) and
@@ -952,22 +975,26 @@ begin
     Exit;
   Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
   FullLayout := BuildScreenLayoutTextLayout(FTextBuffer, Layer.FontFamily,
-    Layer.FontSize, Layer.WrapWidth);
+    Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
+    Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
   ScaleX := Layer.Bounds.Width / Max(FullLayout.Width, 1.0);
   ScaleY := Layer.Bounds.Height / Max(FullLayout.Height, Layer.FontSize);
   FTextEditor.Font.Name := Layer.FontFamily;
   FTextEditor.Font.Height := -Max(Round(Layer.FontSize * ScaleY * FZoom), 1);
+  FTextEditor.Font.Style := Layer.FontStyle;
   FTextEditor.Font.Color := Layer.FillColor;
   Prefix := Copy(FTextBuffer, 1, FTextCaretIndex);
   CaretLayout := BuildScreenLayoutTextLayout(Prefix, Layer.FontFamily,
-    Layer.FontSize, Layer.WrapWidth);
+    Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
+    Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
   LastLine := Max(High(CaretLayout.Lines), 0);
   CaretPoint := TPointF.Create(Layer.Bounds.Left,
     Layer.Bounds.Top + LastLine * CaretLayout.LineHeight * ScaleY);
   if Length(CaretLayout.Lines) > 0 then
-    CaretPoint.X := CaretPoint.X + CreateScreenLayoutTextFont(
-      Layer.FontFamily, Layer.FontSize).MeasureText(
-      CaretLayout.Lines[LastLine]) * ScaleX;
+    CaretPoint.X := CaretPoint.X + MeasureScreenLayoutText(
+      CaretLayout.Lines[LastLine], CreateScreenLayoutTextFont(
+        Layer.FontFamily, Layer.FontSize, Layer.FontStyle),
+      Layer.FontSize * Layer.LetterSpacingRatio) * ScaleX;
   Center := TPointF.Create((Layer.Bounds.Left + Layer.Bounds.Right) * 0.5,
     (Layer.Bounds.Top + Layer.Bounds.Bottom) * 0.5);
   CaretPoint := RotatePointAround(CaretPoint, Center,
@@ -1001,7 +1028,8 @@ begin
   Data.Text := FTextBuffer;
   Data.WrapWidth := Max(FTextGuideBounds.Width, 1.0);
   Layout := BuildScreenLayoutTextLayout(Data.Text, Data.FontFamily,
-    Data.FontSize, Data.WrapWidth);
+    Data.FontSize, Data.WrapWidth, Data.FontStyle, Data.LetterSpacingRatio,
+    Data.LineSpacingRatio);
   Data.Bounds := TRectF.Create(FTextGuideBounds.Left, FTextGuideBounds.Top,
     FTextGuideBounds.Left + Max(Layout.Width, 1.0),
     FTextGuideBounds.Top + Max(Layout.Height, Data.FontSize));

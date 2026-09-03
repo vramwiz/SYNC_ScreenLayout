@@ -65,6 +65,9 @@ begin
   Result.Bounds := Layer.Bounds;
   Result.FontFamily := Layer.FontFamily;
   Result.FontSize := Layer.FontSize;
+  Result.FontStyle := Layer.FontStyle;
+  Result.LetterSpacingRatio := Layer.LetterSpacingRatio;
+  Result.LineSpacingRatio := Layer.LineSpacingRatio;
   Result.Locked := Layer.Locked;
   Result.Name := Layer.Name;
   Result.Opacity := Layer.Opacity;

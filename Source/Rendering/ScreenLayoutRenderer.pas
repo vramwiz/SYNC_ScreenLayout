@@ -342,6 +342,32 @@ begin
   SetLength(FPixels, NativeInt(Count));
 end;
 
+procedure DrawScreenLayoutTextLine(const Canvas: ISkCanvas;
+  const Text: string; const Font: ISkFont; const Paint: ISkPaint;
+  X, BaselineY, LetterSpacing: Single);
+var
+  I: Integer;
+  UnitLength: Integer;
+  UnitText: string;
+begin
+  if SameValue(LetterSpacing, 0) then
+  begin
+    Canvas.DrawSimpleText(Text, X, BaselineY, Font, Paint);
+    Exit;
+  end;
+  I := 1;
+  while I <= Length(Text) do
+  begin
+    UnitLength := ScreenLayoutTextUnitLengthAt(Text, I);
+    UnitText := Copy(Text, I, UnitLength);
+    Canvas.DrawSimpleText(UnitText, X, BaselineY, Font, Paint);
+    X := X + Font.MeasureText(UnitText);
+    Inc(I, UnitLength);
+    if I <= Length(Text) then
+      X := X + LetterSpacing;
+  end;
+end;
+
 procedure RenderVectArtLayers(const RenderLayers: TArray<TVectArtLayer>;
   Target: TVectArtRenderBuffer; Width, Height: Integer;
   const LogicalBounds: TRectF; MinimumStrokeWidth,
@@ -590,7 +616,10 @@ var
   Surface: ISkSurface;
   ShapeLayer: TScreenLayoutShapeLayer;
   TextLayer: TScreenLayoutTextLayer;
+  TextDecorationPaint: ISkPaint;
   TextLayout: TScreenLayoutTextLayout;
+  TextWidth: Single;
+  LetterSpacing: Single;
 
 begin
   if Target = nil then
@@ -620,6 +649,8 @@ begin
   Paint.AntiAlias := True;
   StrokePaint := TSkPaint.Create(TSkPaintStyle.Stroke);
   StrokePaint.AntiAlias := True;
+  TextDecorationPaint := TSkPaint.Create(TSkPaintStyle.Stroke);
+  TextDecorationPaint.AntiAlias := True;
   ImagePaint := TSkPaint.Create;
   ImagePaint.AntiAlias := True;
   Canvas.Scale(ScaleX, ScaleY);
@@ -686,14 +717,19 @@ begin
       if TextLayer.Text = '' then
         Continue;
       TextLayout := BuildScreenLayoutTextLayout(TextLayer.Text,
-        TextLayer.FontFamily, TextLayer.FontSize, TextLayer.WrapWidth);
+        TextLayer.FontFamily, TextLayer.FontSize, TextLayer.WrapWidth,
+        TextLayer.FontStyle, TextLayer.LetterSpacingRatio,
+        TextLayer.LineSpacingRatio);
       if (TextLayout.Width <= 0) or (TextLayout.Height <= 0) then
         Continue;
       Font := CreateScreenLayoutTextFont(TextLayer.FontFamily,
-        TextLayer.FontSize);
+        TextLayer.FontSize, TextLayer.FontStyle);
       Paint.Color := VclColorToAlphaColor(TextLayer.FillColor,
         TextLayer.Opacity * OpacityMultiplier);
       Paint.Style := TSkPaintStyle.Fill;
+      TextDecorationPaint.Color := Paint.Color;
+      TextDecorationPaint.StrokeWidth := Max(TextLayer.FontSize / 16, 1.0);
+      LetterSpacing := TextLayer.FontSize * TextLayer.LetterSpacingRatio;
       Canvas.Save;
       try
         Canvas.Rotate(TextLayer.RotationDegrees,
@@ -703,8 +739,25 @@ begin
         Canvas.Scale(TextLayer.Bounds.Width / TextLayout.Width,
           TextLayer.Bounds.Height / TextLayout.Height);
         for J := 0 to High(TextLayout.Lines) do
-          Canvas.DrawSimpleText(TextLayout.Lines[J], 0,
-            TextLayout.Ascent + J * TextLayout.LineHeight, Font, Paint);
+        begin
+          DrawScreenLayoutTextLine(Canvas, TextLayout.Lines[J], Font, Paint,
+            0, TextLayout.Ascent + J * TextLayout.LineHeight,
+            LetterSpacing);
+          TextWidth := MeasureScreenLayoutText(TextLayout.Lines[J], Font,
+            LetterSpacing);
+          if (TextWidth > 0) and (fsUnderline in TextLayer.FontStyle) then
+            Canvas.DrawLine(TPointF.Create(0, TextLayout.Ascent +
+              J * TextLayout.LineHeight + TextLayer.FontSize * 0.08),
+              TPointF.Create(TextWidth, TextLayout.Ascent +
+              J * TextLayout.LineHeight + TextLayer.FontSize * 0.08),
+              TextDecorationPaint);
+          if (TextWidth > 0) and (fsStrikeOut in TextLayer.FontStyle) then
+            Canvas.DrawLine(TPointF.Create(0, TextLayout.Ascent +
+              J * TextLayout.LineHeight - TextLayer.FontSize * 0.3),
+              TPointF.Create(TextWidth, TextLayout.Ascent +
+              J * TextLayout.LineHeight - TextLayer.FontSize * 0.3),
+              TextDecorationPaint);
+        end;
       finally
         Canvas.Restore;
       end;

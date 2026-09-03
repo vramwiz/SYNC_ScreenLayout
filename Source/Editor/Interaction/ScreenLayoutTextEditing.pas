@@ -4,7 +4,7 @@ unit ScreenLayoutTextEditing;
 interface
 
 uses
-  System.Types, Winapi.Messages, Vcl.StdCtrls;
+  System.Types, Winapi.Messages, Vcl.Graphics, Vcl.StdCtrls;
 
 type
   TScreenLayoutCommittedTextEvent = procedure(Sender: TObject;
@@ -40,14 +40,19 @@ type
 
 // 明示改行とWrapWidthによる折り返しを反映した仮想カーソル行を返す。
 function BuildScreenLayoutTextCaretLines(const Text, FontFamily: string;
-  FontSize, WrapWidth: Single): TArray<TScreenLayoutCaretLine>;
+  FontSize, WrapWidth: Single;
+  FontStyle: TFontStyles = []; LetterSpacingRatio: Single = 0;
+  LineSpacingRatio: Single = 0): TArray<TScreenLayoutCaretLine>;
 // 指定行の横位置に最も近いUTF-16カーソル位置を返す。
 function ScreenLayoutTextCaretIndexAtLineX(
   const Line: TScreenLayoutCaretLine; const FontFamily: string;
-  FontSize, TargetX: Single): Integer;
+  FontSize, TargetX: Single; FontStyle: TFontStyles = [];
+  LetterSpacingRatio: Single = 0): Integer;
 // 折り返し後の組版座標から、最も近い行と文字間のUTF-16位置を返す。
 function ScreenLayoutTextCaretIndexAtPoint(const Text, FontFamily: string;
-  FontSize, WrapWidth, TargetX, TargetY: Single): Integer;
+  FontSize, WrapWidth, TargetX, TargetY: Single;
+  FontStyle: TFontStyles = []; LetterSpacingRatio: Single = 0;
+  LineSpacingRatio: Single = 0): Integer;
 // 選択範囲を削除してカーソルを範囲先頭へ移し、削除した場合にTrueを返す。
 function DeleteScreenLayoutTextSelection(var Text: string;
   var CaretIndex, SelectionAnchor: Integer;
@@ -67,18 +72,10 @@ uses
   System.Generics.Collections, System.Math, System.Skia, Winapi.Imm,
   ScreenLayoutTextGeometry;
 
-function TextUnitLengthAt(const Text: string; Index: Integer): Integer;
-begin
-  Result := 1;
-  if (Index >= 1) and (Index < Length(Text)) and
-    (Ord(Text[Index]) >= $D800) and (Ord(Text[Index]) <= $DBFF) and
-    (Ord(Text[Index + 1]) >= $DC00) and
-    (Ord(Text[Index + 1]) <= $DFFF) then
-    Result := 2;
-end;
-
 function BuildScreenLayoutTextCaretLines(const Text, FontFamily: string;
-  FontSize, WrapWidth: Single): TArray<TScreenLayoutCaretLine>;
+  FontSize, WrapWidth: Single;
+  FontStyle: TFontStyles; LetterSpacingRatio,
+  LineSpacingRatio: Single): TArray<TScreenLayoutCaretLine>;
 var
   Candidate: string;
   CharacterLength: Integer;
@@ -88,8 +85,10 @@ var
   Lines: TList<TScreenLayoutCaretLine>;
   NewLineLength: Integer;
   NextCharacter: string;
+  LetterSpacing: Single;
 begin
-  Font := CreateScreenLayoutTextFont(FontFamily, FontSize);
+  Font := CreateScreenLayoutTextFont(FontFamily, FontSize, FontStyle);
+  LetterSpacing := FontSize * LetterSpacingRatio;
   Lines := TList<TScreenLayoutCaretLine>.Create;
   try
     CurrentLine := Default(TScreenLayoutCaretLine);
@@ -115,11 +114,12 @@ begin
         CurrentLine.StartIndex := I - 1;
         Continue;
       end;
-      CharacterLength := TextUnitLengthAt(Text, I);
+      CharacterLength := ScreenLayoutTextUnitLengthAt(Text, I);
       NextCharacter := Copy(Text, I, CharacterLength);
       Candidate := CurrentLine.Text + NextCharacter;
       if (CurrentLine.Text <> '') and (WrapWidth > 0) and
-        (Font.MeasureText(Candidate) > WrapWidth) then
+        (MeasureScreenLayoutText(Candidate, Font, LetterSpacing) >
+          WrapWidth) then
       begin
         CurrentLine.EndIndex := I - 1;
         Lines.Add(CurrentLine);
@@ -141,7 +141,8 @@ end;
 
 function ScreenLayoutTextCaretIndexAtLineX(
   const Line: TScreenLayoutCaretLine; const FontFamily: string;
-  FontSize, TargetX: Single): Integer;
+  FontSize, TargetX: Single; FontStyle: TFontStyles;
+  LetterSpacingRatio: Single): Integer;
 var
   CharacterLength: Integer;
   Font: ISkFont;
@@ -150,14 +151,14 @@ var
   Width: Single;
 begin
   Result := Line.StartIndex;
-  Font := CreateScreenLayoutTextFont(FontFamily, FontSize);
+  Font := CreateScreenLayoutTextFont(FontFamily, FontSize, FontStyle);
   PreviousWidth := 0;
   I := 1;
   while I <= Length(Line.Text) do
   begin
-    CharacterLength := TextUnitLengthAt(Line.Text, I);
-    Width := Font.MeasureText(Copy(Line.Text, 1,
-      I + CharacterLength - 1));
+    CharacterLength := ScreenLayoutTextUnitLengthAt(Line.Text, I);
+    Width := MeasureScreenLayoutText(Copy(Line.Text, 1,
+      I + CharacterLength - 1), Font, FontSize * LetterSpacingRatio);
     if TargetX < (PreviousWidth + Width) * 0.5 then
       Exit;
     Inc(Result, CharacterLength);
@@ -167,7 +168,9 @@ begin
 end;
 
 function ScreenLayoutTextCaretIndexAtPoint(const Text, FontFamily: string;
-  FontSize, WrapWidth, TargetX, TargetY: Single): Integer;
+  FontSize, WrapWidth, TargetX, TargetY: Single;
+  FontStyle: TFontStyles; LetterSpacingRatio,
+  LineSpacingRatio: Single): Integer;
 var
   Font: ISkFont;
   LineHeight: Single;
@@ -175,15 +178,15 @@ var
   Lines: TArray<TScreenLayoutCaretLine>;
 begin
   Lines := BuildScreenLayoutTextCaretLines(Text, FontFamily, FontSize,
-    WrapWidth);
+    WrapWidth, FontStyle, LetterSpacingRatio, LineSpacingRatio);
   if Length(Lines) = 0 then
     Exit(0);
-  Font := CreateScreenLayoutTextFont(FontFamily, FontSize);
-  LineHeight := Max(Font.Spacing, FontSize);
+  Font := CreateScreenLayoutTextFont(FontFamily, FontSize, FontStyle);
+  LineHeight := Max(Font.Spacing + FontSize * LineSpacingRatio, 1.0);
   LineIndex := EnsureRange(Floor(TargetY / Max(LineHeight, 1.0)), 0,
     High(Lines));
   Result := ScreenLayoutTextCaretIndexAtLineX(Lines[LineIndex],
-    FontFamily, FontSize, TargetX);
+    FontFamily, FontSize, TargetX, FontStyle, LetterSpacingRatio);
 end;
 
 function DeleteScreenLayoutTextSelection(var Text: string;

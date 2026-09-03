@@ -176,6 +176,9 @@ type
   private
     FFontFamily: string;
     FFontSize: Single;
+    FFontStyle: TFontStyles;
+    FLetterSpacingRatio: Single;
+    FLineSpacingRatio: Single;
     FText: string;
     FWrapWidth: Single;
   public
@@ -184,6 +187,11 @@ type
       ATextColor: TColor);
     property FontFamily: string read FFontFamily write FFontFamily;
     property FontSize: Single read FFontSize write FFontSize;
+    property FontStyle: TFontStyles read FFontStyle write FFontStyle;
+    property LetterSpacingRatio: Single read FLetterSpacingRatio
+      write FLetterSpacingRatio;
+    property LineSpacingRatio: Single read FLineSpacingRatio
+      write FLineSpacingRatio;
     property Text: string read FText write FText;
     property WrapWidth: Single read FWrapWidth write FWrapWidth;
   end;
@@ -192,6 +200,9 @@ type
     Bounds: TRectF;          // 文字の組版実寸または変形後の表示範囲。
     FontFamily: string;      // Skiaへ渡す優先フォントファミリー。
     FontSize: Single;        // 変形前の文書座標単位フォントサイズ。
+    FontStyle: TFontStyles;  // 太字、斜体、下線、取り消し線の組み合わせ。
+    LetterSpacingRatio: Single; // 文字サイズを1.0とする字間の加算比率。
+    LineSpacingRatio: Single;   // 文字サイズを1.0とする行間の加算比率。
     Locked: Boolean;         // 編集を禁止する状態。
     Name: string;            // レイヤー一覧の表示名。
     Opacity: Single;         // 0.0..1.0のレイヤー不透明度。
@@ -1446,6 +1457,9 @@ begin
   Result := EnsureRange(Index, 1, FLayers.Count);
   TextLayer := TScreenLayoutTextLayer.Create(Data.Name, Data.Bounds,
     Data.Text, Data.FontFamily, Data.FontSize, Data.WrapWidth, Data.TextColor);
+  TextLayer.FontStyle := Data.FontStyle;
+  TextLayer.LetterSpacingRatio := Data.LetterSpacingRatio;
+  TextLayer.LineSpacingRatio := Data.LineSpacingRatio;
   TextLayer.Locked := Data.Locked;
   TextLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
   TextLayer.RotationDegrees := Data.RotationDegrees;
@@ -1880,6 +1894,9 @@ begin
   Data.Bounds := TextLayer.Bounds;
   Data.FontFamily := TextLayer.FontFamily;
   Data.FontSize := TextLayer.FontSize;
+  Data.FontStyle := TextLayer.FontStyle;
+  Data.LetterSpacingRatio := TextLayer.LetterSpacingRatio;
+  Data.LineSpacingRatio := TextLayer.LineSpacingRatio;
   Data.Locked := TextLayer.Locked;
   Data.Name := TextLayer.Name;
   Data.Opacity := TextLayer.Opacity;
@@ -2407,6 +2424,11 @@ begin
   TextLayer.FillColor := Data.TextColor;
   TextLayer.FontFamily := Data.FontFamily;
   TextLayer.FontSize := Max(Data.FontSize, 1.0);
+  TextLayer.FontStyle := Data.FontStyle;
+  TextLayer.LetterSpacingRatio := EnsureRange(Data.LetterSpacingRatio,
+    -0.9, 10.0);
+  TextLayer.LineSpacingRatio := EnsureRange(Data.LineSpacingRatio,
+    -0.9, 10.0);
   TextLayer.Locked := Data.Locked;
   TextLayer.Name := Data.Name;
   TextLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);

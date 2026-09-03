@@ -41,6 +41,20 @@ begin
   Result := TJSONBool(RequireValue(Parent, Name, TJSONBool)).AsBoolean;
 end;
 
+function ReadOptionalBoolean(Parent: TJSONObject; const Name: string;
+  DefaultValue: Boolean): Boolean;
+var
+  Value: TJSONValue;
+begin
+  Value := Parent.GetValue(Name);
+  if Value = nil then
+    Exit(DefaultValue);
+  if not (Value is TJSONBool) then
+    raise EConvertError.CreateFmt('JSON field "%s" has an invalid type',
+      [Name]);
+  Result := TJSONBool(Value).AsBoolean;
+end;
+
 function ReadInteger(Parent: TJSONObject; const Name: string): Integer;
 begin
   if not TryStrToInt(RequireValue(Parent, Name, TJSONNumber).Value,
@@ -53,6 +67,20 @@ function ReadSingle(Parent: TJSONObject; const Name: string): Single;
 begin
   Result := TJSONNumber(RequireValue(Parent, Name,
     TJSONNumber)).AsDouble;
+end;
+
+function ReadOptionalSingle(Parent: TJSONObject; const Name: string;
+  DefaultValue: Single): Single;
+var
+  Value: TJSONValue;
+begin
+  Value := Parent.GetValue(Name);
+  if Value = nil then
+    Exit(DefaultValue);
+  if not (Value is TJSONNumber) then
+    raise EConvertError.CreateFmt('JSON field "%s" has an invalid type',
+      [Name]);
+  Result := TJSONNumber(Value).AsDouble;
 end;
 
 function ReadString(Parent: TJSONObject; const Name: string): string;
@@ -350,6 +378,19 @@ begin
           TextValue.Text := ReadString(LayerJson, 'text');
           TextValue.FontFamily := ReadString(LayerJson, 'fontFamily');
           TextValue.FontSize := Max(ReadSingle(LayerJson, 'fontSize'), 1.0);
+          TextValue.FontStyle := [];
+          if ReadOptionalBoolean(LayerJson, 'bold', False) then
+            Include(TextValue.FontStyle, fsBold);
+          if ReadOptionalBoolean(LayerJson, 'italic', False) then
+            Include(TextValue.FontStyle, fsItalic);
+          if ReadOptionalBoolean(LayerJson, 'underline', False) then
+            Include(TextValue.FontStyle, fsUnderline);
+          if ReadOptionalBoolean(LayerJson, 'strikeOut', False) then
+            Include(TextValue.FontStyle, fsStrikeOut);
+          TextValue.LetterSpacingRatio := EnsureRange(ReadOptionalSingle(
+            LayerJson, 'letterSpacingRatio', 0), -0.9, 10.0);
+          TextValue.LineSpacingRatio := EnsureRange(ReadOptionalSingle(
+            LayerJson, 'lineSpacingRatio', 0), -0.9, 10.0);
           TextValue.WrapWidth := Max(ReadSingle(LayerJson, 'wrapWidth'), 1.0);
           TextValue.Bounds := TRectF.Create(
             ReadSingle(LayerJson, 'left'), ReadSingle(LayerJson, 'top'),

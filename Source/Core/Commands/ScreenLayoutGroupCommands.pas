@@ -361,6 +361,11 @@ begin
     Result := TScreenLayoutTextLayer.Create(NewName, TextLayer.Bounds,
       TextLayer.Text, TextLayer.FontFamily, TextLayer.FontSize,
       TextLayer.WrapWidth, TextLayer.FillColor);
+    TScreenLayoutTextLayer(Result).FontStyle := TextLayer.FontStyle;
+    TScreenLayoutTextLayer(Result).LetterSpacingRatio :=
+      TextLayer.LetterSpacingRatio;
+    TScreenLayoutTextLayer(Result).LineSpacingRatio :=
+      TextLayer.LineSpacingRatio;
     TScreenLayoutTextLayer(Result).RotationDegrees :=
       TextLayer.RotationDegrees;
   end

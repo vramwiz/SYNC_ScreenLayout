@@ -203,6 +203,18 @@ begin
         TextJson.AddPair('text', TextLayer.Text);
         TextJson.AddPair('fontFamily', TextLayer.FontFamily);
         TextJson.AddPair('fontSize', TJSONNumber.Create(TextLayer.FontSize));
+        TextJson.AddPair('bold',
+          TJSONBool.Create(fsBold in TextLayer.FontStyle));
+        TextJson.AddPair('italic',
+          TJSONBool.Create(fsItalic in TextLayer.FontStyle));
+        TextJson.AddPair('underline',
+          TJSONBool.Create(fsUnderline in TextLayer.FontStyle));
+        TextJson.AddPair('strikeOut',
+          TJSONBool.Create(fsStrikeOut in TextLayer.FontStyle));
+        TextJson.AddPair('letterSpacingRatio',
+          TJSONNumber.Create(TextLayer.LetterSpacingRatio));
+        TextJson.AddPair('lineSpacingRatio',
+          TJSONNumber.Create(TextLayer.LineSpacingRatio));
         TextJson.AddPair('wrapWidth', TJSONNumber.Create(TextLayer.WrapWidth));
         TextJson.AddPair('left', TJSONNumber.Create(TextLayer.Bounds.Left));
         TextJson.AddPair('top', TJSONNumber.Create(TextLayer.Bounds.Top));

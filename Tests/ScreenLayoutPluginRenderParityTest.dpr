@@ -189,6 +189,11 @@ begin
   Group.AddChild(TScreenLayoutTextLayer.Create('Text',
     TRectF.Create(-140, 40, -20, 75), 'Center', 'Segoe UI', 24, 120,
     clWhite));
+  TScreenLayoutTextLayer(Group[Group.ChildCount - 1]).FontStyle :=
+    [fsBold, fsItalic, fsUnderline, fsStrikeOut];
+  TScreenLayoutTextLayer(Group[Group.ChildCount - 1]).LetterSpacingRatio :=
+    0.2;
+  TScreenLayoutTextLayer(Group[Group.ChildCount - 1]).LineSpacingRatio := 0.3;
   Group.AddChild(TVectArtRectangleLayer.Create('Grouped rectangle',
     TRectF.Create(0, 45, 55, 80), clTeal));
   Document.InsertLayer(Document.LayerCount, Group);
