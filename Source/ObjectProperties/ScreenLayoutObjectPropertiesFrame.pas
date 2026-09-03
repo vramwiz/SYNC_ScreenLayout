@@ -114,7 +114,6 @@ begin
   FScrollBar.Visible := False;
   FScrollBar.SmallChange := 40;
   FScrollBar.OnChange := ScrollBarChanged;
-  FScrollBar.BringToFront;
   UpdateScrollLayout;
 end;
 
@@ -225,7 +224,9 @@ var
   NextTop: Integer;
   ScrollStep: Integer;
 begin
-  if (FViewport = nil) or (FContentPanel = nil) or (FScrollBar = nil) then
+  // 生成途中は親Handleを使うレイアウト処理をドック登録後まで延期する。
+  if (Parent = nil) or (FViewport = nil) or (FContentPanel = nil) or
+    (FScrollBar = nil) then
     Exit;
   GeometryHeight := MulDiv(GEOMETRY_PANEL_HEIGHT, CurrentPPI, 96);
   ColorHeight := MulDiv(COLOR_PICKER_PANEL_HEIGHT, CurrentPPI, 96);
@@ -260,6 +261,7 @@ begin
       ContentWidth := FViewport.ClientWidth;
     FScrollBar.SetBounds(Max(FViewport.ClientWidth - BarWidth, 0), 0,
       BarWidth, FViewport.ClientHeight);
+    FScrollBar.BringToFront;
     FScrollBar.SmallChange := ScrollStep;
     FScrollBar.LargeChange := Max(FViewport.ClientHeight - ScrollStep,
       ScrollStep);

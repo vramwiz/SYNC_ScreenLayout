@@ -194,6 +194,9 @@ end;
 constructor TToolPlaceholderFrame.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  // 子Control生成時にHandleが必要なため、ドック登録前だけ所有Controlへ接続する。
+  if AOwner is TWinControl then
+    Parent := TWinControl(AOwner);
   FGripPanel := TPanel.Create(Self);
   FGripPanel.Parent := Self;
   FGripPanel.Align := alTop;

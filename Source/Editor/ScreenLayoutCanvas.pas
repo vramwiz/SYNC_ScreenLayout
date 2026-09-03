@@ -121,7 +121,8 @@ implementation
 
 uses
   System.Math, System.Skia, Winapi.D2D1, Vcl.Clipbrd,
-  ScreenLayoutCanvasPreview, ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
+  ScreenLayoutCanvasGuides, ScreenLayoutCanvasPreview,
+  ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
   ScreenLayoutGroupCommands,
   ScreenLayoutLayerGeometry,
   ScreenLayoutPathOperations,
@@ -131,7 +132,7 @@ uses
 const
   CANVAS_MARGIN         = 32;
   CANVAS_SHADOW_OFFSET  = 6;
-  COLOR_EDITOR_SURROUND = TColor($00121212);
+  COLOR_EDITOR_SURROUND = TColor($00484848); // 出力範囲外を背景色と区別する中間色。
   COLOR_CANVAS_SHADOW   = TColor($00070707);
   COLOR_ROTATION_MARK   = TColor($00008000);
   COLOR_SELECTION       = clBlack;
@@ -1753,6 +1754,7 @@ begin
           @ReferenceRect);
         DocumentBitmap := nil;
       end;
+      DrawCanvasCropMarks(Direct2DCanvas, FCanvasBounds);
 
       if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
         TryGetScreenLayoutLayerBounds(FEditorState.OpenGroup,
@@ -2328,6 +2330,7 @@ begin
   end;
 
   DrawPremultipliedBitmap(Canvas, FCanvasBounds, FRenderedDocument);
+  DrawCanvasCropMarks(Canvas, FCanvasBounds);
   if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
     TryGetScreenLayoutLayerBounds(FEditorState.OpenGroup,
       RotatedBounds) then

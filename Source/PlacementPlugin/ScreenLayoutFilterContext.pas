@@ -5,7 +5,7 @@ interface
 
 uses
   AviUtl2FilterTypes, PluginFilterContextManager, ScreenLayoutFrameCapture,
-  System.SysUtils, ScreenLayoutDocument, ScreenLayoutRenderer;
+  System.SysUtils, Winapi.Windows, ScreenLayoutDocument, ScreenLayoutRenderer;
 
 type
   TScreenLayoutFilterContext = class(TPluginFilterContextItem)
@@ -15,6 +15,9 @@ type
     FLastAttemptedData: string;
     FLastError: string;
     FOutputBuffer: TVectArtRenderBuffer;
+    FOutputHeight: Integer;                 // 最後に描画した有効な出力高さ。
+    FOutputSizeLock: TRTLCriticalSection;   // 映像処理と設定画面の寸法共有を保護する。
+    FOutputWidth: Integer;                  // 最後に描画した有効な出力幅。
     FOverlayBuffer: TVectArtRenderBuffer;
     FRenderedRevision: Int64;
     FSerializedData: string;
@@ -26,6 +29,8 @@ type
     // 設定画面が使用する最新背景を呼び出し側所有の配列で返す。
     function CopyBackground(out Pixels: TBytes; out Width, Height: Integer;
       out Status: string): Boolean;
+    // 映像コールバックが最後に使用した有効な出力寸法をスレッド安全に返す。
+    function CopyOutputSize(out Width, Height: Integer): Boolean;
     // 共通レンダラーのRGBAを入力映像へ合成してAviUtl2へ返す。
     function RenderVideo(Video: PFILTER_PROC_VIDEO): Boolean;
     // 設定値が変わったときだけDocumentを更新し、解析失敗時は直前の正常状態を保つ。
@@ -45,6 +50,7 @@ uses
 constructor TScreenLayoutFilterContext.Create;
 begin
   inherited Create;
+  InitializeCriticalSection(FOutputSizeLock);
   FDocument := TVectArtDocument.Create;
   FFrameCapture := TScreenLayoutFrameCapture.Create;
   FOutputBuffer := TVectArtRenderBuffer.Create;
@@ -54,6 +60,7 @@ end;
 
 destructor TScreenLayoutFilterContext.Destroy;
 begin
+  DeleteCriticalSection(FOutputSizeLock);
   FOverlayBuffer.Free;
   FOutputBuffer.Free;
   FFrameCapture.Free;
@@ -85,6 +92,13 @@ begin
   if (Width <= 0) or (Height <= 0) or
     (Width > 16384) or (Height > 16384) then
     Exit;
+  EnterCriticalSection(FOutputSizeLock);
+  try
+    FOutputWidth := Width;
+    FOutputHeight := Height;
+  finally
+    LeaveCriticalSection(FOutputSizeLock);
+  end;
 
   if (FRenderedRevision <> FDocument.Revision) or
     (FOverlayBuffer.Width <> Width) or (FOverlayBuffer.Height <> Height) then
@@ -112,6 +126,19 @@ function TScreenLayoutFilterContext.CopyBackground(out Pixels: TBytes;
   out Width, Height: Integer; out Status: string): Boolean;
 begin
   Result := FFrameCapture.CopyRgba(Pixels, Width, Height, Status);
+end;
+
+function TScreenLayoutFilterContext.CopyOutputSize(out Width,
+  Height: Integer): Boolean;
+begin
+  EnterCriticalSection(FOutputSizeLock);
+  try
+    Width := FOutputWidth;
+    Height := FOutputHeight;
+  finally
+    LeaveCriticalSection(FOutputSizeLock);
+  end;
+  Result := (Width > 0) and (Height > 0);
 end;
 
 function TScreenLayoutFilterContext.UpdateSerializedData(const Value: string): Boolean;

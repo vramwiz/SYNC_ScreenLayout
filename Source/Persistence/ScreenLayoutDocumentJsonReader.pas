@@ -21,7 +21,8 @@ uses
   System.SysUtils, System.Types, Vcl.Graphics;
 
 const
-  DOCUMENT_FORMAT_VERSION = 13;
+  DOCUMENT_FORMAT_VERSION = 14;
+  DOCUMENT_COORDINATE_ORIGIN = 'center';
 
 type
   TRequiredJSONValueClass = class of TJSONValue;
@@ -71,6 +72,7 @@ var
   CanvasColor: Integer;
   CanvasHeight: Integer;
   CanvasJson: TJSONObject;
+  CanvasOrigin: string;
   CanvasTransparent: Boolean;
   CanvasWidth: Integer;
   ContourIndex: Integer;
@@ -166,10 +168,14 @@ begin
       CanvasJson := TJSONObject(RequireValue(Root, 'canvas', TJSONObject));
       CanvasWidth := ReadInteger(CanvasJson, 'width');
       CanvasHeight := ReadInteger(CanvasJson, 'height');
+      CanvasOrigin := ReadString(CanvasJson, 'origin');
       CanvasColor := ReadInteger(CanvasJson, 'backgroundColor');
       CanvasTransparent := ReadBoolean(CanvasJson, 'transparent');
       if (CanvasWidth <= 0) or (CanvasHeight <= 0) then
         raise EConvertError.Create('Canvas size must be positive');
+      if CanvasOrigin <> DOCUMENT_COORDINATE_ORIGIN then
+        raise EConvertError.CreateFmt('Unsupported coordinate origin: %s',
+          [CanvasOrigin]);
       LayersJson := TJSONArray(RequireValue(Root, 'layers', TJSONArray));
       SetLength(RectangleData, LayersJson.Count);
       SetLength(RectangleLineData, LayersJson.Count);

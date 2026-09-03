@@ -16,7 +16,8 @@ uses
   System.SysUtils, System.Types, Vcl.Graphics;
 
 const
-  DOCUMENT_FORMAT_VERSION = 13;
+  DOCUMENT_FORMAT_VERSION = 14;
+  DOCUMENT_COORDINATE_ORIGIN = 'center';
 
 function SerializeVectArtDocument(Document: TVectArtDocument): string;
 var
@@ -87,6 +88,7 @@ begin
     CanvasJson := TJSONObject.Create;
     CanvasJson.AddPair('width', TJSONNumber.Create(Canvas.Width));
     CanvasJson.AddPair('height', TJSONNumber.Create(Canvas.Height));
+    CanvasJson.AddPair('origin', DOCUMENT_COORDINATE_ORIGIN);
     CanvasJson.AddPair('backgroundColor',
       TJSONNumber.Create(Integer(Canvas.BackgroundColor)));
     CanvasJson.AddPair('transparent', TJSONBool.Create(Canvas.Transparent));

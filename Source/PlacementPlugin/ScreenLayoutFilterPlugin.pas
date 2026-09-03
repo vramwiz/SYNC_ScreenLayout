@@ -36,6 +36,8 @@ var
   BackgroundPixels: TBytes;
   BackgroundStatus: string;
   BackgroundWidth: Integer;
+  CanvasHeight: Integer;
+  CanvasWidth: Integer;
   Context: TScreenLayoutFilterContext;
   CurrentData: string;
   DataPointer: PAnsiChar;
@@ -65,6 +67,8 @@ begin
     BackgroundPixels := nil;
     BackgroundWidth := 0;
     BackgroundHeight := 0;
+    CanvasWidth := 0;
+    CanvasHeight := 0;
     ObjectLocation := Edit^.GetObjectLayerFrame(Obj);
     if ScreenLayoutContexts <> nil then
     begin
@@ -72,12 +76,22 @@ begin
         ObjectLocation.Layer, ObjectLocation.StartFrame,
         ObjectLocation.EndFrame);
       if Context <> nil then
+      begin
         Context.CopyBackground(BackgroundPixels, BackgroundWidth,
           BackgroundHeight, BackgroundStatus);
+        Context.CopyOutputSize(CanvasWidth, CanvasHeight);
+      end;
+    end;
+    if (CanvasWidth <= 0) or (CanvasHeight <= 0) then
+    begin
+      // 映像コールバック前の編集では、取得済みの参照背景寸法を代替値にする。
+      CanvasWidth := BackgroundWidth;
+      CanvasHeight := BackgroundHeight;
     end;
 
     if not EditScreenLayout(CurrentData, BackgroundPixels,
-      BackgroundWidth, BackgroundHeight, UpdatedData, ErrorMessage) then
+      BackgroundWidth, BackgroundHeight, CanvasWidth, CanvasHeight,
+      UpdatedData, ErrorMessage) then
       raise EInvalidOp.Create('画面レイアウトを編集できませんでした。'#13#10 +
         ErrorMessage);
 

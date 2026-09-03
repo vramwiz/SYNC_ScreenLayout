@@ -27,6 +27,7 @@ uses
   ScreenLayoutShapeBooleanOperations in 'Source\Core\Geometry\ScreenLayoutShapeBooleanOperations.pas',
   ScreenLayoutLayerGeometry in 'Source\Core\Geometry\ScreenLayoutLayerGeometry.pas',
   ScreenLayoutRenderer in 'Source\Rendering\ScreenLayoutRenderer.pas',
+  ScreenLayoutCanvasGuides in 'Source\Rendering\ScreenLayoutCanvasGuides.pas',
   ScreenLayoutCanvasPreview in 'Source\Rendering\ScreenLayoutCanvasPreview.pas',
   ScreenLayoutShapePath in 'Source\Rendering\ScreenLayoutShapePath.pas',
   ScreenLayoutContext in 'Source\Core\Model\ScreenLayoutContext.pas',

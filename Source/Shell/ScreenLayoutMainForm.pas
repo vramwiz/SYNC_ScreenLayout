@@ -230,14 +230,15 @@ begin
     pnlLeftDockArea, pnlRightDockArea, pnlLeftDropTarget,
     pnlRightDropTarget, splLeftRegion, splRightRegion);
   FLayerFrame := TLayerPanelFrame.Create(Self);
-  FLayerFrame.Context := FDesignerContext;
   FToolPaletteFrame := TToolPaletteFrame.Create(Self);
-  FToolPaletteFrame.Context := FDesignerContext;
   FObjectPropertiesFrame := TObjectPropertiesFrame.Create(Self);
-  FObjectPropertiesFrame.Context := FDesignerContext;
+  // Context設定は、各Frameが正式なドックスロットへ接続された後に行う。
   FDockManager.RegisterTool(FLayerFrame, vdsLeft);
   FDockManager.RegisterTool(FToolPaletteFrame, vdsLeft);
   FDockManager.RegisterTool(FObjectPropertiesFrame, vdsRight);
+  FLayerFrame.Context := FDesignerContext;
+  FToolPaletteFrame.Context := FDesignerContext;
+  FObjectPropertiesFrame.Context := FDesignerContext;
   FDockManager.OnToolVisibilityChanged := ToolVisibilityChanged;
 
   pnlViewMenuPopup.Height := 128;

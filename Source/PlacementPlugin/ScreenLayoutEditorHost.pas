@@ -6,18 +6,21 @@ interface
 uses
   System.SysUtils;
 
+// 保存値と参照背景を編集画面へ渡し、確定後のversion 14 JSONまたは失敗理由を返す。
 function EditScreenLayout(const SerializedData: string;
   const BackgroundPixels: TBytes; BackgroundWidth, BackgroundHeight: Integer;
+  CanvasWidth, CanvasHeight: Integer;
   out UpdatedData, ErrorMessage: string): Boolean;
 
 implementation
 
 uses
-  Vcl.Forms, ScreenLayoutDocumentJson,
+  Vcl.Forms, ScreenLayoutDocumentJson, ScreenLayoutPluginDocument,
   ScreenLayoutMainForm;
 
 function EditScreenLayout(const SerializedData: string;
   const BackgroundPixels: TBytes; BackgroundWidth, BackgroundHeight: Integer;
+  CanvasWidth, CanvasHeight: Integer;
   out UpdatedData, ErrorMessage: string): Boolean;
 var
   EditorForm: TMainForm;
@@ -35,9 +38,9 @@ begin
       EditorForm.SetCanvasSettingsVisible(False);
       EditorForm.SetReferenceBackgroundRgba(BackgroundPixels,
         BackgroundWidth, BackgroundHeight);
-      if (SerializedData <> '') and
-        not TryDeserializeVectArtDocument(SerializedData,
-          EditorForm.Document, ErrorMessage) then
+      if not InitializeScreenLayoutPluginDocument(EditorForm.Document,
+        SerializedData, CanvasWidth, CanvasHeight,
+        ErrorMessage) then
         Exit;
       EditorForm.ShowModal;
       UpdatedData := SerializeVectArtDocument(EditorForm.Document);

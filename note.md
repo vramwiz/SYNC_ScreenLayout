@@ -29,7 +29,8 @@
   選択したアクティブ図形を結果の基準とする。Rectangle系は回転と角丸を反映した一時Pathとして
   演算し、結果だけを複数輪郭とEven-Odd規則のShapeで保持する。操作全体を1回のUndo／Redo対象とし、
   Undoでは元のレイヤー型、積層位置、回転、角半径を復元する。
-- Document JSONは専用形式のversion 13とし、異なるversionとの互換性を持たない。専用の
+- Document JSONは専用形式のversion 14とし、`canvas.origin` は中央原点を表す `center` に固定する。
+  異なるversionおよび他の原点形式との互換性を持たない。専用の
   `line` レイヤーは保存せず、直線も `closed: false` かつ2頂点の `path` として保存する。
 - 楕円は回転前の外接矩形、回転、塗り設定を持つ独立レイヤーとする。円は楕円の縦横を
   同じにした状態として扱い、楕円ツールの配置中にShiftを押すと正円に制限する。
@@ -146,6 +147,24 @@
 
 ## 現在の作業区切り
 
+- 座標系見直しの第1段階として、Document JSONをversion 14へ更新し、`canvas.origin: "center"` を
+  必須化した。旧versionと左上原点形式は読み込まない。編集座標変換、JSON往復、共通RGBA描画で
+  `(0, 0)` がキャンバス／出力画像の中央になることを `ScreenLayoutCoordinateSystemTest` で確認済みである。
+- AviUtl2で新規作成するDocumentは、映像コールバックが最後に使用したオブジェクト出力寸法を
+  キャンバス寸法として開始する。出力寸法をまだ取得できない場合だけ背景フレーム寸法を使用し、
+  保存済みDocumentを開く場合はJSON内のキャンバス寸法を維持する。
+- 現行の全レイヤー型を含むversion 14 Documentについて、共通レンダラーのRGBAを不透明な入力画像へ
+  合成した結果と、AviUtl2映像コールバック経由の出力が完全一致することを
+  `ScreenLayoutPluginRenderParityTest` で確認済みである。
+- プラグインから編集画面を生成する際、ドッキング用FrameはWinControlの所有者へ一時接続してから
+  子コントロールを初期化し、Contextは正式なドックスロットへ接続した後に設定する。これにより
+  `LayerPanelFrame`／`ObjectPropertiesFrame`が親ウィンドウを持たない生成時例外を防ぐ。
+  `ScreenLayoutMainFormCreationTest`でフォームの生成と破棄を確認する。
+- 編集キャンバスはズーム／パン後の表示矩形を出力範囲として扱い、範囲外を中間グレーでべた塗りし、
+  四隅から8px離れた外側へ画面ピクセル固定長のトンボ線を表示する。キャンバス縁線は描画しない。
+  トンボ位置は表示矩形を基準とし、ビュー内に入る部分だけを表示する。これらは編集補助表示だけで、Documentおよび
+  プラグイン出力へ含めない。補助線は `ScreenLayoutCanvasGuides` に分離し、
+  `ScreenLayoutCanvasGuideTest`で表示矩形に対する固定トンボ座標を確認する。この対応はいったん完了とする。
 - グループ化・解除、開閉、内部選択、複数選択、変形、複製、削除、積層順変更、入れ子作成、
   入れ子ナビゲーション、JSON保存・読込まで実装済みである。
 - ScreenDesignMakerとフィルターのWin64 Debug／Releaseは、警告0・エラー0でビルド確認済みである。
@@ -249,6 +268,10 @@
 - Delphi 37.0を使用し、対象プラットフォームはWin64とする。
 - DebugとReleaseの両構成を検証する。
 - コンパイル警告とエラーを確認し、原則として警告0、エラー0で完了とする。
+- フィルタープラグインの通常ビルドは、Debug／ReleaseそれぞれのPost-build eventで生成したDLLを
+  `C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\SYNC_ScreenLayout_Filter.auf2` として配置し、
+  `Lib\Skia\Win64\sk4d.dll` も同じディレクトリへコピーする。AviUtl2がプラグインを使用中で
+  上書きできない場合はビルドを失敗させ、旧版のまま成功扱いにしない。
 - `Win32`、`Win64`、`.dcu`、`.rsm`、`.exe`、`.dll`などのビルド成果物はGitへ追加しない。
 - 一時的な内部テストも実行ファイル名を必ず `.exe` にし、拡張子なしの成果物は起動しない。
   起動前に対象の `.exe` が存在することを確認し、Windowsの「開くアプリを選択」を発生させない。

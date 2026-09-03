@@ -30,6 +30,12 @@
         <CfgParent>Base</CfgParent>
         <Base>true</Base>
     </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win64' and '$(Cfg_2)'=='true') or '$(Cfg_2_Win64)'!=''">
+        <Cfg_2_Win64>true</Cfg_2_Win64>
+        <CfgParent>Cfg_2</CfgParent>
+        <Cfg_2>true</Cfg_2>
+        <Base>true</Base>
+    </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
         <DCC_UnitSearchPath>Lib\VerticalScrollBar;Lib\ColorPicker;Source\ObjectProperties;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <GenDll>true</GenDll>
@@ -37,6 +43,17 @@
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
         <Debugger_HostApplication>D:\aviutl2_v2.1.3a\aviutl2.exe</Debugger_HostApplication>
+        <PreBuildEvent><![CDATA[if not exist "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout" mkdir "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout"]]></PreBuildEvent>
+        <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
+        <PostBuildEvent><![CDATA[copy /Y "$(MSBuildProjectDirectory)\$(PROJECTNAME).dll" "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\$(PROJECTNAME).auf2"&&copy /Y "$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll" "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\sk4d.dll"]]></PostBuildEvent>
+        <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_2_Win64)'!=''">
+        <Debugger_HostApplication>D:\aviutl2_v2.1.3a\aviutl2.exe</Debugger_HostApplication>
+        <PreBuildEvent><![CDATA[if not exist "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout" mkdir "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout"]]></PreBuildEvent>
+        <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
+        <PostBuildEvent><![CDATA[copy /Y "$(MSBuildProjectDirectory)\$(PROJECTNAME).dll" "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\$(PROJECTNAME).auf2"&&copy /Y "$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll" "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\sk4d.dll"]]></PostBuildEvent>
+        <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <ItemGroup>
         <DelphiCompile Include="$(MainSource)">
@@ -48,6 +65,7 @@
         <DCCReference Include="Source\PlacementPlugin\ScreenLayoutFilterPlugin.pas"/>
         <DCCReference Include="Source\PlacementPlugin\ScreenLayoutFrameCapture.pas"/>
         <DCCReference Include="Source\PlacementPlugin\ScreenLayoutFilterContext.pas"/>
+        <DCCReference Include="Source\PlacementPlugin\ScreenLayoutPluginDocument.pas"/>
         <DCCReference Include="Source\PlacementPlugin\ScreenLayoutEditorHost.pas"/>
         <DCCReference Include="Lib\TextRenderer\TextRendererSkiaBootstrap.pas"/>
         <DCCReference Include="Lib\TextRenderer\TextRendererTypes.pas"/>
@@ -58,10 +76,6 @@
         <DCCReference Include="Lib\ShortcutAction\ShortcutAction.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas"/>
-        <DCCReference Include="Lib\VerticalScrollBar\VerticalScrollBarControl.pas"/>
-        <DCCReference Include="Lib\ColorPicker\ColorPickerColorMath.pas"/>
-        <DCCReference Include="Lib\ColorPicker\ColorPickerHueBar.pas"/>
-        <DCCReference Include="Lib\ColorPicker\ColorPickerSVArea.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutMainForm.pas">
             <Form>MainForm</Form>
         </DCCReference>
@@ -78,7 +92,10 @@
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutShapeOperations.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutShapeBooleanGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutShapeBooleanOperations.pas"/>
+        <DCCReference Include="Source\Core\Geometry\ScreenLayoutLayerGeometry.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutRenderer.pas"/>
+        <DCCReference Include="Source\Rendering\ScreenLayoutCanvasGuides.pas"/>
+        <DCCReference Include="Source\Rendering\ScreenLayoutCanvasPreview.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutShapePath.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutContext.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutEditorState.pas"/>
@@ -88,8 +105,9 @@
         <DCCReference Include="Source\Core\Commands\ScreenLayoutTextCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutLayerStructureCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutLayerBatchCommands.pas"/>
-        <DCCReference Include="Source\Core\Commands\ScreenLayoutGroupTransformCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\ScreenLayoutGroupCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutGroupChildCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\ScreenLayoutGroupTransformCommands.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutEditHistory.pas"/>
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJson.pas"/>
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJsonReader.pas"/>
@@ -97,6 +115,7 @@
         <DCCReference Include="Source\Editor\ScreenLayoutCanvas.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutCanvasInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutGroupInteraction.pas"/>
+        <DCCReference Include="Source\Editor\Interaction\ScreenLayoutTextEditing.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutInteractionGeometry.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutPathInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutShapeInteraction.pas"/>
@@ -121,16 +140,6 @@
         <DCCReference Include="Source\Layout\ScreenLayoutDockManager.pas"/>
         <DCCReference Include="Source\Layout\ScreenLayoutToolFrames.pas"/>
         <DCCReference Include="Source\ObjectProperties\ScreenLayoutObjectPropertiesControl.pas"/>
-        <DCCReference Include="Source\ObjectProperties\ScreenLayoutColorPickerFrame.pas"/>
-        <DCCReference Include="Source\ObjectProperties\ScreenLayoutGeometryPropertiesFrame.pas"/>
-        <DCCReference Include="Source\ObjectProperties\ScreenLayoutLinePropertiesFrame.pas">
-            <Form>ScreenLayoutLinePropertiesFrame</Form>
-            <DesignClass>TFrame</DesignClass>
-        </DCCReference>
-        <DCCReference Include="Source\ObjectProperties\ScreenLayoutObjectPropertyCommands.pas"/>
-        <DCCReference Include="Source\ObjectProperties\ScreenLayoutObjectPropertySelection.pas"/>
-        <DCCReference Include="Source\ObjectProperties\ScreenLayoutObjectColorController.pas"/>
-        <DCCReference Include="Source\ObjectProperties\ScreenLayoutObjectLineController.pas"/>
         <DCCReference Include="Source\ObjectProperties\ScreenLayoutObjectPropertiesFrame.pas">
             <Form>ObjectPropertiesFrame</Form>
             <DesignClass>TFrame</DesignClass>
@@ -171,45 +180,20 @@
     <Import Project="$(BDS)\Bin\CodeGear.Delphi.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Delphi.Targets')"/>
     <Import Project="$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj" Condition="Exists('$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj')"/>
     <Import Project="$(MSBuildProjectName).deployproj" Condition="Exists('$(MSBuildProjectName).deployproj')"/>
-    <PropertyGroup Condition="'$(Platform)'=='Win64'">
-        <ScreenLayoutPluginDir>C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout</ScreenLayoutPluginDir>
-    </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Debug' And '$(Platform)'=='Win64'">
-        <ScreenLayoutBuildDir>$(MSBuildProjectDirectory)\Win64\SYNC_ScreenLayout_Filter\Debug</ScreenLayoutBuildDir>
-        <DCC_DcuOutput>$(ScreenLayoutBuildDir)\DCU</DCC_DcuOutput>
-        <DCC_ExeOutput>$(ScreenLayoutBuildDir)</DCC_ExeOutput>
-        <PreBuildEvent>if not exist &quot;$(ScreenLayoutPluginDir)&quot; mkdir &quot;$(ScreenLayoutPluginDir)&quot;
-if not exist &quot;$(DCC_DcuOutput)&quot; mkdir &quot;$(DCC_DcuOutput)&quot;
-if exist &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).dll&quot; del /Q &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).dll&quot;
-if exist &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).rsm&quot; del /Q &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).rsm&quot;
-if exist &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).exe&quot; del /Q &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).exe&quot;</PreBuildEvent>
+        <PreBuildEvent>if not exist &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout&quot; mkdir &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
-        <PostBuildEvent>set ScreenLayoutCopyResult=0
-copy /Y &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).dll&quot; &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).auf2&quot; || set ScreenLayoutCopyResult=1
-copy /Y &quot;$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll&quot; &quot;$(ScreenLayoutPluginDir)\sk4d.dll&quot; || set ScreenLayoutCopyResult=1
-if exist &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).dll&quot; del /Q &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).dll&quot;
-if exist &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).rsm&quot; del /Q &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).rsm&quot;
-if exist &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).exe&quot; del /Q &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).exe&quot;
-exit /B %ScreenLayoutCopyResult%</PostBuildEvent>
+        <PreLinkEvent/>
+        <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
+        <PostBuildEvent>copy /Y &quot;$(MSBuildProjectDirectory)\$(PROJECTNAME).dll&quot; &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\$(PROJECTNAME).auf2&quot;&amp;&amp;copy /Y &quot;$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll&quot; &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\sk4d.dll&quot;</PostBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Win64'">
-        <ScreenLayoutBuildDir>$(MSBuildProjectDirectory)\Win64\SYNC_ScreenLayout_Filter\Release</ScreenLayoutBuildDir>
-        <DCC_DcuOutput>$(ScreenLayoutBuildDir)\DCU</DCC_DcuOutput>
-        <DCC_ExeOutput>$(ScreenLayoutBuildDir)</DCC_ExeOutput>
-        <PreBuildEvent>if not exist &quot;$(ScreenLayoutPluginDir)&quot; mkdir &quot;$(ScreenLayoutPluginDir)&quot;
-if not exist &quot;$(DCC_DcuOutput)&quot; mkdir &quot;$(DCC_DcuOutput)&quot;
-if exist &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).dll&quot; del /Q &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).dll&quot;
-if exist &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).rsm&quot; del /Q &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).rsm&quot;
-if exist &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).exe&quot; del /Q &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).exe&quot;</PreBuildEvent>
+        <PreBuildEvent>if not exist &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout&quot; mkdir &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout&quot;</PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
-        <PostBuildEvent>set ScreenLayoutCopyResult=0
-copy /Y &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).dll&quot; &quot;$(ScreenLayoutPluginDir)\$(PROJECTNAME).auf2&quot; || set ScreenLayoutCopyResult=1
-copy /Y &quot;$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll&quot; &quot;$(ScreenLayoutPluginDir)\sk4d.dll&quot; || set ScreenLayoutCopyResult=1
-if exist &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).dll&quot; del /Q &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).dll&quot;
-if exist &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).rsm&quot; del /Q &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).rsm&quot;
-if exist &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).exe&quot; del /Q &quot;$(ScreenLayoutBuildDir)\$(PROJECTNAME).exe&quot;
-exit /B %ScreenLayoutCopyResult%</PostBuildEvent>
+        <PreLinkEvent/>
+        <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
+        <PostBuildEvent>copy /Y &quot;$(MSBuildProjectDirectory)\$(PROJECTNAME).dll&quot; &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\$(PROJECTNAME).auf2&quot;&amp;&amp;copy /Y &quot;$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll&quot; &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\sk4d.dll&quot;</PostBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
     </PropertyGroup>
 </Project>

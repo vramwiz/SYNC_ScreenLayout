@@ -90,6 +90,7 @@
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutShapeBooleanGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutShapeBooleanOperations.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutRenderer.pas"/>
+        <DCCReference Include="Source\Rendering\ScreenLayoutCanvasGuides.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutShapePath.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutContext.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutEditorState.pas"/>
