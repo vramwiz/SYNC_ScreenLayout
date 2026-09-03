@@ -28,6 +28,21 @@ type
     FRenderedPreviewStrokeWidth: Single;
     FRenderedRevision: Int64;
     FShapeCreation: TVectArtShapeCreation;
+    FBlurDragActive: Boolean;
+    FBlurDragFilter: TObject;
+    FBlurDragOldRadius: Single;
+    FBlurDragSide: Integer;
+    FBlurDragStart: TPoint;
+    FOutlineDragActive: Boolean;
+    FOutlineDragFilter: TObject;
+    FOutlineDragOldWidth: Single;
+    FOutlineDragSide: Integer;
+    FOutlineDragStart: TPoint;
+    FShadowDragActive: Boolean;
+    FShadowDragFilter: TObject;
+    FShadowDragOldOffsetX: Single;
+    FShadowDragOldOffsetY: Single;
+    FShadowDragStart: TPoint;
     FTextBeforeSelection: TArray<Integer>;
     FTextBuffer: string;
     FTextCaretIndex: Integer;
@@ -69,6 +84,14 @@ type
     procedure BeginNewTextEdit(const GuideBounds: TRectF);
     procedure DrawTextEditingOverlay(ACanvas: TCanvas);
     procedure DrawTextEditingOverlayDirect2D(ACanvas: TDirect2DCanvas);
+    procedure DrawBlurFilterOverlay(ACanvas: TCanvas);
+    procedure DrawBlurFilterOverlayDirect2D(ACanvas: TDirect2DCanvas);
+    procedure DrawOutlineFilterOverlay(ACanvas: TCanvas);
+    procedure DrawOutlineFilterOverlayDirect2D(
+      ACanvas: TDirect2DCanvas);
+    procedure DrawShadowFilterOverlay(ACanvas: TCanvas);
+    procedure DrawShadowFilterOverlayDirect2D(
+      ACanvas: TDirect2DCanvas);
     procedure FinishTextEdit(Cancel: Boolean;
       RestoreCanvasFocus: Boolean = True);
     procedure TextEditorCommittedText(Sender: TObject; const Text: string);
@@ -84,6 +107,13 @@ type
     procedure UpdateTextEditorBackground;
     procedure UpdateTextEditorBounds;
     procedure UpdateTextLayerFromBuffer;
+    function TryGetBlurFilterEditRect(out EditRect: TRect): Boolean;
+    function TryGetBlurFilterHandle(X, Y: Integer;
+      out Side: Integer): Boolean;
+    function TryGetOutlineFilterEditRect(out EditRect: TRect): Boolean;
+    function TryGetOutlineFilterHandle(X, Y: Integer;
+      out Side: Integer): Boolean;
+    function TryGetShadowFilterEditRect(out EditRect: TRect): Boolean;
   protected
     procedure DblClick; override;
     function DoMouseWheel(Shift: TShiftState; WheelDelta: Integer;
@@ -123,6 +153,7 @@ implementation
 uses
   System.Math, System.Skia, Winapi.D2D1, Vcl.Clipbrd,
   ScreenLayoutCanvasGuides, ScreenLayoutCanvasPreview,
+  ScreenLayoutFilterCommands, ScreenLayoutFilters,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
   ScreenLayoutGroupCommands,
   ScreenLayoutLayerGeometry,
@@ -135,6 +166,7 @@ const
   CANVAS_SHADOW_OFFSET  = 6;
   COLOR_EDITOR_SURROUND = TColor($00484848); // 出力範囲外を背景色と区別する中間色。
   COLOR_CANVAS_SHADOW   = TColor($00070707);
+  COLOR_FILTER_EDIT     = TColor($000080FF);
   COLOR_ROTATION_MARK   = TColor($00008000);
   COLOR_SELECTION       = clBlack;
   COLOR_OPEN_GROUP      = TColor($00D6A04A);
@@ -152,6 +184,12 @@ const
   // Falseにすると編集ビューの細線補正を一括で無効化する。
   ENABLE_THIN_STROKE_PREVIEW = True;
   MIN_PREVIEW_STROKE_WIDTH_PIXELS = 1.0;
+  BLUR_EFFECT_RADIUS_MULTIPLIER = 3.0;
+  OUTLINE_HANDLE_RADIUS = 6;
+  OUTLINE_SIDE_LEFT = 0;
+  OUTLINE_SIDE_TOP = 1;
+  OUTLINE_SIDE_RIGHT = 2;
+  OUTLINE_SIDE_BOTTOM = 3;
 
 procedure DrawPremultipliedBitmap(Target: TCanvas; const Bounds: TRect;
   Bitmap: Vcl.Graphics.TBitmap);
@@ -472,6 +510,363 @@ begin
     ACanvas.FrameRect(GuideRect);
     ACanvas.Pen.Style := psSolid;
   end;
+end;
+
+procedure TVectArtCanvasControl.DrawBlurFilterOverlay(ACanvas: TCanvas);
+var
+  Bounds: TRectF;
+  EditRect: TRect;
+  HandleCenter: TPoint;
+  Side: Integer;
+  SourceRect: TRect;
+begin
+  if not TryGetBlurFilterEditRect(EditRect) or
+    not TryGetScreenLayoutLayerBounds(
+      FEditorState.SelectedFilterLayer, Bounds) then
+    Exit;
+  SourceRect := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
+    ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.Pen.Color := COLOR_FILTER_EDIT;
+  ACanvas.Pen.Width := 1;
+  ACanvas.Pen.Style := psDot;
+  ACanvas.Rectangle(EditRect);
+  ACanvas.Pen.Style := psSolid;
+  ACanvas.Rectangle(SourceRect);
+  ACanvas.Brush.Style := bsSolid;
+  ACanvas.Brush.Color := clWhite;
+  for Side := OUTLINE_SIDE_LEFT to OUTLINE_SIDE_BOTTOM do
+  begin
+    case Side of
+      OUTLINE_SIDE_LEFT:
+        HandleCenter := Point(EditRect.Left, EditRect.CenterPoint.Y);
+      OUTLINE_SIDE_TOP:
+        HandleCenter := Point(EditRect.CenterPoint.X, EditRect.Top);
+      OUTLINE_SIDE_RIGHT:
+        HandleCenter := Point(EditRect.Right, EditRect.CenterPoint.Y);
+    else
+      HandleCenter := Point(EditRect.CenterPoint.X, EditRect.Bottom);
+    end;
+    ACanvas.Ellipse(Rect(HandleCenter.X - OUTLINE_HANDLE_RADIUS,
+      HandleCenter.Y - OUTLINE_HANDLE_RADIUS,
+      HandleCenter.X + OUTLINE_HANDLE_RADIUS + 1,
+      HandleCenter.Y + OUTLINE_HANDLE_RADIUS + 1));
+  end;
+end;
+
+procedure TVectArtCanvasControl.DrawBlurFilterOverlayDirect2D(
+  ACanvas: TDirect2DCanvas);
+var
+  Bounds: TRectF;
+  EditRect: TRect;
+  HandleCenter: TPoint;
+  Side: Integer;
+  SourceRect: TRect;
+begin
+  if not TryGetBlurFilterEditRect(EditRect) or
+    not TryGetScreenLayoutLayerBounds(
+      FEditorState.SelectedFilterLayer, Bounds) then
+    Exit;
+  SourceRect := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
+    ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.Pen.Color := COLOR_FILTER_EDIT;
+  ACanvas.Pen.Width := 1;
+  ACanvas.Pen.Style := psDot;
+  ACanvas.Rectangle(EditRect);
+  ACanvas.Pen.Style := psSolid;
+  ACanvas.Rectangle(SourceRect);
+  ACanvas.Brush.Style := bsSolid;
+  ACanvas.Brush.Color := clWhite;
+  for Side := OUTLINE_SIDE_LEFT to OUTLINE_SIDE_BOTTOM do
+  begin
+    case Side of
+      OUTLINE_SIDE_LEFT:
+        HandleCenter := Point(EditRect.Left, EditRect.CenterPoint.Y);
+      OUTLINE_SIDE_TOP:
+        HandleCenter := Point(EditRect.CenterPoint.X, EditRect.Top);
+      OUTLINE_SIDE_RIGHT:
+        HandleCenter := Point(EditRect.Right, EditRect.CenterPoint.Y);
+    else
+      HandleCenter := Point(EditRect.CenterPoint.X, EditRect.Bottom);
+    end;
+    ACanvas.Ellipse(Rect(HandleCenter.X - OUTLINE_HANDLE_RADIUS,
+      HandleCenter.Y - OUTLINE_HANDLE_RADIUS,
+      HandleCenter.X + OUTLINE_HANDLE_RADIUS + 1,
+      HandleCenter.Y + OUTLINE_HANDLE_RADIUS + 1));
+  end;
+end;
+
+procedure TVectArtCanvasControl.DrawOutlineFilterOverlay(ACanvas: TCanvas);
+var
+  EditRect: TRect;
+  HandleCenter: TPoint;
+  Side: Integer;
+begin
+  if not TryGetOutlineFilterEditRect(EditRect) then
+    Exit;
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.Pen.Color := COLOR_FILTER_EDIT;
+  ACanvas.Pen.Width := 1;
+  ACanvas.Rectangle(EditRect);
+  ACanvas.Brush.Style := bsSolid;
+  ACanvas.Brush.Color := clWhite;
+  for Side := OUTLINE_SIDE_LEFT to OUTLINE_SIDE_BOTTOM do
+  begin
+    case Side of
+      OUTLINE_SIDE_LEFT:
+        HandleCenter := Point(EditRect.Left, EditRect.CenterPoint.Y);
+      OUTLINE_SIDE_TOP:
+        HandleCenter := Point(EditRect.CenterPoint.X, EditRect.Top);
+      OUTLINE_SIDE_RIGHT:
+        HandleCenter := Point(EditRect.Right, EditRect.CenterPoint.Y);
+    else
+      HandleCenter := Point(EditRect.CenterPoint.X, EditRect.Bottom);
+    end;
+    ACanvas.Rectangle(Rect(HandleCenter.X - OUTLINE_HANDLE_RADIUS,
+      HandleCenter.Y - OUTLINE_HANDLE_RADIUS,
+      HandleCenter.X + OUTLINE_HANDLE_RADIUS + 1,
+      HandleCenter.Y + OUTLINE_HANDLE_RADIUS + 1));
+  end;
+end;
+
+procedure TVectArtCanvasControl.DrawOutlineFilterOverlayDirect2D(
+  ACanvas: TDirect2DCanvas);
+var
+  EditRect: TRect;
+  HandleCenter: TPoint;
+  Side: Integer;
+begin
+  if not TryGetOutlineFilterEditRect(EditRect) then
+    Exit;
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.Pen.Color := COLOR_FILTER_EDIT;
+  ACanvas.Pen.Width := 1;
+  ACanvas.Rectangle(EditRect);
+  ACanvas.Brush.Style := bsSolid;
+  ACanvas.Brush.Color := clWhite;
+  for Side := OUTLINE_SIDE_LEFT to OUTLINE_SIDE_BOTTOM do
+  begin
+    case Side of
+      OUTLINE_SIDE_LEFT:
+        HandleCenter := Point(EditRect.Left, EditRect.CenterPoint.Y);
+      OUTLINE_SIDE_TOP:
+        HandleCenter := Point(EditRect.CenterPoint.X, EditRect.Top);
+      OUTLINE_SIDE_RIGHT:
+        HandleCenter := Point(EditRect.Right, EditRect.CenterPoint.Y);
+    else
+      HandleCenter := Point(EditRect.CenterPoint.X, EditRect.Bottom);
+    end;
+    ACanvas.Rectangle(Rect(HandleCenter.X - OUTLINE_HANDLE_RADIUS,
+      HandleCenter.Y - OUTLINE_HANDLE_RADIUS,
+      HandleCenter.X + OUTLINE_HANDLE_RADIUS + 1,
+      HandleCenter.Y + OUTLINE_HANDLE_RADIUS + 1));
+  end;
+end;
+
+procedure TVectArtCanvasControl.DrawShadowFilterOverlay(ACanvas: TCanvas);
+var
+  EditRect: TRect;
+  LayerBounds: TRectF;
+  LayerCenter: TPoint;
+  ShadowCenter: TPoint;
+begin
+  if not TryGetShadowFilterEditRect(EditRect) or
+    not TryGetScreenLayoutLayerBounds(
+      FEditorState.SelectedFilterLayer, LayerBounds) then
+    Exit;
+  LayerCenter := Point(ToScreenX(LayerBounds.CenterPoint.X),
+    ToScreenY(LayerBounds.CenterPoint.Y));
+  ShadowCenter := EditRect.CenterPoint;
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.Pen.Color := COLOR_FILTER_EDIT;
+  ACanvas.Pen.Width := 1;
+  ACanvas.MoveTo(LayerCenter.X, LayerCenter.Y);
+  ACanvas.LineTo(ShadowCenter.X, ShadowCenter.Y);
+  ACanvas.Rectangle(EditRect);
+  ACanvas.Brush.Style := bsSolid;
+  ACanvas.Brush.Color := COLOR_FILTER_EDIT;
+  ACanvas.FillRect(Rect(ShadowCenter.X - 3, ShadowCenter.Y - 3,
+    ShadowCenter.X + 4, ShadowCenter.Y + 4));
+end;
+
+procedure TVectArtCanvasControl.DrawShadowFilterOverlayDirect2D(
+  ACanvas: TDirect2DCanvas);
+var
+  EditRect: TRect;
+  LayerBounds: TRectF;
+  LayerCenter: TPoint;
+  ShadowCenter: TPoint;
+begin
+  if not TryGetShadowFilterEditRect(EditRect) or
+    not TryGetScreenLayoutLayerBounds(
+      FEditorState.SelectedFilterLayer, LayerBounds) then
+    Exit;
+  LayerCenter := Point(ToScreenX(LayerBounds.CenterPoint.X),
+    ToScreenY(LayerBounds.CenterPoint.Y));
+  ShadowCenter := EditRect.CenterPoint;
+  ACanvas.Brush.Style := bsClear;
+  ACanvas.Pen.Color := COLOR_FILTER_EDIT;
+  ACanvas.Pen.Width := 1;
+  ACanvas.MoveTo(LayerCenter.X, LayerCenter.Y);
+  ACanvas.LineTo(ShadowCenter.X, ShadowCenter.Y);
+  ACanvas.Rectangle(EditRect);
+  ACanvas.Brush.Style := bsSolid;
+  ACanvas.Brush.Color := COLOR_FILTER_EDIT;
+  ACanvas.FillRect(Rect(ShadowCenter.X - 3, ShadowCenter.Y - 3,
+    ShadowCenter.X + 4, ShadowCenter.Y + 4));
+end;
+
+function TVectArtCanvasControl.TryGetBlurFilterEditRect(
+  out EditRect: TRect): Boolean;
+var
+  Blur: TScreenLayoutBlurFilter;
+  Bounds: TRectF;
+  EffectRadius: Single;
+begin
+  Result := False;
+  EditRect := TRect.Empty;
+  if (FEditorState = nil) or
+    not (FEditorState.SelectedFilter is TScreenLayoutBlurFilter) or
+    (FEditorState.SelectedFilterLayer = nil) or
+    FEditorState.SelectedFilterLayer.Locked or
+    not TryGetScreenLayoutLayerBounds(FEditorState.SelectedFilterLayer,
+      Bounds) then
+    Exit;
+  Blur := TScreenLayoutBlurFilter(FEditorState.SelectedFilter);
+  if not Blur.Enabled then
+    Exit;
+  EffectRadius := Max(Blur.Radius, 0.0) *
+    BLUR_EFFECT_RADIUS_MULTIPLIER;
+  Bounds.Inflate(EffectRadius, EffectRadius);
+  EditRect := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
+    ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
+  Result := True;
+end;
+
+function TVectArtCanvasControl.TryGetBlurFilterHandle(X, Y: Integer;
+  out Side: Integer): Boolean;
+var
+  CandidateSide: Integer;
+  Center: TPoint;
+  EditRect: TRect;
+  HandleRect: TRect;
+begin
+  Result := False;
+  Side := -1;
+  if not TryGetBlurFilterEditRect(EditRect) then
+    Exit;
+  for CandidateSide := OUTLINE_SIDE_LEFT to OUTLINE_SIDE_BOTTOM do
+  begin
+    case CandidateSide of
+      OUTLINE_SIDE_LEFT:
+        Center := Point(EditRect.Left, EditRect.CenterPoint.Y);
+      OUTLINE_SIDE_TOP:
+        Center := Point(EditRect.CenterPoint.X, EditRect.Top);
+      OUTLINE_SIDE_RIGHT:
+        Center := Point(EditRect.Right, EditRect.CenterPoint.Y);
+    else
+      Center := Point(EditRect.CenterPoint.X, EditRect.Bottom);
+    end;
+    HandleRect := Rect(Center.X - OUTLINE_HANDLE_RADIUS,
+      Center.Y - OUTLINE_HANDLE_RADIUS,
+      Center.X + OUTLINE_HANDLE_RADIUS + 1,
+      Center.Y + OUTLINE_HANDLE_RADIUS + 1);
+    if PtInRect(HandleRect, Point(X, Y)) then
+    begin
+      Side := CandidateSide;
+      Exit(True);
+    end;
+  end;
+end;
+
+function TVectArtCanvasControl.TryGetOutlineFilterEditRect(
+  out EditRect: TRect): Boolean;
+var
+  Bounds: TRectF;
+  Outline: TScreenLayoutOutlineFilter;
+begin
+  Result := False;
+  EditRect := TRect.Empty;
+  if (FEditorState = nil) or
+    not (FEditorState.SelectedFilter is TScreenLayoutOutlineFilter) or
+    (FEditorState.SelectedFilterLayer = nil) or
+    FEditorState.SelectedFilterLayer.Locked or
+    not TryGetScreenLayoutLayerBounds(FEditorState.SelectedFilterLayer,
+      Bounds) then
+    Exit;
+  Outline := TScreenLayoutOutlineFilter(FEditorState.SelectedFilter);
+  if not Outline.Enabled then
+    Exit;
+  Bounds.Inflate(Max(Outline.Width, 0.0), Max(Outline.Width, 0.0));
+  EditRect := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
+    ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
+  Result := True;
+end;
+
+function TVectArtCanvasControl.TryGetOutlineFilterHandle(X, Y: Integer;
+  out Side: Integer): Boolean;
+var
+  CandidateSide: Integer;
+  Center: TPoint;
+  EditRect: TRect;
+  HandleRect: TRect;
+begin
+  Result := False;
+  Side := -1;
+  if not TryGetOutlineFilterEditRect(EditRect) then
+    Exit;
+  for CandidateSide := OUTLINE_SIDE_LEFT to OUTLINE_SIDE_BOTTOM do
+  begin
+    case CandidateSide of
+      OUTLINE_SIDE_LEFT:
+        Center := Point(EditRect.Left, EditRect.CenterPoint.Y);
+      OUTLINE_SIDE_TOP:
+        Center := Point(EditRect.CenterPoint.X, EditRect.Top);
+      OUTLINE_SIDE_RIGHT:
+        Center := Point(EditRect.Right, EditRect.CenterPoint.Y);
+    else
+      Center := Point(EditRect.CenterPoint.X, EditRect.Bottom);
+    end;
+    HandleRect := Rect(Center.X - OUTLINE_HANDLE_RADIUS,
+      Center.Y - OUTLINE_HANDLE_RADIUS,
+      Center.X + OUTLINE_HANDLE_RADIUS + 1,
+      Center.Y + OUTLINE_HANDLE_RADIUS + 1);
+    if PtInRect(HandleRect, Point(X, Y)) then
+    begin
+      Side := CandidateSide;
+      Exit(True);
+    end;
+  end;
+  Side := -1;
+end;
+
+function TVectArtCanvasControl.TryGetShadowFilterEditRect(
+  out EditRect: TRect): Boolean;
+var
+  Bounds: TRectF;
+  Shadow: TScreenLayoutShadowFilter;
+begin
+  Result := False;
+  EditRect := TRect.Empty;
+  if (FEditorState = nil) or
+    not (FEditorState.SelectedFilter is TScreenLayoutShadowFilter) or
+    (FEditorState.SelectedFilterLayer = nil) or
+    FEditorState.SelectedFilterLayer.Locked or
+    not TryGetScreenLayoutLayerBounds(FEditorState.SelectedFilterLayer,
+      Bounds) then
+    Exit;
+  Shadow := TScreenLayoutShadowFilter(FEditorState.SelectedFilter);
+  if not Shadow.Enabled then
+    Exit;
+  Bounds.Offset(Shadow.OffsetX, Shadow.OffsetY);
+  EditRect := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
+    ToScreenX(Bounds.Right), ToScreenY(Bounds.Bottom));
+  if EditRect.Width = 0 then
+    Inc(EditRect.Right);
+  if EditRect.Height = 0 then
+    Inc(EditRect.Bottom);
+  Result := True;
 end;
 
 procedure TVectArtCanvasControl.FinishTextEdit(Cancel,
@@ -1171,6 +1566,8 @@ end;
 procedure TVectArtCanvasControl.MouseDown(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
+  BlurFilter: TScreenLayoutBlurFilter;
+  BlurSide: Integer;
   GroupChild: TVectArtLayer;
   GroupChildBounds: TRectF;
   GroupChildRect: TRect;
@@ -1178,7 +1575,11 @@ var
   LayerIndex: Integer;
   LogicalPoint: TPointF;
   OpenGroupBounds: TRectF;
+  OutlineFilter: TScreenLayoutOutlineFilter;
+  OutlineSide: Integer;
   SelectionGeometry: TVectArtSelectionGeometry;
+  ShadowEditRect: TRect;
+  ShadowFilter: TScreenLayoutShadowFilter;
   TextLayerIndex: Integer;
   VertexCaptureNeeded: Boolean;
 begin
@@ -1212,6 +1613,61 @@ begin
   end;
   if (Button = mbLeft) and (FDocument <> nil) then
   begin
+    CalculateCanvasBounds;
+    if TryGetBlurFilterHandle(X, Y, BlurSide) then
+    begin
+      if CanFocus then
+        SetFocus;
+      BlurFilter := TScreenLayoutBlurFilter(FEditorState.SelectedFilter);
+      FBlurDragActive := True;
+      FBlurDragFilter := BlurFilter;
+      FBlurDragStart := Point(X, Y);
+      FBlurDragOldRadius := BlurFilter.Radius;
+      FBlurDragSide := BlurSide;
+      FDocument.BeginInteractiveUpdate;
+      MouseCapture := True;
+      if BlurSide in [OUTLINE_SIDE_LEFT, OUTLINE_SIDE_RIGHT] then
+        Cursor := crSizeWE
+      else
+        Cursor := crSizeNS;
+      Exit;
+    end;
+    if TryGetOutlineFilterHandle(X, Y, OutlineSide) then
+    begin
+      if CanFocus then
+        SetFocus;
+      OutlineFilter := TScreenLayoutOutlineFilter(
+        FEditorState.SelectedFilter);
+      FOutlineDragActive := True;
+      FOutlineDragFilter := OutlineFilter;
+      FOutlineDragStart := Point(X, Y);
+      FOutlineDragOldWidth := OutlineFilter.Width;
+      FOutlineDragSide := OutlineSide;
+      FDocument.BeginInteractiveUpdate;
+      MouseCapture := True;
+      if OutlineSide in [OUTLINE_SIDE_LEFT, OUTLINE_SIDE_RIGHT] then
+        Cursor := crSizeWE
+      else
+        Cursor := crSizeNS;
+      Exit;
+    end;
+    if TryGetShadowFilterEditRect(ShadowEditRect) and
+      PtInRect(ShadowEditRect, Point(X, Y)) then
+    begin
+      if CanFocus then
+        SetFocus;
+      ShadowFilter := TScreenLayoutShadowFilter(
+        FEditorState.SelectedFilter);
+      FShadowDragActive := True;
+      FShadowDragFilter := ShadowFilter;
+      FShadowDragStart := Point(X, Y);
+      FShadowDragOldOffsetX := ShadowFilter.OffsetX;
+      FShadowDragOldOffsetY := ShadowFilter.OffsetY;
+      FDocument.BeginInteractiveUpdate;
+      MouseCapture := True;
+      Cursor := crSizeAll;
+      Exit;
+    end;
     if FTextEditing then
     begin
       CalculateCanvasBounds;
@@ -1239,6 +1695,31 @@ begin
       SetFocus;
     CalculateCanvasBounds;
     ConfigureInteraction;
+    // Creation tools take precedence over existing layer frames and open
+    // group hit-testing. Only an explicit vertex/control-point hit keeps
+    // the structural editing behavior of line, path, and shape tools.
+    if (FEditorState <> nil) and
+      (FEditorState.CurrentTool in [vetLine, vetPath, vetShape]) and
+      FInteraction.MouseDownSelectedVertex(Button, Shift, X, Y,
+        VertexCaptureNeeded) then
+    begin
+      if VertexCaptureNeeded then
+        MouseCapture := True;
+      Cursor := FInteraction.CursorAt(X, Y);
+      Invalidate;
+      Exit;
+    end;
+    FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
+      FCanvasBounds, FZoom);
+    if FShapeCreation.MouseDown(Button, Shift, X, Y) then
+    begin
+      if (FEditorState <> nil) and
+        not (FEditorState.CurrentTool in [vetPath, vetShape]) then
+        MouseCapture := True;
+      Cursor := crCross;
+      Invalidate;
+      Exit;
+    end;
     if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
       (FEditorState.OpenGroupChild <> nil) and
       OpenGroupSelectionEditable(FEditorState) and
@@ -1356,29 +1837,6 @@ begin
       Invalidate;
       Exit;
     end;
-    ConfigureInteraction;
-    if (FEditorState <> nil) and
-      (FEditorState.CurrentTool in [vetLine, vetPath, vetShape]) and
-      FInteraction.MouseDownSelectedVertex(Button, Shift, X, Y,
-        VertexCaptureNeeded) then
-    begin
-      if VertexCaptureNeeded then
-        MouseCapture := True;
-      Cursor := FInteraction.CursorAt(X, Y);
-      Invalidate;
-      Exit;
-    end;
-    FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
-      FCanvasBounds, FZoom);
-    if FShapeCreation.MouseDown(Button, Shift, X, Y) then
-    begin
-      if (FEditorState <> nil) and
-        not (FEditorState.CurrentTool in [vetPath, vetShape]) then
-        MouseCapture := True;
-      Cursor := crCross;
-      Invalidate;
-      Exit;
-    end;
     if (FEditorState <> nil) and
       (FEditorState.CurrentTool in [vetRectangleLine, vetRectangle,
         vetRoundedRectangleLine, vetRoundedRectangle,
@@ -1408,11 +1866,93 @@ procedure TVectArtCanvasControl.MouseMove(Shift: TShiftState;
   X, Y: Integer);
 var
   Angle: Single;
+  BlurDelta: Single;
+  BlurSide: Integer;
   GroupChildBounds: TRectF;
   GroupChildRect: TRect;
   Handle: TVectArtSelectionHandle;
+  OutlineDelta: Single;
+  OutlineSide: Integer;
   SelectionGeometry: TVectArtSelectionGeometry;
+  ShadowEditRect: TRect;
 begin
+  if FBlurDragActive and
+    (FBlurDragFilter is TScreenLayoutBlurFilter) then
+  begin
+    if FBlurDragSide in [OUTLINE_SIDE_LEFT, OUTLINE_SIDE_RIGHT] then
+      BlurDelta := (X - FBlurDragStart.X) / Max(FZoom, 0.001)
+    else
+      BlurDelta := (Y - FBlurDragStart.Y) / Max(FZoom, 0.001);
+    if FBlurDragSide in [OUTLINE_SIDE_LEFT, OUTLINE_SIDE_TOP] then
+      BlurDelta := -BlurDelta;
+    BlurDelta := BlurDelta / BLUR_EFFECT_RADIUS_MULTIPLIER;
+    TScreenLayoutBlurFilter(FBlurDragFilter).Radius :=
+      EnsureRange(FBlurDragOldRadius + BlurDelta, 0.0, 50.0);
+    if FDocument <> nil then
+      FDocument.Changed;
+    if FBlurDragSide in [OUTLINE_SIDE_LEFT, OUTLINE_SIDE_RIGHT] then
+      Cursor := crSizeWE
+    else
+      Cursor := crSizeNS;
+    Invalidate;
+    Exit;
+  end;
+  if FOutlineDragActive and
+    (FOutlineDragFilter is TScreenLayoutOutlineFilter) then
+  begin
+    if FOutlineDragSide in [OUTLINE_SIDE_LEFT, OUTLINE_SIDE_RIGHT] then
+      OutlineDelta := (X - FOutlineDragStart.X) / Max(FZoom, 0.001)
+    else
+      OutlineDelta := (Y - FOutlineDragStart.Y) / Max(FZoom, 0.001);
+    if FOutlineDragSide in [OUTLINE_SIDE_LEFT, OUTLINE_SIDE_TOP] then
+      OutlineDelta := -OutlineDelta;
+    TScreenLayoutOutlineFilter(FOutlineDragFilter).Width :=
+      EnsureRange(FOutlineDragOldWidth + OutlineDelta, 0.0, 40.0);
+    if FDocument <> nil then
+      FDocument.Changed;
+    if FOutlineDragSide in [OUTLINE_SIDE_LEFT, OUTLINE_SIDE_RIGHT] then
+      Cursor := crSizeWE
+    else
+      Cursor := crSizeNS;
+    Invalidate;
+    Exit;
+  end;
+  if FShadowDragActive and
+    (FShadowDragFilter is TScreenLayoutShadowFilter) then
+  begin
+    TScreenLayoutShadowFilter(FShadowDragFilter).OffsetX :=
+      FShadowDragOldOffsetX + (X - FShadowDragStart.X) / Max(FZoom, 0.001);
+    TScreenLayoutShadowFilter(FShadowDragFilter).OffsetY :=
+      FShadowDragOldOffsetY + (Y - FShadowDragStart.Y) / Max(FZoom, 0.001);
+    if FDocument <> nil then
+      FDocument.Changed;
+    Cursor := crSizeAll;
+    Invalidate;
+    Exit;
+  end;
+  CalculateCanvasBounds;
+  if TryGetBlurFilterHandle(X, Y, BlurSide) then
+  begin
+    if BlurSide in [OUTLINE_SIDE_LEFT, OUTLINE_SIDE_RIGHT] then
+      Cursor := crSizeWE
+    else
+      Cursor := crSizeNS;
+    Exit;
+  end;
+  if TryGetOutlineFilterHandle(X, Y, OutlineSide) then
+  begin
+    if OutlineSide in [OUTLINE_SIDE_LEFT, OUTLINE_SIDE_RIGHT] then
+      Cursor := crSizeWE
+    else
+      Cursor := crSizeNS;
+    Exit;
+  end;
+  if TryGetShadowFilterEditRect(ShadowEditRect) and
+    PtInRect(ShadowEditRect, Point(X, Y)) then
+  begin
+    Cursor := crSizeAll;
+    Exit;
+  end;
   if FGroupDrag.UpdateMoveOrResize(X, Y, FZoom) then
   begin
     if FGroupDrag.Mode = slgdmMove then
@@ -1521,12 +2061,122 @@ end;
 procedure TVectArtCanvasControl.MouseUp(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
+  BlurCommand: TScreenLayoutSetFilterParametersCommand;
+  BlurFilter: TScreenLayoutBlurFilter;
   Bottom: Single;
   GuideRect: TRect;
   Left: Single;
+  NewParameters: TScreenLayoutFilter;
+  OldParameters: TScreenLayoutFilter;
+  OutlineCommand: TScreenLayoutSetFilterParametersCommand;
+  OutlineFilter: TScreenLayoutOutlineFilter;
   Right: Single;
+  ShadowCommand: TScreenLayoutSetFilterParametersCommand;
+  ShadowFilter: TScreenLayoutShadowFilter;
   Top: Single;
 begin
+  if (Button = mbLeft) and FBlurDragActive then
+  begin
+    FBlurDragActive := False;
+    MouseCapture := False;
+    if FBlurDragFilter is TScreenLayoutBlurFilter then
+    begin
+      BlurFilter := TScreenLayoutBlurFilter(FBlurDragFilter);
+      if not SameValue(BlurFilter.Radius, FBlurDragOldRadius) then
+      begin
+        OldParameters := BlurFilter.Clone;
+        NewParameters := BlurFilter.Clone;
+        try
+          TScreenLayoutBlurFilter(OldParameters).Radius :=
+            FBlurDragOldRadius;
+          BlurCommand := TScreenLayoutSetFilterParametersCommand.Create(
+            FDocument, BlurFilter, OldParameters, NewParameters);
+          if EditHistory <> nil then
+            EditHistory.AddApplied(BlurCommand)
+          else
+            BlurCommand.Free;
+        finally
+          NewParameters.Free;
+          OldParameters.Free;
+        end;
+      end;
+    end;
+    FBlurDragFilter := nil;
+    if FDocument <> nil then
+      FDocument.EndInteractiveUpdate;
+    Cursor := crDefault;
+    Invalidate;
+    Exit;
+  end;
+  if (Button = mbLeft) and FOutlineDragActive then
+  begin
+    FOutlineDragActive := False;
+    MouseCapture := False;
+    if FOutlineDragFilter is TScreenLayoutOutlineFilter then
+    begin
+      OutlineFilter := TScreenLayoutOutlineFilter(FOutlineDragFilter);
+      if not SameValue(OutlineFilter.Width, FOutlineDragOldWidth) then
+      begin
+        OldParameters := OutlineFilter.Clone;
+        NewParameters := OutlineFilter.Clone;
+        try
+          TScreenLayoutOutlineFilter(OldParameters).Width :=
+            FOutlineDragOldWidth;
+          OutlineCommand := TScreenLayoutSetFilterParametersCommand.Create(
+            FDocument, OutlineFilter, OldParameters, NewParameters);
+          if EditHistory <> nil then
+            EditHistory.AddApplied(OutlineCommand)
+          else
+            OutlineCommand.Free;
+        finally
+          NewParameters.Free;
+          OldParameters.Free;
+        end;
+      end;
+    end;
+    FOutlineDragFilter := nil;
+    if FDocument <> nil then
+      FDocument.EndInteractiveUpdate;
+    Cursor := crDefault;
+    Invalidate;
+    Exit;
+  end;
+  if (Button = mbLeft) and FShadowDragActive then
+  begin
+    FShadowDragActive := False;
+    MouseCapture := False;
+    if FShadowDragFilter is TScreenLayoutShadowFilter then
+    begin
+      ShadowFilter := TScreenLayoutShadowFilter(FShadowDragFilter);
+      if not SameValue(ShadowFilter.OffsetX, FShadowDragOldOffsetX) or
+        not SameValue(ShadowFilter.OffsetY, FShadowDragOldOffsetY) then
+      begin
+        OldParameters := ShadowFilter.Clone;
+        NewParameters := ShadowFilter.Clone;
+        try
+          TScreenLayoutShadowFilter(OldParameters).OffsetX :=
+            FShadowDragOldOffsetX;
+          TScreenLayoutShadowFilter(OldParameters).OffsetY :=
+            FShadowDragOldOffsetY;
+          ShadowCommand := TScreenLayoutSetFilterParametersCommand.Create(
+            FDocument, ShadowFilter, OldParameters, NewParameters);
+          if EditHistory <> nil then
+            EditHistory.AddApplied(ShadowCommand)
+          else
+            ShadowCommand.Free;
+        finally
+          NewParameters.Free;
+          OldParameters.Free;
+        end;
+      end;
+    end;
+    FShadowDragFilter := nil;
+    if FDocument <> nil then
+      FDocument.EndInteractiveUpdate;
+    Cursor := crDefault;
+    Invalidate;
+    Exit;
+  end;
   if (Button = mbLeft) and FGroupDrag.Active then
   begin
     MouseCapture := False;
@@ -1620,8 +2270,13 @@ begin
     FRenderedRevision := -1;
     Exit;
   end;
-  Width := Max(FDocument.CanvasLayer.Width, 1);
-  Height := Max(FDocument.CanvasLayer.Height, 1);
+  // The editor only needs as many pixels as are currently visible. Keeping
+  // the native document size while zoomed out makes interactive blur and
+  // shadow changes needlessly process millions of hidden pixels.
+  Width := Max(Min(FCanvasBounds.Width,
+    FDocument.CanvasLayer.Width), 1);
+  Height := Max(Min(FCanvasBounds.Height,
+    FDocument.CanvasLayer.Height), 1);
   PreviewStrokeWidth := 0.0;
   if ENABLE_THIN_STROKE_PREVIEW and (FZoom > 0) then
     PreviewStrokeWidth := MIN_PREVIEW_STROKE_WIDTH_PIXELS / FZoom;
@@ -2247,6 +2902,9 @@ begin
         Direct2DCanvas.Pen.Color := COLOR_SELECTION;
         Direct2DCanvas.Polyline(PathPreview);
       end;
+      DrawBlurFilterOverlayDirect2D(Direct2DCanvas);
+      DrawOutlineFilterOverlayDirect2D(Direct2DCanvas);
+      DrawShadowFilterOverlayDirect2D(Direct2DCanvas);
       DrawTextEditingOverlayDirect2D(Direct2DCanvas);
     finally
       Direct2DCanvas.EndDraw;
@@ -2796,6 +3454,9 @@ begin
     Canvas.Pen.Color := COLOR_SELECTION;
     Canvas.Polyline(PathPreview);
   end;
+  DrawBlurFilterOverlay(Canvas);
+  DrawOutlineFilterOverlay(Canvas);
+  DrawShadowFilterOverlay(Canvas);
   DrawTextEditingOverlay(Canvas);
 end;
 

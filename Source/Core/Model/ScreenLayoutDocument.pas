@@ -6,7 +6,7 @@ interface
 
 uses
   System.Classes, System.Generics.Collections, System.SysUtils, System.Types,
-  Vcl.Graphics;
+  Vcl.Graphics, ScreenLayoutFilters;
 
 type
   TVectArtLayerKind = (vlkCanvas, vlkRectangle, vlkRoundedRectangle,
@@ -43,14 +43,26 @@ type
   end;
   TVectArtLayer = class
   private
+    FFilters: TObjectList<TScreenLayoutFilter>;
     FKind: TVectArtLayerKind;
     FLocked: Boolean;
     FName: string;
     FOpacity: Single;
     FVisible: Boolean;
+    function GetFilter(Index: Integer): TScreenLayoutFilter;
+    function GetFilterCount: Integer;
   protected
     constructor Create(AKind: TVectArtLayerKind; const AName: string);
   public
+    destructor Destroy; override;
+    procedure AddFilter(Filter: TScreenLayoutFilter);
+    procedure ClearFilters;
+    procedure DeleteFilter(Index: Integer);
+    function ExtractFilter(Index: Integer): TScreenLayoutFilter;
+    procedure InsertFilter(Index: Integer; Filter: TScreenLayoutFilter);
+    procedure MoveFilter(FromIndex, ToIndex: Integer);
+    property FilterCount: Integer read GetFilterCount;
+    property Filters[Index: Integer]: TScreenLayoutFilter read GetFilter;
     property Kind: TVectArtLayerKind read FKind;
     property Locked: Boolean read FLocked write FLocked;
     property Name: string read FName write FName;
@@ -780,11 +792,63 @@ constructor TVectArtLayer.Create(AKind: TVectArtLayerKind;
   const AName: string);
 begin
   inherited Create;
+  FFilters := TObjectList<TScreenLayoutFilter>.Create(True);
   FKind := AKind;
   FLocked := False;
   FName := AName;
   FOpacity := 1.0;
   FVisible := True;
+end;
+
+procedure TVectArtLayer.AddFilter(Filter: TScreenLayoutFilter);
+begin
+  if Filter = nil then
+    raise EArgumentNilException.Create('Filter');
+  FFilters.Add(Filter);
+end;
+
+procedure TVectArtLayer.ClearFilters;
+begin
+  FFilters.Clear;
+end;
+
+procedure TVectArtLayer.DeleteFilter(Index: Integer);
+begin
+  FFilters.Delete(Index);
+end;
+
+destructor TVectArtLayer.Destroy;
+begin
+  FFilters.Free;
+  inherited Destroy;
+end;
+
+function TVectArtLayer.ExtractFilter(Index: Integer): TScreenLayoutFilter;
+begin
+  Result := FFilters.Extract(FFilters[Index]);
+end;
+
+function TVectArtLayer.GetFilter(Index: Integer): TScreenLayoutFilter;
+begin
+  Result := FFilters[Index];
+end;
+
+function TVectArtLayer.GetFilterCount: Integer;
+begin
+  Result := FFilters.Count;
+end;
+
+procedure TVectArtLayer.InsertFilter(Index: Integer;
+  Filter: TScreenLayoutFilter);
+begin
+  if Filter = nil then
+    raise EArgumentNilException.Create('Filter');
+  FFilters.Insert(EnsureRange(Index, 0, FFilters.Count), Filter);
+end;
+
+procedure TVectArtLayer.MoveFilter(FromIndex, ToIndex: Integer);
+begin
+  FFilters.Move(FromIndex, EnsureRange(ToIndex, 0, FFilters.Count - 1));
 end;
 
 { TVectArtCanvasLayer }

@@ -354,7 +354,10 @@ end;
 procedure TMainForm.DocumentChanged(Sender: TObject);
 begin
   if FEditorState <> nil then
+  begin
     FEditorState.ValidateOpenGroupPath(FDocument);
+    FEditorState.ValidateSelectedFilter(FDocument);
+  end;
   if FEditActionsUI <> nil then
     FEditActionsUI.RefreshState;
   if FEditorFrame <> nil then

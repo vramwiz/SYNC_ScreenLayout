@@ -36,6 +36,9 @@ function CanDuplicateSelectedGroups(Document: TVectArtDocument): Boolean;
 // 選択グループを入れ子構造ごと再帰複製する。
 procedure DuplicateSelectedGroups(Document: TVectArtDocument;
   EditHistory: TVectArtEditHistory);
+// レイヤーとそのフィルターを、所有権を共有せず再帰複製する。
+function CloneScreenLayoutLayer(Source: TVectArtLayer;
+  const NewName: string): TVectArtLayer;
 // 開いているグループの子選択を内部グループ化できるかを返す。
 function CanGroupOpenGroupChildren(EditorState: TVectArtEditorState): Boolean;
 // 選択中の直下子が解除可能な内部グループかを返す。
@@ -238,10 +241,14 @@ begin
 end;
 
 procedure CopyCommonLayerValues(Source, Target: TVectArtLayer);
+var
+  I: Integer;
 begin
   Target.Locked := False;
   Target.Opacity := Source.Opacity;
   Target.Visible := Source.Visible;
+  for I := 0 to Source.FilterCount - 1 do
+    Target.AddFilter(Source.Filters[I].Clone);
 end;
 
 function CloneScreenLayoutLayer(Source: TVectArtLayer;

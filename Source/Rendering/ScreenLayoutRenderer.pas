@@ -53,44 +53,11 @@ uses
   System.Generics.Collections, System.Math, System.Skia, System.UITypes,
   TextRendererSkiaRuntime, Vcl.Graphics, Winapi.Windows,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
-  ScreenLayoutLayerGeometry, ScreenLayoutShapePath, ScreenLayoutTextGeometry;
+  ScreenLayoutFilters, ScreenLayoutLayerGeometry, ScreenLayoutShapePath,
+  ScreenLayoutTextGeometry;
 
 const
   MAX_RENDER_DIMENSION = 16384;
-
-procedure AppendScreenLayoutRenderLayers(Layer: TVectArtLayer;
-  Layers: TList<TVectArtLayer>);
-var
-  GroupLayer: TScreenLayoutGroupLayer;
-  I: Integer;
-begin
-  if (Layer = nil) or not Layer.Visible then
-    Exit;
-  if Layer is TScreenLayoutGroupLayer then
-  begin
-    GroupLayer := TScreenLayoutGroupLayer(Layer);
-    for I := 0 to GroupLayer.ChildCount - 1 do
-      AppendScreenLayoutRenderLayers(GroupLayer[I], Layers);
-  end
-  else
-    Layers.Add(Layer);
-end;
-
-function ScreenLayoutRenderLayers(
-  Document: TVectArtDocument): TArray<TVectArtLayer>;
-var
-  I: Integer;
-  Layers: TList<TVectArtLayer>;
-begin
-  Layers := TList<TVectArtLayer>.Create;
-  try
-    for I := 1 to Document.LayerCount - 1 do
-      AppendScreenLayoutRenderLayers(Document[I], Layers);
-    Result := Layers.ToArray;
-  finally
-    Layers.Free;
-  end;
-end;
 
 function VclColorToAlphaColor(Color: TColor; Opacity: Single): TAlphaColor;
 var
@@ -102,6 +69,127 @@ begin
     (Cardinal(GetRValue(RGBColor)) shl 16) or
     (Cardinal(GetGValue(RGBColor)) shl 8) or
     Cardinal(GetBValue(RGBColor)));
+end;
+
+function BuildScreenLayoutImageFilter(
+  Filter: TScreenLayoutFilter; ScaleX: Single = 1.0;
+  ScaleY: Single = 1.0): ISkImageFilter;
+var
+  ColorizedOutline: ISkImageFilter;
+  DilatedOutline: ISkImageFilter;
+  OutlineFilter: TScreenLayoutOutlineFilter;
+  ShadowFilter: TScreenLayoutShadowFilter;
+begin
+  Result := nil;
+  if (Filter = nil) or not Filter.Enabled then
+    Exit;
+  ScaleX := Max(Abs(ScaleX), 0.0);
+  ScaleY := Max(Abs(ScaleY), 0.0);
+  case Filter.Kind of
+    slfkOutline:
+    begin
+      OutlineFilter := TScreenLayoutOutlineFilter(Filter);
+      if OutlineFilter.Width <= 0 then
+        Exit;
+      DilatedOutline := TSkImageFilter.MakeDilate(
+        OutlineFilter.Width * ScaleX, OutlineFilter.Width * ScaleY);
+      ColorizedOutline := TSkImageFilter.MakeColorFilter(
+        TSkColorFilter.MakeBlend(
+          VclColorToAlphaColor(OutlineFilter.Color, 1.0),
+          TSkBlendMode.SrcIn), DilatedOutline);
+      // Paint the original input over the expanded, colorized alpha mask.
+      Result := TSkImageFilter.MakeBlend(TSkBlendMode.SrcOver,
+        ColorizedOutline);
+    end;
+    slfkShadow:
+    begin
+      ShadowFilter := TScreenLayoutShadowFilter(Filter);
+      Result := TSkImageFilter.MakeDropShadow(
+        ShadowFilter.OffsetX * ScaleX, ShadowFilter.OffsetY * ScaleY,
+        Max(ShadowFilter.BlurRadius * ScaleX, 0.0),
+        Max(ShadowFilter.BlurRadius * ScaleY, 0.0),
+        VclColorToAlphaColor(ShadowFilter.Color,
+          EnsureRange(ShadowFilter.Opacity, 0.0, 1.0)));
+    end;
+    slfkBlur:
+      if TScreenLayoutBlurFilter(Filter).Radius > 0 then
+        Result := TSkImageFilter.MakeBlur(
+          TScreenLayoutBlurFilter(Filter).Radius * ScaleX,
+          TScreenLayoutBlurFilter(Filter).Radius * ScaleY);
+  end;
+end;
+
+procedure InflateScreenLayoutBounds(var Bounds: TRectF; X, Y: Single);
+begin
+  Bounds.Left := Bounds.Left - Max(X, 0.0);
+  Bounds.Top := Bounds.Top - Max(Y, 0.0);
+  Bounds.Right := Bounds.Right + Max(X, 0.0);
+  Bounds.Bottom := Bounds.Bottom + Max(Y, 0.0);
+end;
+
+procedure ExpandScreenLayoutFilterBounds(Layer: TVectArtLayer;
+  var Bounds: TRectF);
+var
+  Blur: Single;
+  EffectBounds: TRectF;
+  Filter: TScreenLayoutFilter;
+  I: Integer;
+  Shadow: TScreenLayoutShadowFilter;
+begin
+  for I := 0 to Layer.FilterCount - 1 do
+  begin
+    Filter := Layer.Filters[I];
+    if not Filter.Enabled then
+      Continue;
+    case Filter.Kind of
+      slfkOutline:
+        InflateScreenLayoutBounds(Bounds,
+          TScreenLayoutOutlineFilter(Filter).Width,
+          TScreenLayoutOutlineFilter(Filter).Width);
+      slfkShadow:
+      begin
+        Shadow := TScreenLayoutShadowFilter(Filter);
+        EffectBounds := Bounds;
+        EffectBounds.Offset(Shadow.OffsetX, Shadow.OffsetY);
+        Blur := Max(Shadow.BlurRadius, 0.0) * 3.0;
+        InflateScreenLayoutBounds(EffectBounds, Blur, Blur);
+        Bounds.Left := Min(Bounds.Left, EffectBounds.Left);
+        Bounds.Top := Min(Bounds.Top, EffectBounds.Top);
+        Bounds.Right := Max(Bounds.Right, EffectBounds.Right);
+        Bounds.Bottom := Max(Bounds.Bottom, EffectBounds.Bottom);
+      end;
+      slfkBlur:
+      begin
+        Blur := Max(TScreenLayoutBlurFilter(Filter).Radius, 0.0) * 3.0;
+        InflateScreenLayoutBounds(Bounds, Blur, Blur);
+      end;
+    end;
+  end;
+end;
+
+function TryGetScreenLayoutPaintBounds(Layer: TVectArtLayer;
+  MinimumStrokeWidth: Single; out Bounds: TRectF): Boolean;
+var
+  StrokeMargin: Single;
+begin
+  Result := TryGetScreenLayoutLayerBounds(Layer, Bounds);
+  if not Result then
+    Exit;
+  StrokeMargin := 0.0;
+  if Layer is TScreenLayoutShapeLayer then
+    StrokeMargin := Max(TScreenLayoutShapeLayer(Layer).StrokeWidth,
+      MinimumStrokeWidth) * 0.5
+  else if Layer is TScreenLayoutRectangleLineLayer then
+    StrokeMargin := Max(TScreenLayoutRectangleLineLayer(Layer).StrokeWidth,
+      MinimumStrokeWidth) * 0.5
+  else if Layer is TScreenLayoutArcLayer then
+    StrokeMargin := Max(TScreenLayoutArcLayer(Layer).StrokeWidth,
+      MinimumStrokeWidth) * 0.5
+  else if Layer is TVectArtPathLayer then
+    StrokeMargin := Max(TVectArtPathLayer(Layer).StrokeWidth,
+      MinimumStrokeWidth) * 0.5;
+  InflateScreenLayoutBounds(Bounds, StrokeMargin, StrokeMargin);
+  ExpandScreenLayoutFilterBounds(Layer, Bounds);
 end;
 
 procedure DrawTriangleLineCap(const Canvas: ISkCanvas; const Position: TPointF;
@@ -259,12 +347,91 @@ procedure RenderVectArtLayers(const RenderLayers: TArray<TVectArtLayer>;
   const LogicalBounds: TRectF; MinimumStrokeWidth,
   OpacityMultiplier: Single); forward;
 
+procedure RenderVectArtLayerTree(Layer: TVectArtLayer;
+  Target: TVectArtRenderBuffer; Width, Height: Integer;
+  const LogicalBounds: TRectF; MinimumStrokeWidth,
+  OpacityMultiplier: Single); forward;
+
+procedure ApplyScreenLayoutLayerFilters(Layer: TVectArtLayer;
+  Target: TVectArtRenderBuffer; ScaleX, ScaleY: Single);
+var
+  Canvas: ISkCanvas;
+  FilterImage: ISkImageFilter;
+  FilterPaint: ISkPaint;
+  I: Integer;
+  ImageInfo: TSkImageInfo;
+  InputImage: ISkImage;
+  InputSurface: ISkSurface;
+  OutputSurface: ISkSurface;
+  Scratch: TVectArtRenderBuffer;
+begin
+  if (Layer = nil) or (Target = nil) or (Target.PixelCount = 0) then
+    Exit;
+  Scratch := TVectArtRenderBuffer.Create;
+  try
+    Scratch.SetSize(Target.Width, Target.Height);
+    ImageInfo := TSkImageInfo.Create(Target.Width, Target.Height,
+      TSkColorType.RGBA8888, TSkAlphaType.Unpremul);
+    for I := 0 to Layer.FilterCount - 1 do
+    begin
+      FilterImage := BuildScreenLayoutImageFilter(Layer.Filters[I],
+        ScaleX, ScaleY);
+      if FilterImage = nil then
+        Continue;
+      InputSurface := TSkSurface.MakeRasterDirect(ImageInfo, Target.Data,
+        Target.Stride);
+      if InputSurface = nil then
+        raise EInvalidOp.Create('Cannot create filter input surface');
+      InputSurface.Flush;
+      InputImage := InputSurface.MakeImageSnapshot;
+      Scratch.Clear;
+      OutputSurface := TSkSurface.MakeRasterDirect(ImageInfo, Scratch.Data,
+        Scratch.Stride);
+      if OutputSurface = nil then
+        raise EInvalidOp.Create('Cannot create filter output surface');
+      Canvas := OutputSurface.Canvas;
+      Canvas.Clear(TAlphaColorRec.Null);
+      FilterPaint := TSkPaint.Create;
+      FilterPaint.ImageFilter := FilterImage;
+      Canvas.DrawImage(InputImage, 0, 0, FilterPaint);
+      OutputSurface.Flush;
+      Canvas := nil;
+      OutputSurface := nil;
+      InputImage := nil;
+      InputSurface := nil;
+      Move(Scratch.Data^, Target.Data^,
+        Target.PixelCount * SizeOf(TVectArtRgbaPixel));
+    end;
+  finally
+    Scratch.Free;
+  end;
+end;
+
+procedure MultiplyScreenLayoutBufferOpacity(Target: TVectArtRenderBuffer;
+  Opacity: Single);
+var
+  I: Integer;
+begin
+  if Target = nil then
+    Exit;
+  Opacity := EnsureRange(Opacity, 0.0, 1.0);
+  if Opacity >= 1.0 then
+    Exit;
+  for I := 0 to Target.PixelCount - 1 do
+    Target.Pixels[I].A := EnsureRange(
+      Round(Target.Pixels[I].A * Opacity), 0, 255);
+end;
+
 procedure RenderVectArtDocument(Document: TVectArtDocument;
   Target: TVectArtRenderBuffer; Width, Height: Integer;
   MinimumStrokeWidth: Single);
 var
   CanvasLayer: TVectArtCanvasLayer;
+  FlatLayers: TList<TVectArtLayer>;
+  HasVisibleGroup: Boolean;
+  I: Integer;
   LogicalBounds: TRectF;
+  LayerBuffer: TVectArtRenderBuffer;
 begin
   if Document = nil then
     raise EArgumentNilException.Create('Document');
@@ -274,8 +441,44 @@ begin
   LogicalBounds := TRectF.Create(-CanvasLayer.Width * 0.5,
     -CanvasLayer.Height * 0.5, CanvasLayer.Width * 0.5,
     CanvasLayer.Height * 0.5);
-  RenderVectArtLayers(ScreenLayoutRenderLayers(Document), Target, Width,
-    Height, LogicalBounds, MinimumStrokeWidth, 1.0);
+  if Target = nil then
+    raise EArgumentNilException.Create('Target');
+  HasVisibleGroup := False;
+  FlatLayers := TList<TVectArtLayer>.Create;
+  try
+    for I := 1 to Document.LayerCount - 1 do
+      if Document[I].Visible then
+      begin
+        FlatLayers.Add(Document[I]);
+        HasVisibleGroup := HasVisibleGroup or
+          (Document[I] is TScreenLayoutGroupLayer);
+      end;
+    // The common, non-group case can render directly into the destination.
+    // This avoids a full-canvas temporary buffer and source-over pass on
+    // every mouse movement.
+    if not HasVisibleGroup then
+    begin
+      RenderVectArtLayers(FlatLayers.ToArray, Target, Width, Height,
+        LogicalBounds, MinimumStrokeWidth, 1.0);
+      Exit;
+    end;
+  finally
+    FlatLayers.Free;
+  end;
+  Target.SetSize(Width, Height);
+  Target.Clear;
+  LayerBuffer := TVectArtRenderBuffer.Create;
+  try
+    for I := 1 to Document.LayerCount - 1 do
+      if Document[I].Visible then
+      begin
+        RenderVectArtLayerTree(Document[I], LayerBuffer, Width, Height,
+          LogicalBounds, MinimumStrokeWidth, 1.0);
+        CompositeVectArtRgba(LayerBuffer, Target.Data, Width, Height);
+      end;
+  finally
+    LayerBuffer.Free;
+  end;
 end;
 
 function FitScreenLayoutThumbnailBounds(const ContentBounds: TRectF;
@@ -317,9 +520,6 @@ const
   THUMBNAIL_MINIMUM_STROKE_WIDTH = 1.0;
 var
   ContentBounds: TRectF;
-  GroupLayer: TScreenLayoutGroupLayer;
-  I: Integer;
-  Layers: TList<TVectArtLayer>;
   LogicalBounds: TRectF;
   OpacityMultiplier: Single;
   Scale: Single;
@@ -334,26 +534,12 @@ begin
     not FitScreenLayoutThumbnailBounds(ContentBounds, Width, Height,
       THUMBNAIL_MARGIN, LogicalBounds, Scale) then
     Exit;
-  Layers := TList<TVectArtLayer>.Create;
-  try
-    if Layer is TScreenLayoutGroupLayer then
-    begin
-      GroupLayer := TScreenLayoutGroupLayer(Layer);
-      for I := 0 to GroupLayer.ChildCount - 1 do
-        AppendScreenLayoutRenderLayers(GroupLayer[I], Layers);
-    end
-    else
-      Layers.Add(Layer);
-    if Layer.Visible then
-      OpacityMultiplier := 1.0
-    else
-      OpacityMultiplier := 0.35;
-    RenderVectArtLayers(Layers.ToArray, Target, Width, Height,
-      LogicalBounds, THUMBNAIL_MINIMUM_STROKE_WIDTH / Scale,
-      OpacityMultiplier);
-  finally
-    Layers.Free;
-  end;
+  if Layer.Visible then
+    OpacityMultiplier := 1.0
+  else
+    OpacityMultiplier := 0.35;
+  RenderVectArtLayerTree(Layer, Target, Width, Height, LogicalBounds,
+    THUMBNAIL_MINIMUM_STROKE_WIDTH / Scale, OpacityMultiplier);
 end;
 
 procedure RenderVectArtLayers(const RenderLayers: TArray<TVectArtLayer>;
@@ -377,6 +563,10 @@ var
   ImageLayer: TVectArtImageLayer;
   ImagePaint: ISkPaint;
   Font: ISkFont;
+  FilterImage: ISkImageFilter;
+  FilterPaint: ISkPaint;
+  FilterSaveCount: Integer;
+  FilterBounds: TRectF;
   RasterImage: ISkImage;
   EdgeWidth: Single;
   SignedHeight: Single;
@@ -437,6 +627,22 @@ begin
   for I := 0 to High(RenderLayers) do
   begin
     Layer := RenderLayers[I];
+    FilterSaveCount := 0;
+    if not TryGetScreenLayoutPaintBounds(Layer, MinimumStrokeWidth,
+      FilterBounds) then
+      FilterBounds := LogicalBounds;
+    // Save in reverse so Restore applies the stack in list order.
+    for J := Layer.FilterCount - 1 downto 0 do
+    begin
+      FilterImage := BuildScreenLayoutImageFilter(Layer.Filters[J]);
+      if FilterImage = nil then
+        Continue;
+      FilterPaint := TSkPaint.Create;
+      FilterPaint.ImageFilter := FilterImage;
+      Canvas.SaveLayer(FilterBounds, FilterPaint);
+      Inc(FilterSaveCount);
+    end;
+    try
     if Layer is TVectArtImageLayer then
     begin
       ImageLayer := TVectArtImageLayer(Layer);
@@ -738,8 +944,54 @@ begin
     finally
       Canvas.Restore;
     end;
+    finally
+      while FilterSaveCount > 0 do
+      begin
+        Canvas.Restore;
+        Dec(FilterSaveCount);
+      end;
+    end;
   end;
   Surface.Flush;
+end;
+
+procedure RenderVectArtLayerTree(Layer: TVectArtLayer;
+  Target: TVectArtRenderBuffer; Width, Height: Integer;
+  const LogicalBounds: TRectF; MinimumStrokeWidth,
+  OpacityMultiplier: Single);
+var
+  ChildBuffer: TVectArtRenderBuffer;
+  GroupLayer: TScreenLayoutGroupLayer;
+  I: Integer;
+begin
+  if Layer = nil then
+    raise EArgumentNilException.Create('Layer');
+  if not (Layer is TScreenLayoutGroupLayer) then
+  begin
+    RenderVectArtLayers([Layer], Target, Width, Height, LogicalBounds,
+      MinimumStrokeWidth, OpacityMultiplier);
+    Exit;
+  end;
+
+  Target.SetSize(Width, Height);
+  Target.Clear;
+  GroupLayer := TScreenLayoutGroupLayer(Layer);
+  ChildBuffer := TVectArtRenderBuffer.Create;
+  try
+    for I := 0 to GroupLayer.ChildCount - 1 do
+      if GroupLayer[I].Visible then
+      begin
+        RenderVectArtLayerTree(GroupLayer[I], ChildBuffer, Width, Height,
+          LogicalBounds, MinimumStrokeWidth, 1.0);
+        CompositeVectArtRgba(ChildBuffer, Target.Data, Width, Height);
+      end;
+  finally
+    ChildBuffer.Free;
+  end;
+  ApplyScreenLayoutLayerFilters(Layer, Target,
+    Width / LogicalBounds.Width, Height / LogicalBounds.Height);
+  MultiplyScreenLayoutBufferOpacity(Target,
+    Layer.Opacity * OpacityMultiplier);
 end;
 
 procedure CompositeVectArtRgba(const Source: TVectArtRenderBuffer;

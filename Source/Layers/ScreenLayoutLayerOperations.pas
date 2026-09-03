@@ -46,6 +46,83 @@ const
   DEFAULT_RECTANGLE_HEIGHT = 240;
   DEFAULT_RECTANGLE_COLOR = TColor($00E2904A);
 
+type
+  TScreenLayoutDeleteLayersCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FDeletedLayers: TArray<TVectArtLayer>;
+    FDocument: TVectArtDocument;
+    FIndices: TArray<Integer>;
+    FLayersInDocument: Boolean;
+  public
+    constructor Create(ADocument: TVectArtDocument;
+      const Indices, BeforeSelection: TArray<Integer>);
+    destructor Destroy; override;
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+constructor TScreenLayoutDeleteLayersCommand.Create(
+  ADocument: TVectArtDocument; const Indices,
+  BeforeSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndices := Copy(Indices);
+  FBeforeSelection := Copy(BeforeSelection);
+  SetLength(FDeletedLayers, Length(FIndices));
+  FLayersInDocument := True;
+end;
+
+destructor TScreenLayoutDeleteLayersCommand.Destroy;
+var
+  Layer: TVectArtLayer;
+begin
+  if not FLayersInDocument then
+    for Layer in FDeletedLayers do
+      Layer.Free;
+  inherited Destroy;
+end;
+
+procedure TScreenLayoutDeleteLayersCommand.Execute;
+var
+  I: Integer;
+  SelectionIndex: Integer;
+begin
+  FDocument.BeginUpdate;
+  try
+    for I := High(FIndices) downto 0 do
+      FDeletedLayers[I] := FDocument.ExtractLayer(FIndices[I]);
+    FLayersInDocument := False;
+    if FDocument.LayerCount > 1 then
+    begin
+      SelectionIndex := Min(FIndices[0], FDocument.LayerCount - 1);
+      FAfterSelection := [SelectionIndex];
+    end
+    else
+      FAfterSelection := nil;
+    FDocument.SetSelectedLayers(FAfterSelection);
+  finally
+    FDocument.EndUpdate;
+  end;
+end;
+
+procedure TScreenLayoutDeleteLayersCommand.Undo;
+var
+  I: Integer;
+begin
+  FDocument.BeginUpdate;
+  try
+    for I := 0 to High(FIndices) do
+      FDocument.InsertLayer(FIndices[I], FDeletedLayers[I]);
+    FLayersInDocument := True;
+    FDocument.SetSelectedLayers(FBeforeSelection);
+  finally
+    FDocument.EndUpdate;
+  end;
+end;
+
 procedure TVectArtLayerOperations.AddRectangle;
 var
   AfterSelection: TArray<Integer>;
@@ -127,166 +204,17 @@ end;
 
 procedure TVectArtLayerOperations.DeleteSelectedLayers;
 var
-  AfterSelection: TArray<Integer>;
   BeforeSelection: TArray<Integer>;
-  Command: TVectArtCompoundCommand;
-  ArcData: TScreenLayoutArcData;
-  Data: TVectArtRectangleData;
-  EllipseData: TScreenLayoutEllipseData;
-  EllipseLineData: TScreenLayoutEllipseLineData;
-  EllipseArcShapeData: TScreenLayoutEllipseArcShapeData;
-  RoundedRectangleData: TScreenLayoutRoundedRectangleData;
-  RoundedRectangleLineData: TScreenLayoutRoundedRectangleLineData;
-  ImageData: TVectArtImageData;
-  PathData: TVectArtPathData;
-  RectangleLineData: TScreenLayoutRectangleLineData;
-  ShapeData: TScreenLayoutShapeData;
-  TextData: TScreenLayoutTextData;
-  I: Integer;
+  Command: TScreenLayoutDeleteLayersCommand;
   SelectedIndices: TArray<Integer>;
-  SelectionIndex: Integer;
 begin
-  Command := nil;
-  if FEditHistory <> nil then
-    Command := TVectArtCompoundCommand.Create;
-  // RemoveRectangle は選択が空になると隣接レイヤーを自動選択するため、
-  // 削除中の現在選択ではなく、操作開始時の選択だけを対象にする。
   SelectedIndices := FDocument.GetSelectedLayerIndices;
-  for SelectionIndex := High(SelectedIndices) downto 0 do
-  begin
-    I := SelectedIndices[SelectionIndex];
-    if (I > 0) and (I < FDocument.LayerCount) then
-    begin
-      BeforeSelection := FDocument.GetSelectedLayerIndices;
-      if FDocument[I] is TScreenLayoutEllipseArcShapeLayer then
-      begin
-        if FDocument.RemoveEllipseArcShape(I, EllipseArcShapeData) then
-        begin
-          AfterSelection := FDocument.GetSelectedLayerIndices;
-          if Command <> nil then
-            Command.Add(TScreenLayoutDeleteEllipseArcShapeCommand.Create(
-              FDocument, I, EllipseArcShapeData, BeforeSelection,
-              AfterSelection));
-        end;
-      end
-      else if FDocument[I] is TScreenLayoutEllipseLineLayer then
-      begin
-        if FDocument.RemoveEllipseLine(I, EllipseLineData) then
-        begin
-          AfterSelection := FDocument.GetSelectedLayerIndices;
-          if Command <> nil then
-            Command.Add(TScreenLayoutDeleteEllipseLineCommand.Create(
-              FDocument, I, EllipseLineData, BeforeSelection,
-              AfterSelection));
-        end;
-      end
-      else if FDocument[I] is TScreenLayoutRoundedRectangleLineLayer then
-      begin
-        if FDocument.RemoveRoundedRectangleLine(I,
-          RoundedRectangleLineData) then
-        begin
-          AfterSelection := FDocument.GetSelectedLayerIndices;
-          if Command <> nil then
-            Command.Add(TScreenLayoutDeleteRoundedRectangleLineCommand.Create(
-              FDocument, I, RoundedRectangleLineData, BeforeSelection,
-              AfterSelection));
-        end;
-      end
-      else if FDocument[I] is TScreenLayoutRectangleLineLayer then
-      begin
-        if FDocument.RemoveRectangleLine(I, RectangleLineData) then
-        begin
-          AfterSelection := FDocument.GetSelectedLayerIndices;
-          if Command <> nil then
-            Command.Add(TScreenLayoutDeleteRectangleLineCommand.Create(
-              FDocument, I, RectangleLineData, BeforeSelection,
-              AfterSelection));
-        end;
-      end
-      else if FDocument[I] is TScreenLayoutArcLayer then
-      begin
-        if FDocument.RemoveArc(I, ArcData) then
-        begin
-          AfterSelection := FDocument.GetSelectedLayerIndices;
-          if Command <> nil then
-            Command.Add(TScreenLayoutDeleteArcCommand.Create(FDocument, I,
-              ArcData, BeforeSelection, AfterSelection));
-        end;
-      end
-      else if FDocument[I] is TScreenLayoutEllipseLayer then
-      begin
-        if FDocument.RemoveEllipse(I, EllipseData) then
-        begin
-          AfterSelection := FDocument.GetSelectedLayerIndices;
-          if Command <> nil then
-            Command.Add(TScreenLayoutDeleteEllipseCommand.Create(FDocument,
-              I, EllipseData, BeforeSelection, AfterSelection));
-        end;
-      end
-      else if FDocument[I] is TScreenLayoutRoundedRectangleLayer then
-      begin
-        if FDocument.RemoveRoundedRectangle(I, RoundedRectangleData) then
-        begin
-          AfterSelection := FDocument.GetSelectedLayerIndices;
-          if Command <> nil then
-            Command.Add(TScreenLayoutDeleteRoundedRectangleCommand.Create(
-              FDocument, I, RoundedRectangleData, BeforeSelection,
-              AfterSelection));
-        end;
-      end
-      else if FDocument[I] is TScreenLayoutTextLayer then
-      begin
-        if FDocument.RemoveText(I, TextData) then
-        begin
-          AfterSelection := FDocument.GetSelectedLayerIndices;
-          if Command <> nil then
-            Command.Add(TScreenLayoutDeleteTextCommand.Create(FDocument, I,
-              TextData, BeforeSelection, AfterSelection));
-        end;
-      end
-      else if FDocument[I] is TVectArtRectangleLayer then
-      begin
-        if FDocument.RemoveRectangle(I, Data) then
-        begin
-          AfterSelection := FDocument.GetSelectedLayerIndices;
-          if Command <> nil then
-            Command.Add(TVectArtDeleteRectangleCommand.Create(FDocument, I,
-              Data, BeforeSelection, AfterSelection));
-        end;
-      end
-      else if FDocument[I] is TVectArtPathLayer then
-      begin
-        if FDocument.RemovePath(I, PathData) then
-        begin
-          AfterSelection := FDocument.GetSelectedLayerIndices;
-          if Command <> nil then
-            Command.Add(TVectArtDeletePathCommand.Create(FDocument, I,
-              PathData, BeforeSelection, AfterSelection));
-        end;
-      end
-      else if FDocument[I] is TVectArtImageLayer then
-      begin
-        if FDocument.RemoveImage(I, ImageData) then
-        begin
-          AfterSelection := FDocument.GetSelectedLayerIndices;
-          if Command <> nil then
-            Command.Add(TVectArtDeleteImageCommand.Create(FDocument, I,
-              ImageData, BeforeSelection, AfterSelection));
-        end;
-      end
-      else if FDocument[I] is TScreenLayoutShapeLayer then
-      begin
-        if FDocument.RemoveShape(I, ShapeData) then
-        begin
-          AfterSelection := FDocument.GetSelectedLayerIndices;
-          if Command <> nil then
-            Command.Add(TScreenLayoutDeleteShapeCommand.Create(FDocument, I,
-              ShapeData, BeforeSelection, AfterSelection));
-        end;
-      end;
-    end;
-  end;
-  if (Command <> nil) and (Command.Count > 0) then
+  if Length(SelectedIndices) = 0 then Exit;
+  BeforeSelection := Copy(SelectedIndices);
+  Command := TScreenLayoutDeleteLayersCommand.Create(FDocument,
+    SelectedIndices, BeforeSelection);
+  Command.Execute;
+  if FEditHistory <> nil then
     FEditHistory.AddApplied(Command)
   else
     Command.Free;

@@ -16,6 +16,9 @@ function ScreenLayoutSelectedOpacityLayers(
 // 線幅、線種、線端を持つ選択レイヤーだけを返す。
 function ScreenLayoutSelectedLineLayers(
   const Context: IVectArtDesignerContext): TArray<TVectArtLayer>;
+// 単一選択中のレイヤーを、トップレベルとグループ内の双方から返す。
+function ScreenLayoutSelectedSingleLayer(
+  const Context: IVectArtDesignerContext): TVectArtLayer;
 // Layerの主要色と、ピッカーが塗り・線のどちらを変更すべきかを返す。
 function TryGetScreenLayoutLayerColor(Layer: TVectArtLayer;
   out Value: TColor; out Target: TScreenLayoutLayerColorTarget): Boolean;
@@ -124,6 +127,18 @@ begin
   finally
     Layers.Free;
   end;
+end;
+
+function ScreenLayoutSelectedSingleLayer(
+  const Context: IVectArtDesignerContext): TVectArtLayer;
+var
+  Layers: TArray<TVectArtLayer>;
+begin
+  Layers := SelectedLayers(Context);
+  if Length(Layers) = 1 then
+    Result := Layers[0]
+  else
+    Result := nil;
 end;
 
 function TryGetScreenLayoutLayerColor(Layer: TVectArtLayer;

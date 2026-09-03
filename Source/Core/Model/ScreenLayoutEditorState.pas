@@ -5,7 +5,7 @@ interface
 
 uses
   System.Classes, System.Generics.Collections, Vcl.Graphics,
-  ScreenLayoutDocument;
+  ScreenLayoutDocument, ScreenLayoutFilters;
 
 type
   TVectArtEditorTool = (vetSelect, vetRectangleLine, vetRectangle,
@@ -28,6 +28,8 @@ type
     FOpenGroupPath: TList<TScreenLayoutGroupLayer>;
     FRectangleFillColor: TColor;
     FRectangleOpacity: Single;
+    FSelectedFilter: TScreenLayoutFilter;
+    FSelectedFilterLayer: TVectArtLayer;
     procedure SetCurrentTool(const Value: TVectArtEditorTool);
     procedure SetLineCap(const Value: TVectArtLineCap);
     procedure SetLineStrokeColor(const Value: TColor);
@@ -58,9 +60,13 @@ type
     // レイヤー一覧で開状態を示す最上位グループを返す。
     function RootOpenGroup: TScreenLayoutGroupLayer;
     procedure SetOpenGroupChildren(const Layers: TArray<TVectArtLayer>);
+    // Selects one filter for direct manipulation on the editing canvas.
+    procedure SelectFilter(Layer: TVectArtLayer;
+      Filter: TScreenLayoutFilter);
     procedure ToggleOpenGroupChild(Layer: TVectArtLayer);
     // Document変更後に編集パスと直下選択を実在する階層まで復旧する。
     procedure ValidateOpenGroupPath(Document: TVectArtDocument);
+    procedure ValidateSelectedFilter(Document: TVectArtDocument);
     function OpenGroupChildCount: Integer;
     property CurrentTool: TVectArtEditorTool read FCurrentTool
       write SetCurrentTool;
@@ -83,6 +89,8 @@ type
       write SetRectangleFillColor;
     property RectangleOpacity: Single read FRectangleOpacity
       write SetRectangleOpacity;
+    property SelectedFilter: TScreenLayoutFilter read FSelectedFilter;
+    property SelectedFilterLayer: TVectArtLayer read FSelectedFilterLayer;
   end;
 
 implementation
@@ -111,6 +119,47 @@ begin
     if FindOpenGroupPath(Group[I], Target, Path) then
       Exit(True);
   Path.Delete(Path.Count - 1);
+end;
+
+function LayerContainsFilter(Layer: TVectArtLayer;
+  Filter: TScreenLayoutFilter): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  if (Layer = nil) or (Filter = nil) then
+    Exit;
+  for I := 0 to Layer.FilterCount - 1 do
+    if Layer.Filters[I] = Filter then
+      Exit(True);
+end;
+
+function DocumentContainsLayer(Document: TVectArtDocument;
+  Target: TVectArtLayer): Boolean;
+
+  function ContainsInTree(Layer: TVectArtLayer): Boolean;
+  var
+    Group: TScreenLayoutGroupLayer;
+    I: Integer;
+  begin
+    Result := Layer = Target;
+    if Result or not (Layer is TScreenLayoutGroupLayer) then
+      Exit;
+    Group := TScreenLayoutGroupLayer(Layer);
+    for I := 0 to Group.ChildCount - 1 do
+      if ContainsInTree(Group[I]) then
+        Exit(True);
+  end;
+
+var
+  I: Integer;
+begin
+  Result := False;
+  if (Document = nil) or (Target = nil) then
+    Exit;
+  for I := 1 to Document.LayerCount - 1 do
+    if ContainsInTree(Document[I]) then
+      Exit(True);
 end;
 
 constructor TVectArtEditorState.Create;
@@ -310,6 +359,16 @@ begin
     FOnChanged(Self);
 end;
 
+procedure TVectArtEditorState.ValidateSelectedFilter(
+  Document: TVectArtDocument);
+begin
+  if (FSelectedFilter = nil) and (FSelectedFilterLayer = nil) then
+    Exit;
+  if not DocumentContainsLayer(Document, FSelectedFilterLayer) or
+    not LayerContainsFilter(FSelectedFilterLayer, FSelectedFilter) then
+    SelectFilter(nil, nil);
+end;
+
 procedure TVectArtEditorState.SetOpenGroupChildren(
   const Layers: TArray<TVectArtLayer>);
 var
@@ -323,6 +382,22 @@ begin
     FOpenGroupChild := FOpenGroupChildren.Last
   else
     FOpenGroupChild := nil;
+  if Assigned(FOnChanged) then
+    FOnChanged(Self);
+end;
+
+procedure TVectArtEditorState.SelectFilter(Layer: TVectArtLayer;
+  Filter: TScreenLayoutFilter);
+begin
+  if not LayerContainsFilter(Layer, Filter) then
+  begin
+    Layer := nil;
+    Filter := nil;
+  end;
+  if (FSelectedFilterLayer = Layer) and (FSelectedFilter = Filter) then
+    Exit;
+  FSelectedFilterLayer := Layer;
+  FSelectedFilter := Filter;
   if Assigned(FOnChanged) then
     FOnChanged(Self);
 end;
@@ -475,6 +550,11 @@ begin
   if FCurrentTool = Value then
     Exit;
   FCurrentTool := Value;
+  if Value <> vetSelect then
+  begin
+    FSelectedFilter := nil;
+    FSelectedFilterLayer := nil;
+  end;
   if Assigned(FOnChanged) then
     FOnChanged(Self);
 end;

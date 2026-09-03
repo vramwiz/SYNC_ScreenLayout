@@ -18,10 +18,10 @@ implementation
 
 uses
   System.Generics.Collections, System.IOUtils, System.JSON, System.Math,
-  System.SysUtils, System.Types, Vcl.Graphics;
+  System.SysUtils, System.Types, Vcl.Graphics, ScreenLayoutFilters;
 
 const
-  DOCUMENT_FORMAT_VERSION = 14;
+  DOCUMENT_FORMAT_VERSION = 15;
   DOCUMENT_COORDINATE_ORIGIN = 'center';
 
 type
@@ -58,6 +58,96 @@ end;
 function ReadString(Parent: TJSONObject; const Name: string): string;
 begin
   Result := TJSONString(RequireValue(Parent, Name, TJSONString)).Value;
+end;
+
+function ParseFilter(Value: TJSONValue): TScreenLayoutFilter;
+var
+  Blur: TScreenLayoutBlurFilter;
+  FilterJson: TJSONObject;
+  FilterType: string;
+  Outline: TScreenLayoutOutlineFilter;
+  Shadow: TScreenLayoutShadowFilter;
+begin
+  if not (Value is TJSONObject) then
+    raise EConvertError.Create('Filter is not a JSON object');
+  FilterJson := TJSONObject(Value);
+  FilterType := ReadString(FilterJson, 'type');
+  Result := nil;
+  try
+    if FilterType = 'outline' then
+    begin
+      Outline := TScreenLayoutOutlineFilter.Create;
+      Result := Outline;
+      Outline.Color := TColor(ReadInteger(FilterJson, 'color'));
+      Outline.Width := ReadSingle(FilterJson, 'width');
+      if Outline.Width < 0 then
+        raise EConvertError.Create('Outline width must not be negative');
+    end
+    else if FilterType = 'shadow' then
+    begin
+      Shadow := TScreenLayoutShadowFilter.Create;
+      Result := Shadow;
+      Shadow.Color := TColor(ReadInteger(FilterJson, 'color'));
+      Shadow.OffsetX := ReadSingle(FilterJson, 'offsetX');
+      Shadow.OffsetY := ReadSingle(FilterJson, 'offsetY');
+      Shadow.BlurRadius := ReadSingle(FilterJson, 'blurRadius');
+      Shadow.Opacity := ReadSingle(FilterJson, 'opacity');
+      if Shadow.BlurRadius < 0 then
+        raise EConvertError.Create(
+          'Shadow blur radius must not be negative');
+      if (Shadow.Opacity < 0) or (Shadow.Opacity > 1) then
+        raise EConvertError.Create('Shadow opacity must be between 0 and 1');
+    end
+    else if FilterType = 'blur' then
+    begin
+      Blur := TScreenLayoutBlurFilter.Create;
+      Result := Blur;
+      Blur.Radius := ReadSingle(FilterJson, 'radius');
+      if Blur.Radius < 0 then
+        raise EConvertError.Create('Blur radius must not be negative');
+    end
+    else
+      raise EConvertError.CreateFmt('Unsupported filter type: %s',
+        [FilterType]);
+    Result.Enabled := ReadBoolean(FilterJson, 'enabled');
+  except
+    Result.Free;
+    raise;
+  end;
+end;
+
+procedure ValidateLayerFilters(LayerJson: TJSONObject);
+var
+  Filter: TScreenLayoutFilter;
+  FiltersJson: TJSONArray;
+  I: Integer;
+begin
+  FiltersJson := TJSONArray(RequireValue(LayerJson, 'filters', TJSONArray));
+  for I := 0 to FiltersJson.Count - 1 do
+  begin
+    Filter := ParseFilter(FiltersJson.Items[I]);
+    Filter.Free;
+  end;
+end;
+
+procedure LoadLayerFilters(LayerJson: TJSONObject; Layer: TVectArtLayer);
+var
+  Filter: TScreenLayoutFilter;
+  FiltersJson: TJSONArray;
+  I: Integer;
+begin
+  FiltersJson := TJSONArray(RequireValue(LayerJson, 'filters', TJSONArray));
+  Layer.ClearFilters;
+  for I := 0 to FiltersJson.Count - 1 do
+  begin
+    Filter := ParseFilter(FiltersJson.Items[I]);
+    try
+      Layer.AddFilter(Filter);
+    except
+      Filter.Free;
+      raise;
+    end;
+  end;
 end;
 
 function TryDeserializeVectArtDocumentCore(const Text, BaseDirectory: string;
@@ -196,6 +286,7 @@ begin
         if not (LayersJson.Items[I] is TJSONObject) then
           raise EConvertError.CreateFmt('Layer %d is not a JSON object', [I]);
         LayerJson := TJSONObject(LayersJson.Items[I]);
+        ValidateLayerFilters(LayerJson);
         LayerTypes[I] := ReadString(LayerJson, 'type');
         if LayerTypes[I] = 'group' then
         begin
@@ -786,6 +877,9 @@ begin
           Document.InsertPath(Document.LayerCount, PathData[I])
         else if LayerTypes[I] = 'shape' then
           Document.InsertShape(Document.LayerCount, ShapeData[I]);
+        if LayerTypes[I] <> '' then
+          LoadLayerFilters(TJSONObject(LayersJson.Items[I]),
+            Document[Document.LayerCount - 1]);
         if (LayerTypes[I] <> '') and (SelectedIndex = I + 1) then
           LoadedSelectedIndex := Document.LayerCount - 1;
       end;

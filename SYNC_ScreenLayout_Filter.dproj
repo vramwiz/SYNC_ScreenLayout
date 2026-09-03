@@ -85,6 +85,7 @@
         <DCCReference Include="Source\Shell\ScreenLayoutLineStyleControls.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutCanvasSettingsDialog.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutDocument.pas"/>
+        <DCCReference Include="Source\Core\Model\ScreenLayoutFilters.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutEllipseGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutTextGeometry.pas"/>
@@ -108,6 +109,7 @@
         <DCCReference Include="Source\Core\Commands\ScreenLayoutGroupCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutGroupChildCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutGroupTransformCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\ScreenLayoutFilterCommands.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutEditHistory.pas"/>
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJson.pas"/>
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJsonReader.pas"/>
@@ -140,6 +142,14 @@
         <DCCReference Include="Source\Layout\ScreenLayoutDockManager.pas"/>
         <DCCReference Include="Source\Layout\ScreenLayoutToolFrames.pas"/>
         <DCCReference Include="Source\ObjectProperties\ScreenLayoutObjectPropertiesControl.pas"/>
+        <DCCReference Include="Source\ObjectProperties\ScreenLayoutFilterDetailsFrame.pas">
+            <Form>ScreenLayoutFilterDetailsFrame</Form>
+            <DesignClass>TFrame</DesignClass>
+        </DCCReference>
+        <DCCReference Include="Source\ObjectProperties\ScreenLayoutFilterFrame.pas">
+            <Form>ScreenLayoutFilterFrame</Form>
+            <DesignClass>TFrame</DesignClass>
+        </DCCReference>
         <DCCReference Include="Source\ObjectProperties\ScreenLayoutObjectPropertiesFrame.pas">
             <Form>ObjectPropertiesFrame</Form>
             <DesignClass>TFrame</DesignClass>

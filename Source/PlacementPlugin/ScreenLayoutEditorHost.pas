@@ -6,7 +6,7 @@ interface
 uses
   System.SysUtils;
 
-// 保存値と参照背景を編集画面へ渡し、確定後のversion 14 JSONまたは失敗理由を返す。
+// 保存値と参照背景を編集画面へ渡し、確定後のversion 15 JSONまたは失敗理由を返す。
 function EditScreenLayout(const SerializedData: string;
   const BackgroundPixels: TBytes; BackgroundWidth, BackgroundHeight: Integer;
   CanvasWidth, CanvasHeight: Integer;

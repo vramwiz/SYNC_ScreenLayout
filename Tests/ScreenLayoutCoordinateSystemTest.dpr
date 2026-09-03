@@ -72,8 +72,8 @@ begin
     Json := TJSONObject.ParseJSONValue(Serialized);
     Check(Json is TJSONObject, 'Serialized root is not an object');
     Root := TJSONObject(Json);
-    Check(Root.GetValue('version').Value = '14',
-      'Coordinate format version is not 14');
+    Check(Root.GetValue('version').Value = '15',
+      'Coordinate format version is not 15');
     CanvasJson := Root.GetValue<TJSONObject>('canvas');
     Check((CanvasJson <> nil) and
       (CanvasJson.GetValue('origin').Value = 'center'),
@@ -129,7 +129,7 @@ begin
     ReplaceNumber(Root, 'version', 13);
     Check(not TryDeserializeVectArtDocument(Root.ToJSON, Loaded,
       ErrorMessage), 'Version 13 was unexpectedly accepted');
-    ReplaceNumber(Root, 'version', 14);
+    ReplaceNumber(Root, 'version', 15);
     CanvasJson := Root.GetValue<TJSONObject>('canvas');
     ReplaceString(CanvasJson, 'origin', 'topLeft');
     Check(not TryDeserializeVectArtDocument(Root.ToJSON, Loaded,

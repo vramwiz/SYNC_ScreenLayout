@@ -13,11 +13,60 @@ implementation
 
 uses
   System.Generics.Collections, System.IOUtils, System.JSON, System.Math,
-  System.SysUtils, System.Types, Vcl.Graphics;
+  System.SysUtils, System.Types, Vcl.Graphics, ScreenLayoutFilters;
 
 const
-  DOCUMENT_FORMAT_VERSION = 14;
+  DOCUMENT_FORMAT_VERSION = 15;
   DOCUMENT_COORDINATE_ORIGIN = 'center';
+
+procedure AddLayerFilters(Layer: TVectArtLayer; LayerJson: TJSONObject);
+var
+  Blur: TScreenLayoutBlurFilter;
+  Filter: TScreenLayoutFilter;
+  FilterJson: TJSONObject;
+  FiltersJson: TJSONArray;
+  I: Integer;
+  Outline: TScreenLayoutOutlineFilter;
+  Shadow: TScreenLayoutShadowFilter;
+begin
+  FiltersJson := TJSONArray.Create;
+  LayerJson.AddPair('filters', FiltersJson);
+  for I := 0 to Layer.FilterCount - 1 do
+  begin
+    Filter := Layer.Filters[I];
+    FilterJson := TJSONObject.Create;
+    FilterJson.AddPair('enabled', TJSONBool.Create(Filter.Enabled));
+    case Filter.Kind of
+      slfkOutline:
+      begin
+        Outline := TScreenLayoutOutlineFilter(Filter);
+        FilterJson.AddPair('type', 'outline');
+        FilterJson.AddPair('color',
+          TJSONNumber.Create(Integer(Outline.Color)));
+        FilterJson.AddPair('width', TJSONNumber.Create(Outline.Width));
+      end;
+      slfkShadow:
+      begin
+        Shadow := TScreenLayoutShadowFilter(Filter);
+        FilterJson.AddPair('type', 'shadow');
+        FilterJson.AddPair('color',
+          TJSONNumber.Create(Integer(Shadow.Color)));
+        FilterJson.AddPair('offsetX', TJSONNumber.Create(Shadow.OffsetX));
+        FilterJson.AddPair('offsetY', TJSONNumber.Create(Shadow.OffsetY));
+        FilterJson.AddPair('blurRadius',
+          TJSONNumber.Create(Shadow.BlurRadius));
+        FilterJson.AddPair('opacity', TJSONNumber.Create(Shadow.Opacity));
+      end;
+      slfkBlur:
+      begin
+        Blur := TScreenLayoutBlurFilter(Filter);
+        FilterJson.AddPair('type', 'blur');
+        FilterJson.AddPair('radius', TJSONNumber.Create(Blur.Radius));
+      end;
+    end;
+    FiltersJson.AddElement(FilterJson);
+  end;
+end;
 
 function SerializeVectArtDocument(Document: TVectArtDocument): string;
 var
@@ -108,6 +157,7 @@ begin
         GroupJson.AddPair('opacity', TJSONNumber.Create(Group.Opacity));
         GroupJson.AddPair('visible', TJSONBool.Create(Group.Visible));
         GroupJson.AddPair('locked', TJSONBool.Create(Group.Locked));
+        AddLayerFilters(Group, GroupJson);
         GroupLayersJson := TJSONArray.Create;
         GroupJson.AddPair('layers', GroupLayersJson);
         for ChildIndex := 0 to Group.ChildCount - 1 do
@@ -165,6 +215,7 @@ begin
         TextJson.AddPair('opacity', TJSONNumber.Create(TextLayer.Opacity));
         TextJson.AddPair('visible', TJSONBool.Create(TextLayer.Visible));
         TextJson.AddPair('locked', TJSONBool.Create(TextLayer.Locked));
+        AddLayerFilters(TextLayer, TextJson);
         LayersJson.AddElement(TextJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;
@@ -186,6 +237,7 @@ begin
         ImageJson.AddPair('opacity', TJSONNumber.Create(Image.Opacity));
         ImageJson.AddPair('visible', TJSONBool.Create(Image.Visible));
         ImageJson.AddPair('locked', TJSONBool.Create(Image.Locked));
+        AddLayerFilters(Image, ImageJson);
         PointsJson := TJSONArray.Create;
         for PointIndex := 0 to High(Image.Points) do
         begin
@@ -218,6 +270,7 @@ begin
         PathJson.AddPair('lineCap', TJSONNumber.Create(Ord(Path.LineCap)));
         PathJson.AddPair('visible', TJSONBool.Create(Path.Visible));
         PathJson.AddPair('locked', TJSONBool.Create(Path.Locked));
+        AddLayerFilters(Path, PathJson);
         VerticesJson := TJSONArray.Create;
         PathVertices := Path.Vertices;
         for VertexIndex := 0 to High(PathVertices) do
@@ -271,6 +324,7 @@ begin
           TJSONNumber.Create(Ord(Shape.StrokeStyle)));
         ShapeJson.AddPair('visible', TJSONBool.Create(Shape.Visible));
         ShapeJson.AddPair('locked', TJSONBool.Create(Shape.Locked));
+        AddLayerFilters(Shape, ShapeJson);
         ContoursJson := TJSONArray.Create;
         ShapeContours := Shape.Contours;
         for ContourIndex := 0 to High(ShapeContours) do
@@ -336,6 +390,7 @@ begin
         ArcShapeJson.AddPair('opacity', TJSONNumber.Create(ArcShape.Opacity));
         ArcShapeJson.AddPair('visible', TJSONBool.Create(ArcShape.Visible));
         ArcShapeJson.AddPair('locked', TJSONBool.Create(ArcShape.Locked));
+        AddLayerFilters(ArcShape, ArcShapeJson);
         LayersJson.AddElement(ArcShapeJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;
@@ -369,6 +424,7 @@ begin
           TJSONBool.Create(EllipseLine.Visible));
         EllipseLineJson.AddPair('locked',
           TJSONBool.Create(EllipseLine.Locked));
+        AddLayerFilters(EllipseLine, EllipseLineJson);
         LayersJson.AddElement(EllipseLineJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;
@@ -410,6 +466,7 @@ begin
           TJSONBool.Create(RoundedRectangleLine.Visible));
         RoundedRectangleLineJson.AddPair('locked',
           TJSONBool.Create(RoundedRectangleLine.Locked));
+        AddLayerFilters(RoundedRectangleLine, RoundedRectangleLineJson);
         LayersJson.AddElement(RoundedRectangleLineJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;
@@ -443,6 +500,7 @@ begin
           TJSONBool.Create(RectangleLine.Visible));
         RectangleLineJson.AddPair('locked',
           TJSONBool.Create(RectangleLine.Locked));
+        AddLayerFilters(RectangleLine, RectangleLineJson);
         LayersJson.AddElement(RectangleLineJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;
@@ -474,6 +532,7 @@ begin
         ArcJson.AddPair('opacity', TJSONNumber.Create(Arc.Opacity));
         ArcJson.AddPair('visible', TJSONBool.Create(Arc.Visible));
         ArcJson.AddPair('locked', TJSONBool.Create(Arc.Locked));
+        AddLayerFilters(Arc, ArcJson);
         LayersJson.AddElement(ArcJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;
@@ -500,6 +559,7 @@ begin
           TJSONNumber.Create(Ellipse.RotationDegrees));
         EllipseJson.AddPair('visible', TJSONBool.Create(Ellipse.Visible));
         EllipseJson.AddPair('locked', TJSONBool.Create(Ellipse.Locked));
+        AddLayerFilters(Ellipse, EllipseJson);
         LayersJson.AddElement(EllipseJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;
@@ -537,6 +597,7 @@ begin
           TJSONBool.Create(RoundedRectangle.Visible));
         RoundedRectangleJson.AddPair('locked',
           TJSONBool.Create(RoundedRectangle.Locked));
+        AddLayerFilters(RoundedRectangle, RoundedRectangleJson);
         LayersJson.AddElement(RoundedRectangleJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;
@@ -563,6 +624,7 @@ begin
         TJSONNumber.Create(Rectangle.RotationDegrees));
       RectangleJson.AddPair('visible', TJSONBool.Create(Rectangle.Visible));
       RectangleJson.AddPair('locked', TJSONBool.Create(Rectangle.Locked));
+      AddLayerFilters(Rectangle, RectangleJson);
       LayersJson.AddElement(RectangleJson);
       if I = Document.SelectedIndex then
         SerializedSelectedIndex := LayersJson.Count;
