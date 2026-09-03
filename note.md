@@ -289,6 +289,10 @@
 - キャンバス入力は `ScreenLayoutCanvasInteraction` が選択、共通変形、操作の振り分けを担当し、
   `ScreenLayoutShapeInteraction` がShapeの頂点選択、区間分割、頂点削除、種別変更、
   ベジェ制御点の操作と表示用幾何を担当する。
+- フィルター効果枠の描画、当たり判定、直接操作、Undo確定は
+  `ScreenLayoutFilterInteraction` が担当し、Canvasはマウスイベントと描画先だけを委譲する。
+- フィルターUIの外枠とコマンド連携は `ScreenLayoutFilterFrame`、一覧固有の描画、D&D、
+  有効スイッチ、主要値スライダーは `ScreenLayoutFilterListControl` が担当する。
 - 文字入力のWindows IME受け取り、UTF-16／CRLFを壊さない選択・カーソル操作、折り返し行の
   カーソル位置計算は `ScreenLayoutTextEditing` が担当し、CanvasはDocument反映と表示更新を担当する。
 - このリポジトリ固有の共有ユニット名には `ScreenLayout` 接頭辞を使用し、分離元アプリの

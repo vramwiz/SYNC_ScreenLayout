@@ -6,7 +6,9 @@ interface
 uses
   ScreenLayoutDocument, ScreenLayoutEditHistory;
 
+// 通常レイヤーだけの同種選択で、ロックされていない場合にTrueを返す。
 function CanDuplicateSelectedLayers(ADocument: TVectArtDocument): Boolean;
+// 選択レイヤーを24論理pxずらして完全複製し、操作を1履歴として追加する。
 procedure DuplicateSelectedLayers(ADocument: TVectArtDocument;
   AEditHistory: TVectArtEditHistory);
 

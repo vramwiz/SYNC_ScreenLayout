@@ -1,4 +1,4 @@
-// Edits the parameters of one selected filter in the fixed lower UI area.
+// フィルターUI下端の補助領域で、色と影の透明度を編集する。
 unit ScreenLayoutFilterDetailsFrame;
 
 interface
@@ -29,10 +29,11 @@ type
     procedure SetRow(Index: Integer; const Caption, Value: string;
       Visible: Boolean);
   public
+    // 固定下端領域で使用するコントロールを生成する。
     constructor Create(AOwner: TComponent); override;
-    // Rebuilds the visible rows from the current filter kind and values.
+    // 選択フィルターの種類と現在値から表示項目を再構築する。
     procedure Refresh;
-    // Selects the layer/filter pair edited by this frame; neither is owned.
+    // 編集対象を切り替える。LayerとFilterの所有権は受け取らない。
     procedure SelectFilter(Layer: TVectArtLayer;
       Filter: TScreenLayoutFilter);
     property Context: IVectArtDesignerContext read FContext write SetContext;

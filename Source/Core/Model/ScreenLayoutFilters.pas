@@ -1,5 +1,5 @@
-// Defines non-destructive visual filters and their editable parameters.
-// Rendering, persistence, and UI behavior are intentionally kept elsewhere.
+// 非破壊フィルターの種類と編集可能な値だけを保持する。
+// 描画、永続化、UI操作には依存しない。
 unit ScreenLayoutFilters;
 
 interface
@@ -10,6 +10,7 @@ uses
 type
   TScreenLayoutFilterKind = (slfkOutline, slfkShadow, slfkBlur);
 
+  // 全フィルターに共通する有効状態と、派生型を判別する不変の種類を持つ。
   TScreenLayoutFilter = class
   private
     FEnabled: Boolean;
@@ -17,7 +18,9 @@ type
   protected
     constructor Create(AKind: TScreenLayoutFilterKind);
   public
+    // 元インスタンスと所有権を共有しない完全な複製を返す。
     function Clone: TScreenLayoutFilter; virtual; abstract;
+    // UIへ表示する種類名を返す。
     function DisplayName: string;
     property Enabled: Boolean read FEnabled write FEnabled;
     property Kind: TScreenLayoutFilterKind read FKind;
@@ -28,7 +31,9 @@ type
     FColor: TColor;
     FWidth: Single;
   public
+    // UIとJSONで共通使用する初期値を設定する。
     constructor Create;
+    // 有効状態、色、幅を独立したインスタンスへ複製する。
     function Clone: TScreenLayoutFilter; override;
     property Color: TColor read FColor write FColor;
     property Width: Single read FWidth write FWidth;
@@ -42,7 +47,9 @@ type
     FOffsetY: Single;
     FOpacity: Single;
   public
+    // UIとJSONで共通使用する初期値を設定する。
     constructor Create;
+    // 有効状態を含む影の全パラメーターを複製する。
     function Clone: TScreenLayoutFilter; override;
     property BlurRadius: Single read FBlurRadius write FBlurRadius;
     property Color: TColor read FColor write FColor;
@@ -55,15 +62,17 @@ type
   private
     FRadius: Single;
   public
+    // UIとJSONで共通使用する初期値を設定する。
     constructor Create;
+    // 有効状態と半径を独立したインスタンスへ複製する。
     function Clone: TScreenLayoutFilter; override;
     property Radius: Single read FRadius write FRadius;
   end;
 
-// Creates one filter with the defaults used by the add-filter UI.
+// 指定した種類を追加UIと同じ初期値で生成し、呼び出し側へ所有権を渡す。
 function CreateDefaultScreenLayoutFilter(
   Kind: TScreenLayoutFilterKind): TScreenLayoutFilter;
-// Copies editable values between filters of the same kind.
+// 同じ種類のフィルター間で、有効状態を含む編集可能値をすべてコピーする。
 procedure AssignScreenLayoutFilter(Target, Source: TScreenLayoutFilter);
 
 implementation

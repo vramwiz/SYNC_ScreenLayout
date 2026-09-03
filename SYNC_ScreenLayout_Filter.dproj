@@ -116,6 +116,7 @@
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJsonWriter.pas"/>
         <DCCReference Include="Source\Editor\ScreenLayoutCanvas.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutCanvasInteraction.pas"/>
+        <DCCReference Include="Source\Editor\Interaction\ScreenLayoutFilterInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutGroupInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutTextEditing.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutInteractionGeometry.pas"/>
@@ -146,6 +147,7 @@
             <Form>ScreenLayoutFilterDetailsFrame</Form>
             <DesignClass>TFrame</DesignClass>
         </DCCReference>
+        <DCCReference Include="Source\ObjectProperties\ScreenLayoutFilterListControl.pas"/>
         <DCCReference Include="Source\ObjectProperties\ScreenLayoutFilterFrame.pas">
             <Form>ScreenLayoutFilterFrame</Form>
             <DesignClass>TFrame</DesignClass>

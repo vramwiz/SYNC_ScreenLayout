@@ -1,4 +1,4 @@
-// Provides Undo/Redo commands for filter-stack structure and enabled state.
+// フィルタースタックの構造と値を、所有権を保ちながらUndo／Redoする。
 unit ScreenLayoutFilterCommands;
 
 interface
@@ -7,11 +7,12 @@ uses
   ScreenLayoutDocument, ScreenLayoutEditCommands, ScreenLayoutFilters;
 
 type
+  // 新規フィルターを挿入し、Undo中だけコマンド側で所有する。
   TScreenLayoutAddFilterCommand = class(TVectArtEditCommand)
   private
     FDocument: TVectArtDocument;
     FFilter: TScreenLayoutFilter;
-    FInLayer: Boolean;
+    FInLayer: Boolean; // FFilterの所有者がFLayerならTrue。
     FIndex: Integer;
     FLayer: TVectArtLayer;
   public
@@ -22,11 +23,12 @@ type
     procedure Undo; override;
   end;
 
+  // 既存フィルターを取り外し、削除状態の間だけコマンド側で所有する。
   TScreenLayoutRemoveFilterCommand = class(TVectArtEditCommand)
   private
     FDocument: TVectArtDocument;
     FFilter: TScreenLayoutFilter;
-    FInLayer: Boolean;
+    FInLayer: Boolean; // FFilterの所有者がFLayerならTrue。
     FIndex: Integer;
     FLayer: TVectArtLayer;
   public
@@ -37,6 +39,7 @@ type
     procedure Undo; override;
   end;
 
+  // 同一レイヤー内の順序だけを変更し、フィルター本体は移動しない。
   TScreenLayoutMoveFilterCommand = class(TVectArtEditCommand)
   private
     FDocument: TVectArtDocument;
@@ -50,6 +53,7 @@ type
     procedure Undo; override;
   end;
 
+  // 既存フィルターの有効状態を履歴化する。
   TScreenLayoutSetFilterEnabledCommand = class(TVectArtEditCommand)
   private
     FDocument: TVectArtDocument;
@@ -64,6 +68,7 @@ type
     procedure Undo; override;
   end;
 
+  // 同じフィルターへスナップショットを適用し、ドラッグ全体を1履歴にする。
   TScreenLayoutSetFilterParametersCommand = class(TVectArtEditCommand)
   private
     FDocument: TVectArtDocument;
