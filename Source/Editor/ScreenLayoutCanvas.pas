@@ -1183,6 +1183,7 @@ var
   CaretPoint: TPointF;
   Center: TPointF;
   FullLayout: TScreenLayoutTextLayout;
+  IndividualLetterSpacingRatios: TArray<Single>;
   LastLine: Integer;
   Layer: TScreenLayoutTextLayer;
   LineWidth: Single;
@@ -1196,9 +1197,11 @@ begin
     not (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
     Exit;
   Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
+  IndividualLetterSpacingRatios := Layer.IndividualLetterSpacingRatios;
   FullLayout := BuildScreenLayoutTextLayout(FTextBuffer, Layer.FontFamily,
     Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
-    Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
+    Layer.LetterSpacingRatio, Layer.LineSpacingRatio,
+    IndividualLetterSpacingRatios);
   ScaleX := Layer.Bounds.Width / Max(FullLayout.Width, 1.0);
   ScaleY := Layer.Bounds.Height / Max(FullLayout.Height, Layer.FontSize);
   FTextEditor.Font.Name := Layer.FontFamily;
@@ -1208,7 +1211,8 @@ begin
   Prefix := Copy(FTextBuffer, 1, FTextCaretIndex);
   CaretLayout := BuildScreenLayoutTextLayout(Prefix, Layer.FontFamily,
     Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
-    Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
+    Layer.LetterSpacingRatio, Layer.LineSpacingRatio,
+    IndividualLetterSpacingRatios);
   LastLine := Max(High(CaretLayout.Lines), 0);
   CaretPoint := TPointF.Create(Layer.Bounds.Left,
     Layer.Bounds.Top + LastLine * CaretLayout.LineHeight * ScaleY);
@@ -1216,14 +1220,18 @@ begin
   begin
     LineWidth := MeasureScreenLayoutText(FullLayout.Lines[
       Min(LastLine, High(FullLayout.Lines))], CreateScreenLayoutTextFont(
-        Layer.FontFamily, Layer.FontSize, Layer.FontStyle),
-      Layer.FontSize * Layer.LetterSpacingRatio);
+      Layer.FontFamily, Layer.FontSize, Layer.FontStyle),
+      Layer.FontSize * Layer.LetterSpacingRatio, Layer.FontSize,
+      IndividualLetterSpacingRatios,
+      FullLayout.LineGapOffsets[Min(LastLine, High(FullLayout.Lines))]);
     CaretPoint.X := CaretPoint.X +
       HorizontalTextAlignmentOffset(Layer.Alignment, FullLayout.Width,
         LineWidth) * ScaleX + MeasureScreenLayoutText(
           CaretLayout.Lines[LastLine], CreateScreenLayoutTextFont(
             Layer.FontFamily, Layer.FontSize, Layer.FontStyle),
-          Layer.FontSize * Layer.LetterSpacingRatio) * ScaleX;
+          Layer.FontSize * Layer.LetterSpacingRatio, Layer.FontSize,
+          IndividualLetterSpacingRatios,
+          CaretLayout.LineGapOffsets[LastLine]) * ScaleX;
   end;
   Center := TPointF.Create((Layer.Bounds.Left + Layer.Bounds.Right) * 0.5,
     (Layer.Bounds.Top + Layer.Bounds.Bottom) * 0.5);
@@ -1255,6 +1263,8 @@ begin
     Exit;
   Data := CaptureScreenLayoutTextData(
     TScreenLayoutTextLayer(FDocument[FTextLayerIndex]));
+  if Data.Text <> FTextBuffer then
+    SetLength(Data.IndividualLetterSpacingRatios, 0);
   Data.Text := FTextBuffer;
   if FTextNewLayer then
   begin
@@ -1970,6 +1980,9 @@ procedure TVectArtCanvasControl.PaintDirect2D;
 var
   ArcHandles: TScreenLayoutArcAngleHandles;
   TextSpacingHandles: TScreenLayoutTextSpacingHandles;
+  TextIndividualGapIndex: Integer;
+  TextIndividualHandle: TScreenLayoutTextIndividualSpacingHandle;
+  TextIndividualHandles: TArray<TScreenLayoutTextIndividualSpacingHandle>;
   TextSpacingIsLetter: Boolean;
   TextSpacingRatio: Single;
   ArcLayer: TScreenLayoutArcLayer;
@@ -2414,6 +2427,12 @@ begin
           if not FTextEditing and
             FInteraction.SelectedTextSpacingHandles(TextSpacingHandles) then
           begin
+            TextIndividualHandles :=
+              FInteraction.SelectedTextIndividualSpacingHandles;
+            for TextIndividualHandle in TextIndividualHandles do
+              DrawBidirectionalArrow(Direct2DCanvas,
+                TextIndividualHandle.LineStart,
+                TextIndividualHandle.LineEnd);
             DrawBidirectionalArrow(Direct2DCanvas,
               TextSpacingHandles.LetterLineStart,
               TextSpacingHandles.LetterLineEnd);
@@ -2435,6 +2454,19 @@ begin
                 Direct2DCanvas.TextOut(TextSpacingHandles.LineHandle.Right + 4,
                   TextSpacingHandles.LineHandle.Top - 2,
                   Format('行間 %.0f%%', [TextSpacingRatio * 100]));
+              Direct2DCanvas.Brush.Style := bsSolid;
+            end;
+            if FInteraction.IndividualTextSpacingDragValue(
+              TextIndividualGapIndex, TextSpacingRatio) and
+              (TextIndividualGapIndex >= 0) and
+              (TextIndividualGapIndex < Length(TextIndividualHandles)) then
+            begin
+              Direct2DCanvas.Brush.Style := bsClear;
+              Direct2DCanvas.Font.Color := clWhite;
+              Direct2DCanvas.TextOut(
+                TextIndividualHandles[TextIndividualGapIndex].HitRect.Right + 4,
+                TextIndividualHandles[TextIndividualGapIndex].HitRect.Top - 2,
+                Format('個別字間 %.0f%%', [TextSpacingRatio * 100]));
               Direct2DCanvas.Brush.Style := bsSolid;
             end;
           end;
@@ -2604,6 +2636,9 @@ procedure TVectArtCanvasControl.PaintGDI;
 var
   ArcHandles: TScreenLayoutArcAngleHandles;
   TextSpacingHandles: TScreenLayoutTextSpacingHandles;
+  TextIndividualGapIndex: Integer;
+  TextIndividualHandle: TScreenLayoutTextIndividualSpacingHandle;
+  TextIndividualHandles: TArray<TScreenLayoutTextIndividualSpacingHandle>;
   TextSpacingIsLetter: Boolean;
   TextSpacingRatio: Single;
   ArcLayer: TScreenLayoutArcLayer;
@@ -3000,6 +3035,11 @@ begin
       if not FTextEditing and
         FInteraction.SelectedTextSpacingHandles(TextSpacingHandles) then
       begin
+        TextIndividualHandles :=
+          FInteraction.SelectedTextIndividualSpacingHandles;
+        for TextIndividualHandle in TextIndividualHandles do
+          DrawBidirectionalArrow(Canvas, TextIndividualHandle.LineStart,
+            TextIndividualHandle.LineEnd);
         DrawBidirectionalArrow(Canvas, TextSpacingHandles.LetterLineStart,
           TextSpacingHandles.LetterLineEnd);
         if TextSpacingHandles.HasLineSpacing then
@@ -3018,6 +3058,19 @@ begin
             Canvas.TextOut(TextSpacingHandles.LineHandle.Right + 4,
               TextSpacingHandles.LineHandle.Top - 2,
               Format('行間 %.0f%%', [TextSpacingRatio * 100]));
+          Canvas.Brush.Style := bsSolid;
+        end;
+        if FInteraction.IndividualTextSpacingDragValue(
+          TextIndividualGapIndex, TextSpacingRatio) and
+          (TextIndividualGapIndex >= 0) and
+          (TextIndividualGapIndex < Length(TextIndividualHandles)) then
+        begin
+          Canvas.Brush.Style := bsClear;
+          Canvas.Font.Color := clWhite;
+          Canvas.TextOut(
+            TextIndividualHandles[TextIndividualGapIndex].HitRect.Right + 4,
+            TextIndividualHandles[TextIndividualGapIndex].HitRect.Top - 2,
+            Format('個別字間 %.0f%%', [TextSpacingRatio * 100]));
           Canvas.Brush.Style := bsSolid;
         end;
       end;

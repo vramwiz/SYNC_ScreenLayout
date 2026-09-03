@@ -110,6 +110,9 @@ var
   I: Integer;
   Image: TVectArtImageLayer;
   ImageJson: TJSONObject;
+  IndividualLetterSpacingIndex: Integer;
+  IndividualLetterSpacingJson: TJSONArray;
+  IndividualLetterSpacingRatios: TArray<Single>;
   Layer: TVectArtLayer;
   LayersJson: TJSONArray;
   Path: TVectArtPathLayer;
@@ -233,6 +236,15 @@ begin
           TJSONBool.Create(fsStrikeOut in TextLayer.FontStyle));
         TextJson.AddPair('letterSpacingRatio',
           TJSONNumber.Create(TextLayer.LetterSpacingRatio));
+        IndividualLetterSpacingJson := TJSONArray.Create;
+        IndividualLetterSpacingRatios :=
+          TextLayer.IndividualLetterSpacingRatios;
+        for IndividualLetterSpacingIndex := 0 to
+          High(IndividualLetterSpacingRatios) do
+          IndividualLetterSpacingJson.Add(
+            IndividualLetterSpacingRatios[IndividualLetterSpacingIndex]);
+        TextJson.AddPair('individualLetterSpacingRatios',
+          IndividualLetterSpacingJson);
         TextJson.AddPair('lineSpacingRatio',
           TJSONNumber.Create(TextLayer.LineSpacingRatio));
         TextJson.AddPair('transformMode',

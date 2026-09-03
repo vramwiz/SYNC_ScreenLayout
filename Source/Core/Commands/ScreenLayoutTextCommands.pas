@@ -67,6 +67,8 @@ begin
   Result.FontFamily := Layer.FontFamily;
   Result.FontSize := Layer.FontSize;
   Result.FontStyle := Layer.FontStyle;
+  Result.IndividualLetterSpacingRatios :=
+    Layer.IndividualLetterSpacingRatios;
   Result.LetterSpacingRatio := Layer.LetterSpacingRatio;
   Result.LineSpacingRatio := Layer.LineSpacingRatio;
   Result.Locked := Layer.Locked;
@@ -151,6 +153,10 @@ begin
   FIndex := Index;
   FOldData := OldData;
   FNewData := NewData;
+  FOldData.IndividualLetterSpacingRatios :=
+    Copy(OldData.IndividualLetterSpacingRatios);
+  FNewData.IndividualLetterSpacingRatios :=
+    Copy(NewData.IndividualLetterSpacingRatios);
 end;
 
 procedure TScreenLayoutTextDataCommand.Execute;

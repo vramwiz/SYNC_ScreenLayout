@@ -12,6 +12,10 @@ uses
   ScreenLayoutCanvasInteraction in
     '..\Source\Editor\Interaction\ScreenLayoutCanvasInteraction.pas',
   ScreenLayoutDocument in '..\Source\Core\Model\ScreenLayoutDocument.pas',
+  ScreenLayoutDocumentJsonReader in
+    '..\Source\Persistence\ScreenLayoutDocumentJsonReader.pas',
+  ScreenLayoutDocumentJsonWriter in
+    '..\Source\Persistence\ScreenLayoutDocumentJsonWriter.pas',
   ScreenLayoutEditHistory in
     '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutTextCommands in
@@ -45,16 +49,22 @@ end;
 procedure Run;
 var
   Data: TScreenLayoutTextData;
+  CopyDocument: TVectArtDocument;
   Document: TVectArtDocument;
+  ErrorMessage: string;
   Handles: TScreenLayoutTextSpacingHandles;
   History: TVectArtEditHistory;
+  IndividualHandles: TArray<TScreenLayoutTextIndividualSpacingHandle>;
+  IndividualRatios: TArray<Single>;
   Interaction: TVectArtCanvasInteraction;
+  JsonText: string;
   StartPoint: TPoint;
   TextLayer: TScreenLayoutTextLayer;
 begin
   Document := TVectArtDocument.Create;
   History := TVectArtEditHistory.Create;
   Interaction := TVectArtCanvasInteraction.Create;
+  CopyDocument := nil;
   try
     Document.SetCanvasSize(200, 200);
     Data := Default(TScreenLayoutTextData);
@@ -171,6 +181,65 @@ begin
     History.Undo;
 
     Data := CaptureScreenLayoutTextData(TextLayer);
+    Data.LetterSpacingRatio := 0;
+    Data.LineSpacingRatio := 0;
+    Data.Text := 'ABC';
+    SetLength(Data.IndividualLetterSpacingRatios, 0);
+    Document.SetTextData(1, Data);
+    Interaction.Configure(Document, Rect(0, 0, 400, 400), 1.0);
+    IndividualHandles :=
+      Interaction.SelectedTextIndividualSpacingHandles;
+    Check(Length(IndividualHandles) = 2,
+      'single-line text did not expose one arrow per character gap');
+    StartPoint := RectCenter(IndividualHandles[0].HitRect);
+    Drag(Interaction, StartPoint, Point(StartPoint.X + 10, StartPoint.Y));
+    IndividualRatios := TextLayer.IndividualLetterSpacingRatios;
+    Check((Length(IndividualRatios) >= 1) and
+      SameValue(IndividualRatios[0], 0.5),
+      'individual letter spacing drag did not update the selected gap');
+    Check((Length(IndividualRatios) < 2) or
+      SameValue(IndividualRatios[1], 0),
+      'individual letter spacing drag changed another gap');
+    History.Undo;
+    Check(Length(TextLayer.IndividualLetterSpacingRatios) = 0,
+      'individual letter spacing undo failed');
+    History.Redo;
+    IndividualRatios := TextLayer.IndividualLetterSpacingRatios;
+    Check((Length(IndividualRatios) >= 1) and
+      SameValue(IndividualRatios[0], 0.5),
+      Format('individual letter spacing redo failed: count=%d',
+        [Length(IndividualRatios)]));
+    JsonText := SerializeVectArtDocument(Document);
+    CopyDocument := TVectArtDocument.Create;
+    Check(TryDeserializeVectArtDocument(JsonText, CopyDocument,
+      ErrorMessage), 'individual letter spacing JSON failed: ' +
+      ErrorMessage);
+    IndividualRatios := TScreenLayoutTextLayer(
+      CopyDocument[1]).IndividualLetterSpacingRatios;
+    Check((Length(IndividualRatios) >= 1) and
+      SameValue(IndividualRatios[0], 0.5),
+      'individual letter spacing was not preserved by JSON');
+    FreeAndNil(CopyDocument);
+    Interaction.Configure(Document, Rect(0, 0, 400, 400), 1.0);
+    IndividualHandles :=
+      Interaction.SelectedTextIndividualSpacingHandles;
+    StartPoint := RectCenter(IndividualHandles[0].HitRect);
+    Interaction.MouseDown(mbLeft, [ssDouble], StartPoint.X, StartPoint.Y);
+    IndividualRatios := TextLayer.IndividualLetterSpacingRatios;
+    Check((Length(IndividualRatios) >= 1) and
+      SameValue(IndividualRatios[0], 0),
+      'double-click did not reset individual letter spacing');
+    History.Undo;
+
+    Data := CaptureScreenLayoutTextData(TextLayer);
+    Data.Text := 'AB' + sLineBreak + 'CD';
+    SetLength(Data.IndividualLetterSpacingRatios, 0);
+    Document.SetTextData(1, Data);
+    Interaction.Configure(Document, Rect(0, 0, 400, 400), 1.0);
+    Check(Length(Interaction.SelectedTextIndividualSpacingHandles) = 0,
+      'individual letter spacing arrows remained visible for multiline text');
+
+    Data := CaptureScreenLayoutTextData(TextLayer);
     Data.Text := 'A';
     Document.SetTextData(1, Data);
     Interaction.Configure(Document, Rect(0, 0, 400, 400), 1.0);
@@ -179,6 +248,7 @@ begin
     Check(not Handles.HasLineSpacing,
       'line spacing handle remained visible for single-line text');
   finally
+    CopyDocument.Free;
     Interaction.Free;
     History.Free;
     Document.Free;

@@ -270,6 +270,8 @@ var
   ImageData: TArray<TVectArtImageData>;
   ImageFileName: string;
   ImageValue: TVectArtImageData;
+  IndividualLetterSpacingIndex: Integer;
+  IndividualLetterSpacingJson: TJSONArray;
   Json: TJSONValue;
   LayerJson: TJSONObject;
   LayerTypes: TArray<string>;
@@ -437,6 +439,29 @@ begin
             LayerJson, 'letterSpacingRatio', 0),
             SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
             SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX);
+          SetLength(TextValue.IndividualLetterSpacingRatios, 0);
+          if LayerJson.GetValue('individualLetterSpacingRatios') <> nil then
+          begin
+            IndividualLetterSpacingJson := TJSONArray(RequireValue(
+              LayerJson, 'individualLetterSpacingRatios', TJSONArray));
+            SetLength(TextValue.IndividualLetterSpacingRatios,
+              IndividualLetterSpacingJson.Count);
+            for IndividualLetterSpacingIndex := 0 to
+              IndividualLetterSpacingJson.Count - 1 do
+            begin
+              if not (IndividualLetterSpacingJson.Items[
+                IndividualLetterSpacingIndex] is TJSONNumber) then
+                raise EConvertError.CreateFmt(
+                  'JSON field "individualLetterSpacingRatios[%d]" has an invalid type',
+                  [IndividualLetterSpacingIndex]);
+              TextValue.IndividualLetterSpacingRatios[
+                IndividualLetterSpacingIndex] := EnsureRange(
+                  TJSONNumber(IndividualLetterSpacingJson.Items[
+                    IndividualLetterSpacingIndex]).AsDouble,
+                  SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
+                  SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX);
+            end;
+          end;
           TextValue.LineSpacingRatio := EnsureRange(ReadOptionalSingle(
             LayerJson, 'lineSpacingRatio', 0),
             SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN,

@@ -78,16 +78,19 @@
             <Form>MainForm</Form>
         </DCCReference>
         <DCCReference Include="Source\Shell\ScreenLayoutObjectContextMenu.pas"/>
+        <DCCReference Include="Source\Shell\ScreenLayoutTextContextMenu.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutEditActionsUI.pas"/>
         <DCCReference Include="Source\ObjectProperties\ScreenLayoutStrokeStyleCombo.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutLineToolbar.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutLineStyleControls.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutCanvasSettingsDialog.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutDocument.pas"/>
+        <DCCReference Include="Source\Core\Commands\ScreenLayoutTextDecompositionCommands.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutFilters.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutEllipseGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutTextGeometry.pas"/>
+        <DCCReference Include="Source\Core\Geometry\ScreenLayoutTextOutlineGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutPathOperations.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutShapeOperations.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutShapeBooleanGeometry.pas"/>

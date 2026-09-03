@@ -15,6 +15,7 @@ type
     vcdmRangeSelect, vcdmRoundedRadius, vcdmRoundedCornerRadius,
     vcdmArcStartAngle, vcdmArcEndAngle,
     vcdmTextLetterSpacing, vcdmTextLineSpacing,
+    vcdmTextIndividualLetterSpacing,
     vcdmPathVertex, vcdmPathBezierHandle, vcdmShapeVertex,
     vcdmShapeBezierHandle);
 
@@ -26,6 +27,13 @@ type
     LineLineEnd: TPoint;     // 行間の上下矢印を構成する軸の終点。
     LineHandle: TRect;       // 行間矢印の画面座標上の当たり判定範囲。
     HasLineSpacing: Boolean; // 複数行で行間操作を表示する場合にTrue。
+  end;
+
+  TScreenLayoutTextIndividualSpacingHandle = record
+    GapIndex: Integer; // 先頭から何番目の文字境界か。
+    LineStart: TPoint; // 既存の左右矢印描画へ渡す軸の始点。
+    LineEnd: TPoint;   // 既存の左右矢印描画へ渡す軸の終点。
+    HitRect: TRect;    // 近接する境界を区別する当たり判定範囲。
   end;
 
   TScreenLayoutArcAngleHandles = record
@@ -87,6 +95,7 @@ type
     FTextSpacingCenter: TPointF;
     FTextSpacingRotation: Single;
     FTextSpacingFontSize: Single;
+    FTextSpacingGapIndex: Integer;
     FTextResizeStartData: TScreenLayoutTextData;
     FPathInteraction: TScreenLayoutPathInteraction;
     FPathStructureEditingEnabled: Boolean;
@@ -142,6 +151,8 @@ type
       out HandleRect: TRect): Boolean;
     function SelectedTextSpacingHandlesCore(
       out Handles: TScreenLayoutTextSpacingHandles): Boolean;
+    function SelectedTextIndividualSpacingHandlesCore:
+      TArray<TScreenLayoutTextIndividualSpacingHandle>;
     function ToLogicalX(Value: Single): Single;
     function ToLogicalY(Value: Single): Single;
     function ToScreenX(Value: Single): Integer;
@@ -190,8 +201,13 @@ type
     // 選択Textの字間・行間を直接編集する寸法線とハンドルを返す。
     function SelectedTextSpacingHandles(
       out Handles: TScreenLayoutTextSpacingHandles): Boolean;
+    // 1行Textの各文字境界へ表示する個別字間調整矢印を返す。
+    function SelectedTextIndividualSpacingHandles:
+      TArray<TScreenLayoutTextIndividualSpacingHandle>;
     // 字間・行間ドラッグ中の種別と現在比率を、数値プレビュー表示用に返す。
     function TextSpacingDragValue(out IsLetterSpacing: Boolean;
+      out Ratio: Single): Boolean;
+    function IndividualTextSpacingDragValue(out GapIndex: Integer;
       out Ratio: Single): Boolean;
     // 単一選択中の角丸四角について、4隅共通の半径ハンドルを返す。
     function RoundedRectangleRadiusHandle(out HandleRect: TRect): Boolean;
@@ -248,6 +264,7 @@ begin
   FPathInteraction := TScreenLayoutPathInteraction.Create;
   FShapeInteraction := TScreenLayoutShapeInteraction.Create;
   FDragLayerIndex := -1;
+  FTextSpacingGapIndex := -1;
   FSelectionModeLayerIndex := -1;
 end;
 
@@ -339,6 +356,18 @@ begin
   CrossDistance := Abs(OffsetX * -AxisY + OffsetY * AxisX);
   Result := (AlongDistance <= TEXT_SPACING_HIT_ALONG_HALF_LENGTH) and
     (CrossDistance <= TEXT_SPACING_HIT_CROSS_HALF_LENGTH);
+end;
+
+function SameSingleArrays(const Left, Right: TArray<Single>): Boolean;
+var
+  I: Integer;
+begin
+  if Length(Left) <> Length(Right) then
+    Exit(False);
+  for I := 0 to High(Left) do
+    if not SameValue(Left[I], Right[I]) then
+      Exit(False);
+  Result := True;
 end;
 
 function TVectArtCanvasInteraction.SelectedTextSpacingHandlesCore(
@@ -441,7 +470,8 @@ begin
   Layer := TScreenLayoutTextLayer(FDocument[FDocument.SelectedIndex]);
   Layout := BuildScreenLayoutTextLayout(Layer.Text, Layer.FontFamily,
     Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
-    Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
+    Layer.LetterSpacingRatio, Layer.LineSpacingRatio,
+    Layer.IndividualLetterSpacingRatios);
   LogicalQuad := RectangleCorners(Layer.Bounds, Layer.RotationDegrees);
   for I := 0 to High(ScreenQuad) do
     ScreenQuad[I] := Point(ToScreenX(LogicalQuad[I].X),
@@ -465,6 +495,112 @@ begin
   Result := SelectedTextSpacingHandlesCore(Handles);
 end;
 
+function TVectArtCanvasInteraction.SelectedTextIndividualSpacingHandlesCore:
+  TArray<TScreenLayoutTextIndividualSpacingHandle>;
+const
+  ARROW_HALF_LENGTH = 7.0;
+  ARROW_OUTSIDE_OFFSET = 10.0;
+  HIT_HALF_SIZE = 8;
+var
+  ArrowCenter: TPointF;
+  AxisLength: Single;
+  AxisX: Single;
+  AxisY: Single;
+  BoundaryX: Single;
+  Center: TPointF;
+  CharacterIndex: Integer;
+  CharacterLength: Integer;
+  Font: ISkFont;
+  GapIndex: Integer;
+  GapWidth: Single;
+  IndividualRatios: TArray<Single>;
+  Layer: TScreenLayoutTextLayer;
+  Layout: TScreenLayoutTextLayout;
+  LocalPoint: TPointF;
+  ScreenPoint: TPointF;
+  ScaleX: Single;
+  UnitText: string;
+begin
+  Result := nil;
+  if (FDocument = nil) or (FZoom <= 0) or
+    (FDocument.SelectionCount <> 1) or (FDocument.SelectedIndex <= 0) or
+    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextLayer) or
+    FDocument[FDocument.SelectedIndex].Locked then
+    Exit;
+  Layer := TScreenLayoutTextLayer(FDocument[FDocument.SelectedIndex]);
+  IndividualRatios := Layer.IndividualLetterSpacingRatios;
+  Layout := BuildScreenLayoutTextLayout(Layer.Text, Layer.FontFamily,
+    Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
+    Layer.LetterSpacingRatio, Layer.LineSpacingRatio, IndividualRatios);
+  if (Length(Layout.Lines) <> 1) or (Layout.Lines[0] = '') or
+    (Layout.Width <= 0) then
+    Exit;
+  CharacterIndex := 1;
+  GapIndex := 0;
+  while CharacterIndex <= Length(Layout.Lines[0]) do
+  begin
+    Inc(GapIndex);
+    Inc(CharacterIndex, ScreenLayoutTextUnitLengthAt(Layout.Lines[0],
+      CharacterIndex));
+  end;
+  if GapIndex < 2 then
+    Exit;
+  SetLength(Result, GapIndex - 1);
+  Font := CreateScreenLayoutTextFont(Layer.FontFamily, Layer.FontSize,
+    Layer.FontStyle);
+  ScaleX := Layer.Bounds.Width / Layout.Width;
+  Center := Layer.Bounds.CenterPoint;
+  BoundaryX := 0;
+  CharacterIndex := 1;
+  GapIndex := 0;
+  while (CharacterIndex <= Length(Layout.Lines[0])) and
+    (GapIndex < Length(Result)) do
+  begin
+    CharacterLength := ScreenLayoutTextUnitLengthAt(Layout.Lines[0],
+      CharacterIndex);
+    UnitText := Copy(Layout.Lines[0], CharacterIndex, CharacterLength);
+    BoundaryX := BoundaryX + Font.MeasureText(UnitText);
+    GapWidth := Layer.FontSize * Layer.LetterSpacingRatio;
+    if GapIndex < Length(IndividualRatios) then
+      GapWidth := GapWidth + Layer.FontSize * IndividualRatios[GapIndex];
+    LocalPoint := TPointF.Create(Layer.Bounds.Left +
+      (BoundaryX + GapWidth * 0.5) * ScaleX, Layer.Bounds.Bottom);
+    LocalPoint := RotatePointAround(LocalPoint, Center,
+      Layer.RotationDegrees);
+    ScreenPoint := TPointF.Create(ToScreenX(LocalPoint.X),
+      ToScreenY(LocalPoint.Y));
+    AxisX := Cos(DegToRad(Layer.RotationDegrees));
+    AxisY := Sin(DegToRad(Layer.RotationDegrees));
+    AxisLength := Hypot(AxisX, AxisY);
+    if AxisLength <= 0 then
+      Exit(nil);
+    AxisX := AxisX / AxisLength;
+    AxisY := AxisY / AxisLength;
+    ArrowCenter := TPointF.Create(ScreenPoint.X - AxisY *
+      ARROW_OUTSIDE_OFFSET, ScreenPoint.Y + AxisX * ARROW_OUTSIDE_OFFSET);
+    Result[GapIndex].GapIndex := GapIndex;
+    Result[GapIndex].LineStart := Point(
+      Round(ArrowCenter.X - AxisX * ARROW_HALF_LENGTH),
+      Round(ArrowCenter.Y - AxisY * ARROW_HALF_LENGTH));
+    Result[GapIndex].LineEnd := Point(
+      Round(ArrowCenter.X + AxisX * ARROW_HALF_LENGTH),
+      Round(ArrowCenter.Y + AxisY * ARROW_HALF_LENGTH));
+    Result[GapIndex].HitRect := Rect(Round(ArrowCenter.X) - HIT_HALF_SIZE,
+      Round(ArrowCenter.Y) - HIT_HALF_SIZE,
+      Round(ArrowCenter.X) + HIT_HALF_SIZE + 1,
+      Round(ArrowCenter.Y) + HIT_HALF_SIZE + 1);
+    BoundaryX := BoundaryX + GapWidth;
+    Inc(GapIndex);
+    Inc(CharacterIndex, CharacterLength);
+  end;
+end;
+
+function TVectArtCanvasInteraction.SelectedTextIndividualSpacingHandles:
+  TArray<TScreenLayoutTextIndividualSpacingHandle>;
+begin
+  Result := SelectedTextIndividualSpacingHandlesCore;
+end;
+
 function TVectArtCanvasInteraction.TextSpacingDragValue(
   out IsLetterSpacing: Boolean; out Ratio: Single): Boolean;
 var
@@ -483,6 +619,28 @@ begin
     Ratio := Layer.LetterSpacingRatio
   else
     Ratio := Layer.LineSpacingRatio;
+end;
+
+function TVectArtCanvasInteraction.IndividualTextSpacingDragValue(
+  out GapIndex: Integer; out Ratio: Single): Boolean;
+var
+  Ratios: TArray<Single>;
+  Layer: TScreenLayoutTextLayer;
+begin
+  GapIndex := FTextSpacingGapIndex;
+  Ratio := 0;
+  Result := (FDragMode = vcdmTextIndividualLetterSpacing) and
+    (FDocument <> nil) and (FDragLayerIndex > 0) and
+    (FDragLayerIndex < FDocument.LayerCount) and
+    (FDocument[FDragLayerIndex] is TScreenLayoutTextLayer);
+  if not Result then
+    Exit;
+  Layer := TScreenLayoutTextLayer(FDocument[FDragLayerIndex]);
+  Ratios := Layer.IndividualLetterSpacingRatios;
+  if (GapIndex >= 0) and (GapIndex < Length(Ratios)) then
+    Ratio := Layer.LetterSpacingRatio + Ratios[GapIndex]
+  else
+    Ratio := Layer.LetterSpacingRatio;
 end;
 
 function TVectArtCanvasInteraction.SelectedArcAngleHandlesCore(
@@ -648,6 +806,8 @@ var
   Handle: TVectArtSelectionHandle;
   LayerIndex: Integer;
   SelectionRect: TRect;
+  TextIndividualHandle: TScreenLayoutTextIndividualSpacingHandle;
+  TextIndividualHandles: TArray<TScreenLayoutTextIndividualSpacingHandle>;
   TextSpacingHandles: TScreenLayoutTextSpacingHandles;
   VertexRect: TRect;
   VertexCursor: TCursor;
@@ -665,7 +825,8 @@ begin
     Exit(RoundedCornerCursor(FSelectedRoundedCorner));
   if FDragMode in [vcdmArcStartAngle, vcdmArcEndAngle] then
     Exit(crCross);
-  if FDragMode = vcdmTextLetterSpacing then
+  if FDragMode in [vcdmTextLetterSpacing,
+    vcdmTextIndividualLetterSpacing] then
     Exit(crSizeWE);
   if FDragMode = vcdmTextLineSpacing then
     Exit(crSizeNS);
@@ -711,6 +872,10 @@ begin
         TextSpacingHandles.LineLineEnd) then
       Exit(crSizeNS);
   end;
+  TextIndividualHandles := SelectedTextIndividualSpacingHandlesCore;
+  for TextIndividualHandle in TextIndividualHandles do
+    if PtInRect(TextIndividualHandle.HitRect, Point(X, Y)) then
+      Exit(crSizeWE);
   if SelectedRoundedRectangleRadiusHandle(SelectionRect) and
     not FDocument[FDocument.SelectedIndex].Locked and
     PtInRect(SelectionRect, Point(X, Y)) then
@@ -799,6 +964,8 @@ begin
     if SameValue(OldData.LetterSpacingRatio,
         NewData.LetterSpacingRatio) and
       SameValue(OldData.LineSpacingRatio, NewData.LineSpacingRatio) and
+      SameSingleArrays(OldData.IndividualLetterSpacingRatios,
+        NewData.IndividualLetterSpacingRatios) and
       SameValue(OldData.Bounds.Left, NewData.Bounds.Left) and
       SameValue(OldData.Bounds.Top, NewData.Bounds.Top) and
       SameValue(OldData.Bounds.Right, NewData.Bounds.Right) and
@@ -1353,6 +1520,7 @@ begin
   SetLength(FDragStartShapeContours, 0);
   SetLength(FTextSpacingLayerIndices, 0);
   SetLength(FTextSpacingStartData, 0);
+  FTextSpacingGapIndex := -1;
 end;
 
 function TVectArtCanvasInteraction.GetDragging: Boolean;
@@ -1884,6 +2052,7 @@ var
   ShapeLayer: TScreenLayoutShapeLayer;
   TextLayer: TScreenLayoutTextLayer;
   TextData: TScreenLayoutTextData;
+  TextIndividualHandles: TArray<TScreenLayoutTextIndividualSpacingHandle>;
   TextSelection: TArray<Integer>;
   TextSpacingHandles: TScreenLayoutTextSpacingHandles;
   I: Integer;
@@ -1933,6 +2102,39 @@ begin
   end;
   FPathInteraction.ClearSelection;
   FShapeInteraction.ClearSelection;
+  TextIndividualHandles := SelectedTextIndividualSpacingHandlesCore;
+  for I := 0 to High(TextIndividualHandles) do
+    if PtInRect(TextIndividualHandles[I].HitRect, Point(X, Y)) then
+    begin
+      FDragMode := vcdmTextIndividualLetterSpacing;
+      FTextSpacingGapIndex := TextIndividualHandles[I].GapIndex;
+      SetLength(FTextSpacingLayerIndices, 1);
+      SetLength(FTextSpacingStartData, 1);
+      FTextSpacingLayerIndices[0] := FDocument.SelectedIndex;
+      FTextSpacingStartData[0] := CaptureScreenLayoutTextData(
+        TScreenLayoutTextLayer(FDocument[FDocument.SelectedIndex]));
+      FDragLayerIndex := FDocument.SelectedIndex;
+      TextLayer := TScreenLayoutTextLayer(FDocument[FDragLayerIndex]);
+      FTextSpacingRotation := TextLayer.RotationDegrees;
+      FTextSpacingFontSize := Max(TextLayer.FontSize, 1.0);
+      FTextSpacingCenter := TextLayer.Bounds.CenterPoint;
+      FDragStartMouse := Point(X, Y);
+      if ssDouble in Shift then
+      begin
+        TextData := FTextSpacingStartData[0];
+        TextData.IndividualLetterSpacingRatios :=
+          Copy(FTextSpacingStartData[0].IndividualLetterSpacingRatios);
+        if FTextSpacingGapIndex <
+          Length(TextData.IndividualLetterSpacingRatios) then
+          TextData.IndividualLetterSpacingRatios[
+            FTextSpacingGapIndex] := 0;
+        FDocument.SetTextData(FDragLayerIndex, TextData);
+        CommitTextSpacingCommand;
+        EndDrag;
+        Exit(False);
+      end;
+      Exit(True);
+    end;
   if SelectedTextSpacingHandlesCore(TextSpacingHandles) then
   begin
     if PointHitsTextSpacingArrow(Point(X, Y),
@@ -1944,7 +2146,8 @@ begin
         TextSpacingHandles.LineLineStart,
         TextSpacingHandles.LineLineEnd) then
       FDragMode := vcdmTextLineSpacing;
-    if FDragMode in [vcdmTextLetterSpacing, vcdmTextLineSpacing] then
+    if FDragMode in [vcdmTextLetterSpacing, vcdmTextLineSpacing,
+      vcdmTextIndividualLetterSpacing] then
     begin
       TextSelection := FDocument.GetSelectedLayerIndices;
       SetLength(FTextSpacingLayerIndices, Length(TextSelection));
@@ -2373,7 +2576,8 @@ begin
     FShapeInteraction.DragTo(Shift, X, Y);
     Exit(True);
   end;
-  if FDragMode in [vcdmTextLetterSpacing, vcdmTextLineSpacing] then
+  if FDragMode in [vcdmTextLetterSpacing, vcdmTextLineSpacing,
+    vcdmTextIndividualLetterSpacing] then
   begin
     if Length(FTextSpacingLayerIndices) = 0 then
       Exit(True);
@@ -2383,7 +2587,8 @@ begin
     LocalStartPoint := RotatePointAround(TPointF.Create(
       ToLogicalX(FDragStartMouse.X), ToLogicalY(FDragStartMouse.Y)),
       TextCenter, -FTextSpacingRotation);
-    if FDragMode = vcdmTextLetterSpacing then
+    if FDragMode in [vcdmTextLetterSpacing,
+      vcdmTextIndividualLetterSpacing] then
       DeltaRatio := (LocalPoint.X - LocalStartPoint.X) /
         FTextSpacingFontSize
     else
@@ -2401,11 +2606,28 @@ begin
             TextData.LetterSpacingRatio + DeltaRatio,
             SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
             SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX)
-        else
+        else if FDragMode = vcdmTextLineSpacing then
           TextData.LineSpacingRatio := EnsureRange(
             TextData.LineSpacingRatio + DeltaRatio,
             SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN,
-            SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX);
+            SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX)
+        else
+        begin
+          TextData.IndividualLetterSpacingRatios := Copy(
+            FTextSpacingStartData[I].IndividualLetterSpacingRatios);
+          if Length(TextData.IndividualLetterSpacingRatios) <=
+            FTextSpacingGapIndex then
+            SetLength(TextData.IndividualLetterSpacingRatios,
+              FTextSpacingGapIndex + 1);
+          TextData.IndividualLetterSpacingRatios[FTextSpacingGapIndex] :=
+            EnsureRange(
+              TextData.IndividualLetterSpacingRatios[
+                FTextSpacingGapIndex] + DeltaRatio,
+              SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN -
+                TextData.LetterSpacingRatio,
+              SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX -
+                TextData.LetterSpacingRatio);
+        end;
         FDocument.SetTextData(FTextSpacingLayerIndices[I], TextData);
       end;
     finally
@@ -2783,7 +3005,8 @@ begin
       CommitRoundedRadiusCommand;
     if FDragMode in [vcdmArcStartAngle, vcdmArcEndAngle] then
       CommitArcAnglesCommand;
-    if FDragMode in [vcdmTextLetterSpacing, vcdmTextLineSpacing] then
+    if FDragMode in [vcdmTextLetterSpacing, vcdmTextLineSpacing,
+      vcdmTextIndividualLetterSpacing] then
       CommitTextSpacingCommand;
     if FToggleSelectionModeOnClick and not FMoveOccurred then
       FAxisAlignedSelection := not FAxisAlignedSelection;
@@ -2796,7 +3019,7 @@ var
   I: Integer;
 begin
   Result := FDragMode in [vcdmTextLetterSpacing,
-    vcdmTextLineSpacing];
+    vcdmTextLineSpacing, vcdmTextIndividualLetterSpacing];
   if not Result then
     Exit;
   if FDocument <> nil then

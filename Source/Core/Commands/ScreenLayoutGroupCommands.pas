@@ -365,6 +365,8 @@ begin
     TScreenLayoutTextLayer(Result).FontStyle := TextLayer.FontStyle;
     TScreenLayoutTextLayer(Result).LetterSpacingRatio :=
       TextLayer.LetterSpacingRatio;
+    TScreenLayoutTextLayer(Result).IndividualLetterSpacingRatios :=
+      TextLayer.IndividualLetterSpacingRatios;
     TScreenLayoutTextLayer(Result).LineSpacingRatio :=
       TextLayer.LineSpacingRatio;
     TScreenLayoutTextLayer(Result).RotationDegrees :=

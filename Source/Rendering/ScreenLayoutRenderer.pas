@@ -344,18 +344,23 @@ end;
 
 procedure DrawScreenLayoutTextLine(const Canvas: ISkCanvas;
   const Text: string; const Font: ISkFont; const Paint: ISkPaint;
-  X, BaselineY, LetterSpacing: Single);
+  X, BaselineY, LetterSpacing, FontSize: Single;
+  const IndividualLetterSpacingRatios: TArray<Single>;
+  GapOffset: Integer);
 var
+  GapIndex: Integer;
   I: Integer;
   UnitLength: Integer;
   UnitText: string;
 begin
-  if SameValue(LetterSpacing, 0) then
+  if SameValue(LetterSpacing, 0) and
+    (Length(IndividualLetterSpacingRatios) = 0) then
   begin
     Canvas.DrawSimpleText(Text, X, BaselineY, Font, Paint);
     Exit;
   end;
   I := 1;
+  GapIndex := GapOffset;
   while I <= Length(Text) do
   begin
     UnitLength := ScreenLayoutTextUnitLengthAt(Text, I);
@@ -364,7 +369,13 @@ begin
     X := X + Font.MeasureText(UnitText);
     Inc(I, UnitLength);
     if I <= Length(Text) then
+    begin
       X := X + LetterSpacing;
+      if (GapIndex >= 0) and
+        (GapIndex < Length(IndividualLetterSpacingRatios)) then
+        X := X + FontSize * IndividualLetterSpacingRatios[GapIndex];
+      Inc(GapIndex);
+    end;
   end;
 end;
 
@@ -621,6 +632,7 @@ var
   TextWidth: Single;
   TextX: Single;
   LetterSpacing: Single;
+  IndividualLetterSpacingRatios: TArray<Single>;
 
 begin
   if Target = nil then
@@ -717,10 +729,12 @@ begin
       TextLayer := TScreenLayoutTextLayer(Layer);
       if TextLayer.Text = '' then
         Continue;
+      IndividualLetterSpacingRatios :=
+        TextLayer.IndividualLetterSpacingRatios;
       TextLayout := BuildScreenLayoutTextLayout(TextLayer.Text,
         TextLayer.FontFamily, TextLayer.FontSize, TextLayer.WrapWidth,
         TextLayer.FontStyle, TextLayer.LetterSpacingRatio,
-        TextLayer.LineSpacingRatio);
+        TextLayer.LineSpacingRatio, IndividualLetterSpacingRatios);
       if (TextLayout.Width <= 0) or (TextLayout.Height <= 0) then
         Continue;
       Font := CreateScreenLayoutTextFont(TextLayer.FontFamily,
@@ -742,7 +756,9 @@ begin
         for J := 0 to High(TextLayout.Lines) do
         begin
           TextWidth := MeasureScreenLayoutText(TextLayout.Lines[J], Font,
-            LetterSpacing);
+            LetterSpacing, TextLayer.FontSize,
+            IndividualLetterSpacingRatios,
+            TextLayout.LineGapOffsets[J]);
           case Ord(TextLayer.Alignment) mod 3 of
             1: TextX := (TextLayout.Width - TextWidth) * 0.5;
             2: TextX := TextLayout.Width - TextWidth;
@@ -751,7 +767,9 @@ begin
           end;
           DrawScreenLayoutTextLine(Canvas, TextLayout.Lines[J], Font, Paint,
             TextX, TextLayout.Ascent + J * TextLayout.LineHeight,
-            LetterSpacing);
+            LetterSpacing, TextLayer.FontSize,
+            IndividualLetterSpacingRatios,
+            TextLayout.LineGapOffsets[J]);
           if (TextWidth > 0) and (fsUnderline in TextLayer.FontStyle) then
             Canvas.DrawLine(TPointF.Create(TextX, TextLayout.Ascent +
               J * TextLayout.LineHeight + TextLayer.FontSize * 0.08),

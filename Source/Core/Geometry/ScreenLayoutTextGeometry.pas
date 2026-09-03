@@ -10,6 +10,7 @@ type
   TScreenLayoutTextLayout = record
     Ascent: Single;        // 行上端からベースラインまでの距離。
     Height: Single;        // 全行を含む組版高。
+    LineGapOffsets: TArray<Integer>; // 各表示行の先頭文字に対応する個別字間添字。
     Lines: TArray<string>; // 明示改行と幅折り返しを反映した表示行。
     LineHeight: Single;    // 連続するベースライン間の距離。
     Width: Single;         // 最長行の文字送り幅。
@@ -22,13 +23,22 @@ function CreateScreenLayoutTextFont(const FontFamily: string;
 function BuildScreenLayoutTextLayout(const Text, FontFamily: string;
   FontSize, MaxWidth: Single;
   FontStyle: TFontStyles = []; LetterSpacingRatio: Single = 0;
-  LineSpacingRatio: Single = 0): TScreenLayoutTextLayout;
+  LineSpacingRatio: Single = 0): TScreenLayoutTextLayout; overload;
+function BuildScreenLayoutTextLayout(const Text, FontFamily: string;
+  FontSize, MaxWidth: Single; FontStyle: TFontStyles;
+  LetterSpacingRatio, LineSpacingRatio: Single;
+  const IndividualLetterSpacingRatios: TArray<Single>):
+  TScreenLayoutTextLayout; overload;
 // UTF-16のサロゲートペアを分割せず、Indexから始まる1文字の長さを返す。
 function ScreenLayoutTextUnitLengthAt(const Text: string;
   Index: Integer): Integer;
 // Fontによる文字送りへ、文字間ごとの追加幅を加えた行幅を返す。
 function MeasureScreenLayoutText(const Text: string; const Font: ISkFont;
-  LetterSpacing: Single): Single;
+  LetterSpacing: Single): Single; overload;
+function MeasureScreenLayoutText(const Text: string; const Font: ISkFont;
+  LetterSpacing, FontSize: Single;
+  const IndividualLetterSpacingRatios: TArray<Single>;
+  GapOffset: Integer = 0): Single; overload;
 
 implementation
 
@@ -48,16 +58,27 @@ end;
 
 function MeasureScreenLayoutText(const Text: string; const Font: ISkFont;
   LetterSpacing: Single): Single;
+begin
+  Result := MeasureScreenLayoutText(Text, Font, LetterSpacing, 0, nil, 0);
+end;
+
+function MeasureScreenLayoutText(const Text: string; const Font: ISkFont;
+  LetterSpacing, FontSize: Single;
+  const IndividualLetterSpacingRatios: TArray<Single>;
+  GapOffset: Integer): Single;
 var
+  GapIndex: Integer;
   I: Integer;
   UnitLength: Integer;
   UnitText: string;
 begin
   if (Text = '') or (Font = nil) then
     Exit(0);
-  if SameValue(LetterSpacing, 0) then
+  if SameValue(LetterSpacing, 0) and
+    (Length(IndividualLetterSpacingRatios) = 0) then
     Exit(Font.MeasureText(Text));
   Result := 0;
+  GapIndex := GapOffset;
   I := 1;
   while I <= Length(Text) do
   begin
@@ -66,25 +87,39 @@ begin
     Result := Result + Font.MeasureText(UnitText);
     Inc(I, UnitLength);
     if I <= Length(Text) then
+    begin
       Result := Result + LetterSpacing;
+      if (GapIndex >= 0) and
+        (GapIndex < Length(IndividualLetterSpacingRatios)) then
+        Result := Result + FontSize *
+          IndividualLetterSpacingRatios[GapIndex];
+      Inc(GapIndex);
+    end;
   end;
 end;
 
 procedure AppendWrappedParagraph(Lines: TList<string>; const Paragraph: string;
-  const Font: ISkFont; MaxWidth, LetterSpacing: Single);
+  const Font: ISkFont; MaxWidth, LetterSpacing, FontSize: Single;
+  const IndividualLetterSpacingRatios: TArray<Single>;
+  ParagraphGapOffset: Integer; GapOffsets: TList<Integer>);
 var
   Candidate: string;
   CharacterLength: Integer;
   CurrentLine: string;
   I: Integer;
   NextCharacter: string;
+  CurrentGapOffset: Integer;
+  CurrentUnitCount: Integer;
 begin
   if Paragraph = '' then
   begin
     Lines.Add('');
+    GapOffsets.Add(ParagraphGapOffset);
     Exit;
   end;
   CurrentLine := '';
+  CurrentGapOffset := ParagraphGapOffset;
+  CurrentUnitCount := 0;
   I := 1;
   while I <= Length(Paragraph) do
   begin
@@ -92,16 +127,24 @@ begin
     NextCharacter := Copy(Paragraph, I, CharacterLength);
     Candidate := CurrentLine + NextCharacter;
     if (CurrentLine <> '') and (MaxWidth > 0) and
-      (MeasureScreenLayoutText(Candidate, Font, LetterSpacing) > MaxWidth) then
+      (MeasureScreenLayoutText(Candidate, Font, LetterSpacing, FontSize,
+        IndividualLetterSpacingRatios, CurrentGapOffset) > MaxWidth) then
     begin
       Lines.Add(CurrentLine);
+      GapOffsets.Add(CurrentGapOffset);
+      Inc(CurrentGapOffset, CurrentUnitCount);
       CurrentLine := NextCharacter;
+      CurrentUnitCount := 1;
     end
     else
+    begin
       CurrentLine := Candidate;
+      Inc(CurrentUnitCount);
+    end;
     Inc(I, CharacterLength);
   end;
   Lines.Add(CurrentLine);
+  GapOffsets.Add(CurrentGapOffset);
 end;
 
 function CreateScreenLayoutTextFont(const FontFamily: string;
@@ -137,14 +180,27 @@ function BuildScreenLayoutTextLayout(const Text, FontFamily: string;
   FontSize, MaxWidth: Single;
   FontStyle: TFontStyles; LetterSpacingRatio,
   LineSpacingRatio: Single): TScreenLayoutTextLayout;
+begin
+  Result := BuildScreenLayoutTextLayout(Text, FontFamily, FontSize,
+    MaxWidth, FontStyle, LetterSpacingRatio, LineSpacingRatio, nil);
+end;
+
+function BuildScreenLayoutTextLayout(const Text, FontFamily: string;
+  FontSize, MaxWidth: Single; FontStyle: TFontStyles; LetterSpacingRatio,
+  LineSpacingRatio: Single;
+  const IndividualLetterSpacingRatios: TArray<Single>):
+  TScreenLayoutTextLayout;
 var
   Font: ISkFont;
   FontMetrics: TSkFontMetrics;
   I: Integer;
   LetterSpacing: Single;
+  GapOffsets: TList<Integer>;
   Lines: TList<string>;
   NormalizedText: string;
   Paragraphs: TArray<string>;
+  ParagraphGapOffset: Integer;
+  J: Integer;
 begin
   Result := Default(TScreenLayoutTextLayout);
   Font := CreateScreenLayoutTextFont(FontFamily, FontSize, FontStyle);
@@ -156,20 +212,39 @@ begin
   NormalizedText := StringReplace(NormalizedText, #13, #10, [rfReplaceAll]);
   Paragraphs := NormalizedText.Split([#10], TStringSplitOptions.None);
   Lines := TList<string>.Create;
+  GapOffsets := TList<Integer>.Create;
   try
     if Length(Paragraphs) = 0 then
-      Lines.Add('')
+    begin
+      Lines.Add('');
+      GapOffsets.Add(0);
+    end
     else
+    begin
+      ParagraphGapOffset := 0;
       for I := 0 to High(Paragraphs) do
+      begin
         AppendWrappedParagraph(Lines, Paragraphs[I], Font, MaxWidth,
-          LetterSpacing);
+          LetterSpacing, FontSize, IndividualLetterSpacingRatios,
+          ParagraphGapOffset, GapOffsets);
+        J := 1;
+        while J <= Length(Paragraphs[I]) do
+        begin
+          Inc(ParagraphGapOffset);
+          Inc(J, ScreenLayoutTextUnitLengthAt(Paragraphs[I], J));
+        end;
+      end;
+    end;
     Result.Lines := Lines.ToArray;
+    Result.LineGapOffsets := GapOffsets.ToArray;
   finally
+    GapOffsets.Free;
     Lines.Free;
   end;
   for I := 0 to High(Result.Lines) do
     Result.Width := Max(Result.Width, MeasureScreenLayoutText(
-      Result.Lines[I], Font, LetterSpacing));
+      Result.Lines[I], Font, LetterSpacing, FontSize,
+      IndividualLetterSpacingRatios, Result.LineGapOffsets[I]));
   Result.Height := Max(Length(Result.Lines), 1) * Result.LineHeight;
 end;
 

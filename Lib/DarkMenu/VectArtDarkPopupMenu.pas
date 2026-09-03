@@ -52,6 +52,10 @@ type
     // 子メニューを持つ項目を追加する。子は別Ownerが所有し、このメニューは参照だけを保持する。
     function AddSubMenu(const ACaption: string; Top: Integer;
       SubMenu: TVectArtDarkPopupMenu): TPanel;
+    // 項目群の間へ高さを指定した空白を追加し、利用側が構成した区切りを表現する。
+    function AddSeparator(Top, Height: Integer): TPanel;
+    // 動的な再構築に備え、子メニューとの関連を外して全項目Controlを破棄する。
+    procedure ClearItems;
     // ポップアップを閉じる。すでに閉じている場合は何もしない。
     procedure Close;
     // 指定Controlがトップボタンまたはポップアップ内部に属するかを返す。
@@ -122,6 +126,17 @@ begin
   FSubMenus.AddOrSetValue(Result, SubMenu);
 end;
 
+function TVectArtDarkPopupMenu.AddSeparator(Top, Height: Integer): TPanel;
+begin
+  Result := TPanel.Create(Self);
+  Result.Parent := FPopup;
+  Result.SetBounds(0, Top, FPopup.Width, Height);
+  Result.BevelOuter := bvNone;
+  Result.Caption := '';
+  Result.Color := COLOR_POPUP;
+  Result.ParentBackground := False;
+end;
+
 procedure TVectArtDarkPopupMenu.ButtonClick(Sender: TObject);
 begin
   Toggle;
@@ -137,6 +152,20 @@ procedure TVectArtDarkPopupMenu.Close;
 begin
   CloseChildMenus;
   FPopup.Visible := False;
+end;
+
+procedure TVectArtDarkPopupMenu.ClearItems;
+var
+  Menu: TVectArtDarkPopupMenu;
+begin
+  Close;
+  for Menu in FChildMenus do
+    if Menu.FParentMenu = Self then
+      Menu.FParentMenu := nil;
+  FChildMenus.Clear;
+  FSubMenus.Clear;
+  while FPopup.ControlCount > 0 do
+    FPopup.Controls[0].Free;
 end;
 
 procedure TVectArtDarkPopupMenu.CloseChildMenus(

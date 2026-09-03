@@ -189,13 +189,18 @@ type
     FFontFamily: string;
     FFontSize: Single;
     FFontStyle: TFontStyles;
+    FIndividualLetterSpacingRatios: TArray<Single>;
     FLetterSpacingRatio: Single;
     FLineSpacingRatio: Single;
     FText: string;
     FTransformMode: TScreenLayoutTextTransformMode;
     FWrapWidth: Single;
+    function GetIndividualLetterSpacingRatios: TArray<Single>;
+    procedure SetIndividualLetterSpacingRatios(
+      const Value: TArray<Single>);
     procedure SetLetterSpacingRatio(Value: Single);
     procedure SetLineSpacingRatio(Value: Single);
+    procedure SetText(const Value: string);
   public
     constructor Create(const AName: string; const ABounds: TRectF;
       const AText, AFontFamily: string; AFontSize, AWrapWidth: Single;
@@ -205,11 +210,14 @@ type
     property FontFamily: string read FFontFamily write FFontFamily;
     property FontSize: Single read FFontSize write FFontSize;
     property FontStyle: TFontStyles read FFontStyle write FFontStyle;
+    property IndividualLetterSpacingRatios: TArray<Single>
+      read GetIndividualLetterSpacingRatios
+      write SetIndividualLetterSpacingRatios;
     property LetterSpacingRatio: Single read FLetterSpacingRatio
       write SetLetterSpacingRatio;
     property LineSpacingRatio: Single read FLineSpacingRatio
       write SetLineSpacingRatio;
-    property Text: string read FText write FText;
+    property Text: string read FText write SetText;
     property TransformMode: TScreenLayoutTextTransformMode
       read FTransformMode write FTransformMode;
     property WrapWidth: Single read FWrapWidth write FWrapWidth;
@@ -221,6 +229,7 @@ type
     FontFamily: string;      // Skiaへ渡す優先フォントファミリー。
     FontSize: Single;        // 変形前の文書座標単位フォントサイズ。
     FontStyle: TFontStyles;  // 太字、斜体、下線、取り消し線の組み合わせ。
+    IndividualLetterSpacingRatios: TArray<Single>; // 各文字境界へ加える個別字間比率。
     LetterSpacingRatio: Single; // 文字サイズを1.0とする字間の加算比率。
     LineSpacingRatio: Single;   // 文字サイズを1.0とする行間の加算比率。
     Locked: Boolean;         // 編集を禁止する状態。
@@ -954,11 +963,36 @@ begin
     SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX);
 end;
 
+function TScreenLayoutTextLayer.GetIndividualLetterSpacingRatios:
+  TArray<Single>;
+begin
+  Result := Copy(FIndividualLetterSpacingRatios);
+end;
+
+procedure TScreenLayoutTextLayer.SetIndividualLetterSpacingRatios(
+  const Value: TArray<Single>);
+var
+  I: Integer;
+begin
+  SetLength(FIndividualLetterSpacingRatios, Length(Value));
+  for I := 0 to High(Value) do
+    FIndividualLetterSpacingRatios[I] := EnsureRange(Value[I],
+      SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
+      SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX);
+end;
+
 procedure TScreenLayoutTextLayer.SetLineSpacingRatio(Value: Single);
 begin
   FLineSpacingRatio := EnsureRange(Value,
     SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN,
     SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX);
+end;
+
+procedure TScreenLayoutTextLayer.SetText(const Value: string);
+begin
+  if FText <> Value then
+    SetLength(FIndividualLetterSpacingRatios, 0);
+  FText := Value;
 end;
 
 { TScreenLayoutRectangleLineLayer }
@@ -1496,6 +1530,8 @@ begin
   TextLayer.Alignment := Data.Alignment;
   TextLayer.FontStyle := Data.FontStyle;
   TextLayer.LetterSpacingRatio := Data.LetterSpacingRatio;
+  TextLayer.IndividualLetterSpacingRatios :=
+    Data.IndividualLetterSpacingRatios;
   TextLayer.LineSpacingRatio := Data.LineSpacingRatio;
   TextLayer.Locked := Data.Locked;
   TextLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
@@ -1934,6 +1970,8 @@ begin
   Data.FontFamily := TextLayer.FontFamily;
   Data.FontSize := TextLayer.FontSize;
   Data.FontStyle := TextLayer.FontStyle;
+  Data.IndividualLetterSpacingRatios :=
+    TextLayer.IndividualLetterSpacingRatios;
   Data.LetterSpacingRatio := TextLayer.LetterSpacingRatio;
   Data.LineSpacingRatio := TextLayer.LineSpacingRatio;
   Data.Locked := TextLayer.Locked;
@@ -2466,6 +2504,7 @@ begin
   TextLayer.FontFamily := Data.FontFamily;
   TextLayer.FontSize := Max(Data.FontSize, 1.0);
   TextLayer.FontStyle := Data.FontStyle;
+  TextLayer.Text := Data.Text;
   TextLayer.LetterSpacingRatio := EnsureRange(Data.LetterSpacingRatio,
     SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
     SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX);
@@ -2476,7 +2515,8 @@ begin
   TextLayer.Name := Data.Name;
   TextLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
   TextLayer.RotationDegrees := Data.RotationDegrees;
-  TextLayer.Text := Data.Text;
+  TextLayer.IndividualLetterSpacingRatios :=
+    Data.IndividualLetterSpacingRatios;
   TextLayer.TransformMode := Data.TransformMode;
   TextLayer.Visible := Data.Visible;
   TextLayer.WrapWidth := Max(Data.WrapWidth, 1.0);

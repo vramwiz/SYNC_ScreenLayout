@@ -18,7 +18,8 @@ uses
   ScreenLayoutGroupCommands,
   ScreenLayoutGeometryPropertiesFrame,
   ScreenLayoutObjectPropertiesFrame, ScreenLayoutToolFrames,
-  ScreenLayoutToolPaletteFrame, ScreenLayoutObjectContextMenu;
+  ScreenLayoutToolPaletteFrame, ScreenLayoutObjectContextMenu,
+  ScreenLayoutTextContextMenu;
 
 type
   TMainForm = class(TForm)
@@ -255,7 +256,10 @@ begin
   FMenuGroup.RegisterMenu(FEditActionsUI.Menu);
   FMenuGroup.RegisterMenu(FViewMenu);
   FObjectContextMenu := TScreenLayoutObjectContextMenu.Create(Self, Self,
-    FMenuGroup);
+    FMenuGroup, FDocument, FEditorState);
+  FObjectContextMenu.RegisterContributor(
+    TScreenLayoutTextMenuContributor.Create(FObjectContextMenu,
+      FEditHistory));
   FEditorFrame := TEditorWorkspaceFrame.Create(Self);
   FEditorFrame.Context := FDesignerContext;
   FEditorFrame.CanvasControl.OnObjectContextMenu :=
