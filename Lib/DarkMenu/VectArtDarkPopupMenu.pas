@@ -1,24 +1,25 @@
-﻿// ダーク表示のトップメニューと子ポップアップの生成、開閉、マウス判定を共通化する。
-// メニュー項目が実行する機能や、複数メニュー間の切替方針は利用側がイベントから決定する。
+﻿// ダーク表示のドロップダウン、任意位置ポップアップ、階層サブメニューの生成と配置を担当する。
+// メニュー項目が実行する機能は利用側へ委譲し、子メニューの所有権は変更しない。
+// 複数のルートメニューをまたぐ排他制御とアプリケーションメッセージ監視は担当しない。
 unit VectArtDarkPopupMenu;
 
 interface
 
 uses
-  System.Classes, System.Generics.Collections, Vcl.AppEvnts, Vcl.Controls,
-  Vcl.ExtCtrls, Winapi.Windows;
+  System.Classes, System.Generics.Collections, Vcl.Controls, Vcl.ExtCtrls,
+  Winapi.Windows;
 
 type
   TVectArtDarkPopupMenu = class(TComponent)
   private
     FButton: TPanel;
-    FChildMenus: TList<TVectArtDarkPopupMenu>;
+    FChildMenus: TList<TVectArtDarkPopupMenu>; // このメニューから開く子への非所有参照。
     FMainForm: TWinControl;
     FOnHover: TNotifyEvent;
     FOnOpening: TNotifyEvent;
-    FParentMenu: TVectArtDarkPopupMenu;
+    FParentMenu: TVectArtDarkPopupMenu; // 親メニューへの非所有参照。ルートではnil。
     FPopup: TPanel;
-    FSubMenus: TDictionary<TPanel, TVectArtDarkPopupMenu>;
+    FSubMenus: TDictionary<TPanel, TVectArtDarkPopupMenu>; // 項目Panelと子メニューの対応。
     procedure ButtonClick(Sender: TObject);
     procedure ButtonMouseEnter(Sender: TObject);
     procedure CloseChildMenus(ExceptMenu: TVectArtDarkPopupMenu = nil);
@@ -43,6 +44,7 @@ type
     // メニューバーを持たず、任意座標または親項目から開くポップアップを生成する。
     constructor CreatePopup(AOwner: TComponent; AMainForm: TWinControl;
       PopupWidth, PopupHeight: Integer); reintroduce;
+    // 親子メニュー間の非所有参照を解除してから、内部生成したPanelと対応表を破棄する。
     destructor Destroy; override;
     // ポップアップへ高さ32pxの項目を追加し、返したPanelから表示状態などを個別調整できる。
     function AddItem(const ACaption: string; Top: Integer;
@@ -62,39 +64,24 @@ type
     procedure SetItemEnabled(Item: TPanel; const Value: Boolean);
     // 現在の表示状態を反転する。通常はトップボタンのクリックから自動的に呼ばれる。
     procedure Toggle;
+    // メニューバー型だけが持つ起点ボタン。任意位置ポップアップではnilを返す。
     property Button: TPanel read FButton;
     // トップボタンへマウスが入るたび通知する。ホバー切替の開始条件は利用側が判断する。
     property OnHover: TNotifyEvent read FOnHover write FOnHover;
     // 非表示から表示へ変わる直前に通知する。利用側は他のメニューをここで閉じられる。
     property OnOpening: TNotifyEvent read FOnOpening write FOnOpening;
+    // 利用側が既存DFM項目の追加や表示状態の調整に使用するポップアップ本体。
     property Popup: TPanel read FPopup;
+    // 項目数に応じて利用側が変更できるポップアップ本体の高さ。
     property PopupHeight: Integer read GetPopupHeight write SetPopupHeight;
+    // ルートまたは子ポップアップ本体が現在表示されているかを返す。
     property Visible: Boolean read GetVisible;
-  end;
-
-  TVectArtDarkMenuGroup = class(TComponent)
-  private
-    FApplicationEvents: TApplicationEvents;
-    FMenus: TList<TVectArtDarkPopupMenu>;
-    procedure ApplicationDeactivate(Sender: TObject);
-    procedure ApplicationMessage(var Msg: TMsg; var Handled: Boolean);
-    function AnyMenuVisible: Boolean;
-    procedure MenuHover(Sender: TObject);
-    procedure MenuOpening(Sender: TObject);
-  public
-    // アプリケーションメッセージの監視を開始する。Owner破棄時に監視と非所有Menu一覧も解放する。
-    constructor Create(AOwner: TComponent); override;
-    destructor Destroy; override;
-    // 登録済みの全ポップアップを閉じる。
-    procedure CloseAll;
-    // Menuを非所有参照として登録し、相互切替、外側クリック、非アクティブ時の自動Closeを接続する。
-    procedure RegisterMenu(Menu: TVectArtDarkPopupMenu);
   end;
 
 implementation
 
 uses
-  System.Math, System.Types, Vcl.Forms, Vcl.Graphics, Winapi.Messages;
+  System.Math, System.Types, Vcl.Forms, Vcl.Graphics;
 
 const
   COLOR_BUTTON = TColor($00222222);
@@ -407,98 +394,6 @@ begin
   if (Sender is TPanel) and
     FSubMenus.TryGetValue(TPanel(Sender), SubMenu) then
     OpenSubMenu(TPanel(Sender), SubMenu);
-end;
-
-{ TVectArtDarkMenuGroup }
-
-procedure TVectArtDarkMenuGroup.ApplicationDeactivate(Sender: TObject);
-begin
-  CloseAll;
-end;
-
-procedure TVectArtDarkMenuGroup.ApplicationMessage(var Msg: TMsg;
-  var Handled: Boolean);
-var
-  Menu: TVectArtDarkPopupMenu;
-  Target: TControl;
-begin
-  if ((Msg.message = WM_KEYDOWN) or (Msg.message = WM_SYSKEYDOWN)) and
-    (Msg.wParam = VK_ESCAPE) then
-  begin
-    if AnyMenuVisible then
-    begin
-      CloseAll;
-      Handled := True;
-    end;
-    Exit;
-  end;
-  if (Msg.message <> WM_LBUTTONDOWN) and
-    (Msg.message <> WM_RBUTTONDOWN) and
-    (Msg.message <> WM_MBUTTONDOWN) and
-    (Msg.message <> WM_NCLBUTTONDOWN) then
-    Exit;
-  Target := FindVCLWindow(Msg.pt);
-  for Menu in FMenus do
-    if Menu.OwnsControl(Target) then
-      Exit;
-  CloseAll;
-end;
-
-function TVectArtDarkMenuGroup.AnyMenuVisible: Boolean;
-var
-  Menu: TVectArtDarkPopupMenu;
-begin
-  for Menu in FMenus do
-    if Menu.Visible then
-      Exit(True);
-  Result := False;
-end;
-
-procedure TVectArtDarkMenuGroup.CloseAll;
-var
-  Menu: TVectArtDarkPopupMenu;
-begin
-  for Menu in FMenus do
-    Menu.Close;
-end;
-
-constructor TVectArtDarkMenuGroup.Create(AOwner: TComponent);
-begin
-  inherited Create(AOwner);
-  FMenus := TList<TVectArtDarkPopupMenu>.Create;
-  FApplicationEvents := TApplicationEvents.Create(Self);
-  FApplicationEvents.OnDeactivate := ApplicationDeactivate;
-  FApplicationEvents.OnMessage := ApplicationMessage;
-end;
-
-destructor TVectArtDarkMenuGroup.Destroy;
-begin
-  FMenus.Free;
-  inherited Destroy;
-end;
-
-procedure TVectArtDarkMenuGroup.MenuHover(Sender: TObject);
-begin
-  if AnyMenuVisible and (Sender is TVectArtDarkPopupMenu) then
-    TVectArtDarkPopupMenu(Sender).Open;
-end;
-
-procedure TVectArtDarkMenuGroup.MenuOpening(Sender: TObject);
-var
-  Menu: TVectArtDarkPopupMenu;
-begin
-  for Menu in FMenus do
-    if Menu <> Sender then
-      Menu.Close;
-end;
-
-procedure TVectArtDarkMenuGroup.RegisterMenu(Menu: TVectArtDarkPopupMenu);
-begin
-  if (Menu = nil) or FMenus.Contains(Menu) then
-    Exit;
-  FMenus.Add(Menu);
-  Menu.OnHover := MenuHover;
-  Menu.OnOpening := MenuOpening;
 end;
 
 end.

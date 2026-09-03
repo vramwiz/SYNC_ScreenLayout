@@ -7,7 +7,8 @@ interface
 uses
   System.Classes, System.SysUtils, Vcl.Controls, Vcl.ExtCtrls, Vcl.Forms,
   Vcl.StdCtrls, Winapi.Messages, Winapi.ShellAPI, Winapi.Windows,
-  ShortcutAction, VectArtDarkPopupMenu, ScreenLayoutContext,
+  ShortcutAction, VectArtDarkMenuGroup, VectArtDarkPopupMenu,
+  ScreenLayoutContext,
   ScreenLayoutDockManager,
   ScreenLayoutDocument,
   ScreenLayoutEditHistory, ScreenLayoutEditorState,
@@ -17,7 +18,7 @@ uses
   ScreenLayoutGroupCommands,
   ScreenLayoutGeometryPropertiesFrame,
   ScreenLayoutObjectPropertiesFrame, ScreenLayoutToolFrames,
-  ScreenLayoutToolPaletteFrame;
+  ScreenLayoutToolPaletteFrame, ScreenLayoutObjectContextMenu;
 
 type
   TMainForm = class(TForm)
@@ -60,8 +61,7 @@ type
     FLayerFrame: TLayerPanelFrame;
     FLineToolbar: TVectArtLineToolbarControl;
     FObjectPropertiesFrame: TObjectPropertiesFrame;
-    FObjectContextMenu: TVectArtDarkPopupMenu;
-    FObjectOrderMenu: TVectArtDarkPopupMenu;
+    FObjectContextMenu: TScreenLayoutObjectContextMenu;
     FSkiaAcquired: Boolean;
     FShortcuts: TShortcutAction;
     FToolPaletteFrame: TToolPaletteFrame;
@@ -75,8 +75,6 @@ type
     procedure ActivateToolShortcut(const Tool: TVectArtEditorTool);
     procedure AttachFrame(AFrame: TFrame; AHost: TWinControl);
     procedure CanvasSettingsRequest(Sender: TObject);
-    procedure CanvasObjectContextMenu(Sender: TObject;
-      const ScreenPoint: TPoint);
     function CreateViewMenuItem(const Caption: string): TPanel;
     procedure DocumentChanged(Sender: TObject);
     procedure FinalizeSkiaRuntime;
@@ -256,23 +254,12 @@ begin
   FMenuGroup := TVectArtDarkMenuGroup.Create(Self);
   FMenuGroup.RegisterMenu(FEditActionsUI.Menu);
   FMenuGroup.RegisterMenu(FViewMenu);
-  // 右クリックメニューは現段階では表示確認用。各項目の処理は後から接続する。
-  FObjectOrderMenu := TVectArtDarkPopupMenu.CreatePopup(Self, Self, 160, 128);
-  FObjectOrderMenu.AddItem('最前面へ', 0, nil);
-  FObjectOrderMenu.AddItem('前面へ', 32, nil);
-  FObjectOrderMenu.AddItem('背面へ', 64, nil);
-  FObjectOrderMenu.AddItem('最背面へ', 96, nil);
-  FObjectContextMenu := TVectArtDarkPopupMenu.CreatePopup(Self, Self,
-    208, 160);
-  FObjectContextMenu.AddItem('切り取り    Ctrl+X', 0, nil);
-  FObjectContextMenu.AddItem('コピー      Ctrl+C', 32, nil);
-  FObjectContextMenu.AddItem('複製        Ctrl+D', 64, nil);
-  FObjectContextMenu.AddSubMenu('重なり順', 96, FObjectOrderMenu);
-  FObjectContextMenu.AddItem('削除        Delete', 128, nil);
-  FMenuGroup.RegisterMenu(FObjectContextMenu);
+  FObjectContextMenu := TScreenLayoutObjectContextMenu.Create(Self, Self,
+    FMenuGroup);
   FEditorFrame := TEditorWorkspaceFrame.Create(Self);
   FEditorFrame.Context := FDesignerContext;
-  FEditorFrame.CanvasControl.OnObjectContextMenu := CanvasObjectContextMenu;
+  FEditorFrame.CanvasControl.OnObjectContextMenu :=
+    FObjectContextMenu.ShowForObject;
   AttachFrame(FEditorFrame, pnlEditorHost);
 
   FDockManager := TVectDockManager.Create(Self, pnlWorkspace,
@@ -328,13 +315,6 @@ begin
     FDocument.SetCanvasSize(CanvasWidth, CanvasHeight);
     EditorStateChanged(FEditorState);
   end;
-end;
-
-procedure TMainForm.CanvasObjectContextMenu(Sender: TObject;
-  const ScreenPoint: TPoint);
-begin
-  if FObjectContextMenu <> nil then
-    FObjectContextMenu.OpenAtScreenPoint(ScreenPoint);
 end;
 
 procedure TMainForm.GeometryPopupDeactivate(Sender: TObject);

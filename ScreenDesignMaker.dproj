@@ -70,12 +70,14 @@
         <DCCReference Include="Lib\TextRenderer\TextRendererSkiaRuntime.pas"/>
         <DCCReference Include="Lib\TextRenderer\TextRendererSkia.pas"/>
         <DCCReference Include="Lib\DarkMenu\VectArtDarkPopupMenu.pas"/>
+        <DCCReference Include="Lib\DarkMenu\VectArtDarkMenuGroup.pas"/>
         <DCCReference Include="Lib\ShortcutAction\ShortcutAction.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutMainForm.pas">
             <Form>MainForm</Form>
         </DCCReference>
+        <DCCReference Include="Source\Shell\ScreenLayoutObjectContextMenu.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutEditActionsUI.pas"/>
         <DCCReference Include="Source\ObjectProperties\ScreenLayoutStrokeStyleCombo.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutLineToolbar.pas"/>
@@ -113,6 +115,7 @@
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJsonWriter.pas"/>
         <DCCReference Include="Source\Editor\ScreenLayoutCanvas.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutCanvasInteraction.pas"/>
+        <DCCReference Include="Source\Editor\Interaction\ScreenLayoutContextMenuInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutFilterInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutGroupInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutTextEditing.pas"/>

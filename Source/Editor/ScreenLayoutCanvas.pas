@@ -133,6 +133,7 @@ implementation
 uses
   System.Math, System.Skia, System.UITypes, Winapi.D2D1, Vcl.Clipbrd,
   ScreenLayoutCanvasGuides, ScreenLayoutCanvasPreview,
+  ScreenLayoutContextMenuInteraction,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
   ScreenLayoutGroupCommands,
   ScreenLayoutLayerGeometry,
@@ -1452,7 +1453,7 @@ var
   SelectionGeometry: TVectArtSelectionGeometry;
   TextLayerIndex: Integer;
   VertexCaptureNeeded: Boolean;
-  ContextObjectFound: Boolean;
+  LogicalPointValid: Boolean;
 begin
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
@@ -1475,30 +1476,11 @@ begin
       Invalidate;
       Exit;
     end;
-    ContextObjectFound := False;
-    if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
-      TryClientPointToLogical(Point(X, Y), LogicalPoint) then
-    begin
-      GroupChild := HitTestGroupChild(FEditorState.OpenGroup, LogicalPoint);
-      if GroupChild <> nil then
-      begin
-        if not FEditorState.IsOpenGroupChildSelected(GroupChild) then
-          FEditorState.OpenGroupChild := GroupChild;
-        FDocument.SetSelectedLayers([]);
-        ContextObjectFound := True;
-      end;
-    end;
-    if not ContextObjectFound then
-    begin
-      LayerIndex := FInteraction.LayerAt(X, Y);
-      if LayerIndex > 0 then
-      begin
-        if not FDocument.IsLayerSelected(LayerIndex) then
-          FDocument.SelectedIndex := LayerIndex;
-        ContextObjectFound := True;
-      end;
-    end;
-    if ContextObjectFound and Assigned(FOnObjectContextMenu) then
+    LogicalPointValid := TryClientPointToLogical(Point(X, Y), LogicalPoint);
+    LayerIndex := FInteraction.LayerAt(X, Y);
+    if SelectScreenLayoutContextMenuTarget(FDocument, FEditorState,
+      LayerIndex, LogicalPoint, LogicalPointValid) and
+      Assigned(FOnObjectContextMenu) then
     begin
       FOnObjectContextMenu(Self, ClientToScreen(Point(X, Y)));
       Invalidate;
