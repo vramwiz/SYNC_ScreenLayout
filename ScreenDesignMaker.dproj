@@ -33,6 +33,7 @@
     <PropertyGroup Condition="'$(Base)'!=''">
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;Vcl;Winapi;$(DCC_Namespace)</DCC_Namespace>
         <DCC_UnitSearchPath>Lib\VerticalScrollBar;Lib\ColorPicker;Source\ObjectProperties;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_DcuOutput>$(MSBuildProjectDirectory)\$(Platform)\$(ProjectName)\$(Config)\DCU</DCC_DcuOutput>
         <SanitizedProjectName>ScreenDesignMaker</SanitizedProjectName>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1)'!=''">
@@ -55,7 +56,7 @@
         <DCC_DebugInformation>0</DCC_DebugInformation>
         <DCC_LocalDebugSymbols>false</DCC_LocalDebugSymbols>
         <DCC_Optimize>true</DCC_Optimize>
-        <ScreenDesignBuildDir>$(MSBuildProjectDirectory)\Win64\ScreenDesignMaker\Release</ScreenDesignBuildDir>
+        <ScreenDesignBuildDir>$(MSBuildProjectDirectory)\$(Platform)\ScreenDesignMaker\Release</ScreenDesignBuildDir>
         <DCC_DcuOutput>$(ScreenDesignBuildDir)\DCU</DCC_DcuOutput>
         <DCC_ExeOutput>$(ScreenDesignBuildDir)</DCC_ExeOutput>
     </PropertyGroup>

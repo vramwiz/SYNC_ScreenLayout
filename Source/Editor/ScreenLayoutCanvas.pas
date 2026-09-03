@@ -15,6 +15,9 @@ uses
   ScreenLayoutShapeCreation, ScreenLayoutRenderer, ScreenLayoutTextEditing;
 
 type
+  TScreenLayoutObjectContextMenuEvent = procedure(Sender: TObject;
+    const ScreenPoint: TPoint) of object;
+
   TVectArtCanvasControl = class(TCustomControl)
   private
     FCanvasBounds: TRect;
@@ -24,6 +27,7 @@ type
     FFilterInteraction: TScreenLayoutFilterInteraction;
     FGroupDrag: TScreenLayoutGroupDrag;
     FInteraction: TVectArtCanvasInteraction;
+    FOnObjectContextMenu: TScreenLayoutObjectContextMenuEvent;
     FReferenceBackground: TBitmap;
     FRenderedDocument: TBitmap;
     FRenderBuffer: TVectArtRenderBuffer;
@@ -114,6 +118,9 @@ type
       write SetEditHistory;
     property EditorState: TVectArtEditorState read FEditorState
       write SetEditorState;
+    // オブジェクト上の未処理右クリックを、画面座標でホストへ通知する。
+    property OnObjectContextMenu: TScreenLayoutObjectContextMenuEvent
+      read FOnObjectContextMenu write FOnObjectContextMenu;
     property Zoom: Single read FZoom;
   end;
 
@@ -1445,6 +1452,7 @@ var
   SelectionGeometry: TVectArtSelectionGeometry;
   TextLayerIndex: Integer;
   VertexCaptureNeeded: Boolean;
+  ContextObjectFound: Boolean;
 begin
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
@@ -1467,6 +1475,40 @@ begin
       Invalidate;
       Exit;
     end;
+    ContextObjectFound := False;
+    if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
+      TryClientPointToLogical(Point(X, Y), LogicalPoint) then
+    begin
+      GroupChild := HitTestGroupChild(FEditorState.OpenGroup, LogicalPoint);
+      if GroupChild <> nil then
+      begin
+        if not FEditorState.IsOpenGroupChildSelected(GroupChild) then
+          FEditorState.OpenGroupChild := GroupChild;
+        FDocument.SetSelectedLayers([]);
+        ContextObjectFound := True;
+      end;
+    end;
+    if not ContextObjectFound then
+    begin
+      LayerIndex := FInteraction.LayerAt(X, Y);
+      if LayerIndex > 0 then
+      begin
+        if not FDocument.IsLayerSelected(LayerIndex) then
+          FDocument.SelectedIndex := LayerIndex;
+        ContextObjectFound := True;
+      end;
+    end;
+    if ContextObjectFound and Assigned(FOnObjectContextMenu) then
+    begin
+      FOnObjectContextMenu(Self, ClientToScreen(Point(X, Y)));
+      Invalidate;
+      Exit;
+    end;
+    inherited MouseDown(Button, Shift, X, Y);
+    Exit;
+  end;
+  if Button = mbMiddle then
+  begin
     FPanning := True;
     FPanStartMouse := Point(X, Y);
     FPanStartOffset := FPanOffset;
@@ -1716,7 +1758,7 @@ begin
   end;
   if FPanning then
   begin
-    if not (ssRight in Shift) then
+    if not (ssMiddle in Shift) then
     begin
       EndPan;
       Exit;
@@ -1843,7 +1885,7 @@ begin
     Invalidate;
     Exit;
   end;
-  if (Button = mbRight) and FPanning then
+  if (Button = mbMiddle) and FPanning then
   begin
     EndPan;
     Exit;

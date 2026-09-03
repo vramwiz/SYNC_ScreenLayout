@@ -38,6 +38,7 @@
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
         <DCC_UnitSearchPath>Lib\VerticalScrollBar;Lib\ColorPicker;Source\ObjectProperties;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_DcuOutput>$(MSBuildProjectDirectory)\$(Platform)\$(ProjectName)\$(Config)\DCU</DCC_DcuOutput>
         <GenDll>true</GenDll>
         <SanitizedProjectName>SYNC_ScreenLayout_Filter</SanitizedProjectName>
     </PropertyGroup>

@@ -36,6 +36,8 @@ type
     procedure ClickAt(const PointValue: TPoint);
     procedure DoubleClickSelected;
     procedure DragCreate(const StartPoint, EndPoint: TPoint);
+    procedure DragWithButton(Button: TMouseButton;
+      const StartPoint, EndPoint: TPoint);
   end;
 
 procedure Check(Condition: Boolean; const MessageText: string);
@@ -57,6 +59,23 @@ begin
   MouseUp(mbLeft, [], EndPoint.X, EndPoint.Y);
 end;
 
+procedure TTestCanvasControl.DragWithButton(Button: TMouseButton;
+  const StartPoint, EndPoint: TPoint);
+var
+  Shift: TShiftState;
+begin
+  case Button of
+    mbLeft: Shift := [ssLeft];
+    mbRight: Shift := [ssRight];
+    mbMiddle: Shift := [ssMiddle];
+  else
+    Shift := [];
+  end;
+  MouseDown(Button, [], StartPoint.X, StartPoint.Y);
+  MouseMove(Shift, EndPoint.X, EndPoint.Y);
+  MouseUp(Button, [], EndPoint.X, EndPoint.Y);
+end;
+
 procedure TTestCanvasControl.ClickAt(const PointValue: TPoint);
 begin
   MouseDown(mbLeft, [], PointValue.X, PointValue.Y);
@@ -71,6 +90,7 @@ end;
 procedure Run;
 var
   CanvasControl: TTestCanvasControl;
+  CanvasBoundsBeforePan: TRect;
   Child: TVectArtRectangleLayer;
   Context: IVectArtDesignerContext;
   Document: TVectArtDocument;
@@ -174,6 +194,15 @@ begin
     Check(SameValue(TScreenLayoutTextLayer(Document[3]).WrapWidth,
       ResizedWrapWidth),
       're-editing text changed the existing wrap width');
+
+    CanvasBoundsBeforePan := CanvasControl.CanvasBounds;
+    CanvasControl.DragWithButton(mbRight, Point(20, 20), Point(40, 45));
+    Check(CanvasControl.CanvasBounds = CanvasBoundsBeforePan,
+      'right-button drag still moved the canvas');
+    CanvasControl.DragWithButton(mbMiddle, Point(20, 20), Point(40, 45));
+    Check((CanvasControl.CanvasBounds.Left = CanvasBoundsBeforePan.Left + 20) and
+      (CanvasControl.CanvasBounds.Top = CanvasBoundsBeforePan.Top + 25),
+      'middle-button drag did not move the canvas');
   finally
     Document.OnChanged := nil;
     PropertiesFrame.Context := nil;
