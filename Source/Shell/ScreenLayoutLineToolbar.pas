@@ -21,8 +21,10 @@ type
     FEditorState: TVectArtEditorState;
     FFontFamilyCombo: TComboBox;
     FFontStyleButtons: array[TFontStyle] of TScreenLayoutTextStyleButton;
-    FLetterSpacingEdit: TEdit;
-    FLineSpacingEdit: TEdit;
+    FTextAlignmentButton: TScreenLayoutTextAlignmentButton;
+    FTextAlignmentButtons: array[TScreenLayoutTextAlignment] of
+      TScreenLayoutTextAlignmentButton;
+    FTextAlignmentPanel: TPanel;
     FMifStrokeStyleCombo: TVectArtMifStrokeStyleCombo;
     FLineCapButtons: array[TVectArtLineCap] of TVectArtLineCapButton;
     FStrokeWidthTrackBar: THorizontalTrackBarControl;
@@ -42,10 +44,10 @@ type
       Shift: TShiftState);
     procedure FontFamilyChanged(Sender: TObject);
     procedure FontStyleClick(Sender: TObject);
-    procedure SpacingEditExit(Sender: TObject);
-    procedure SpacingEditKeyDown(Sender: TObject; var Key: Word;
-      Shift: TShiftState);
+    procedure TextAlignmentClick(Sender: TObject);
+    procedure TextAlignmentPopupClick(Sender: TObject);
     procedure DetailsClick(Sender: TObject);
+    function IsTextAlignmentControl(Control: TControl): Boolean;
     function IsDetailsControl(Control: TControl): Boolean;
     procedure LineCapClick(Sender: TObject);
     function SelectedLineIndices: TArray<Integer>;
@@ -74,6 +76,8 @@ type
     procedure ApplyFontFamily(const Value: string);
     // 選択中の全Textへ1種類の文字装飾を追加または削除する。
     procedure ApplyFontStyle(Style: TFontStyle; Enabled: Boolean);
+    // 選択中の全Textへ枠内配置を適用する。
+    procedure ApplyTextAlignment(Value: TScreenLayoutTextAlignment);
     // 選択中の全Textへ文字サイズ比率の字間または行間を適用する。
     procedure ApplyTextSpacing(IsLetterSpacing: Boolean; Ratio: Single);
     // EditorStateと現在選択から表示値、混在状態、有効状態を再同期する。
@@ -97,8 +101,11 @@ type
     // Text選択時に線幅UIと入れ替えて表示するフォント一覧。
     property FontFamilyCombo: TComboBox read FFontFamilyCombo;
     function FontStyleButton(Style: TFontStyle): TScreenLayoutTextStyleButton;
-    property LetterSpacingEdit: TEdit read FLetterSpacingEdit;
-    property LineSpacingEdit: TEdit read FLineSpacingEdit;
+    property TextAlignmentButton: TScreenLayoutTextAlignmentButton
+      read FTextAlignmentButton;
+    property TextAlignmentPanel: TPanel read FTextAlignmentPanel;
+    function TextAlignmentCell(Value: TScreenLayoutTextAlignment):
+      TScreenLayoutTextAlignmentButton;
     // 線幅の常設UI。所有権はToolbarが保持する。
     property StrokeWidthTrackBar: THorizontalTrackBarControl
       read FStrokeWidthTrackBar;
@@ -120,7 +127,7 @@ const
   STROKE_WIDTH_TRACK_MIN = 10;
   STROKE_WIDTH_TRACK_MAX = 1000;
   LINE_TOOLBAR_WIDTH = 270;
-  TEXT_TOOLBAR_WIDTH = 590;
+  TEXT_TOOLBAR_WIDTH = 420;
 
 function UnicodeText(const CodePoints: array of Word): string;
 var
@@ -204,8 +211,23 @@ end;
 
 procedure TVectArtLineToolbarControl.ApplicationIdle(Sender: TObject;
   var Done: Boolean);
+var
+  ActiveControl: TWinControl;
+  ParentForm: TCustomForm;
 begin
   UpdateDetailsPanelFocus;
+  if (FTextAlignmentPanel = nil) or not FTextAlignmentPanel.Visible then
+    Exit;
+  ParentForm := GetParentForm(Self);
+  if (ParentForm = nil) or (Screen.ActiveForm <> ParentForm) then
+  begin
+    FTextAlignmentPanel.Visible := False;
+    Exit;
+  end;
+  ActiveControl := ParentForm.ActiveControl;
+  if (ActiveControl <> FTextAlignmentButton) and
+    not IsTextAlignmentControl(ActiveControl) then
+    FTextAlignmentPanel.Visible := False;
 end;
 
 procedure TVectArtLineToolbarControl.UpdateDetailsPanelFocus;
@@ -232,6 +254,7 @@ var
   CaptionLabel: TLabel;
   ParentForm: TCustomForm;
   Style: TFontStyle;
+  TextAlignment: TScreenLayoutTextAlignment;
 begin
   FFontFamilyCombo := TComboBox.Create(Self);
   FFontFamilyCombo.Parent := Self;
@@ -259,25 +282,12 @@ begin
   FFontStyleButtons[fsUnderline].Caption := 'U';
   FFontStyleButtons[fsStrikeOut].Caption := 'S';
 
-  FLetterSpacingEdit := TEdit.Create(Self);
-  FLetterSpacingEdit.Parent := Self;
-  FLetterSpacingEdit.Color := COLOR_EDIT;
-  FLetterSpacingEdit.Font.Color := COLOR_TEXT;
-  FLetterSpacingEdit.Font.Name := 'Segoe UI';
-  FLetterSpacingEdit.Font.Height := -12;
-  FLetterSpacingEdit.OnExit := SpacingEditExit;
-  FLetterSpacingEdit.OnKeyDown := SpacingEditKeyDown;
-  FLetterSpacingEdit.Visible := False;
-
-  FLineSpacingEdit := TEdit.Create(Self);
-  FLineSpacingEdit.Parent := Self;
-  FLineSpacingEdit.Color := COLOR_EDIT;
-  FLineSpacingEdit.Font.Color := COLOR_TEXT;
-  FLineSpacingEdit.Font.Name := 'Segoe UI';
-  FLineSpacingEdit.Font.Height := -12;
-  FLineSpacingEdit.OnExit := SpacingEditExit;
-  FLineSpacingEdit.OnKeyDown := SpacingEditKeyDown;
-  FLineSpacingEdit.Visible := False;
+  FTextAlignmentButton := TScreenLayoutTextAlignmentButton.Create(Self);
+  FTextAlignmentButton.Parent := Self;
+  FTextAlignmentButton.OnClick := TextAlignmentPopupClick;
+  FTextAlignmentButton.ShowHint := True;
+  FTextAlignmentButton.Hint := UnicodeText([$914D, $7F6E]);
+  FTextAlignmentButton.Visible := False;
 
   FStrokeWidthTrackBar := THorizontalTrackBarControl.Create(Self);
   FStrokeWidthTrackBar.Parent := Self;
@@ -328,6 +338,29 @@ begin
   FDetailsPanel.ParentBackground := False;
   FDetailsPanel.SetBounds(0, 0, 420, 96);
   FDetailsPanel.Visible := False;
+
+  FTextAlignmentPanel := TPanel.Create(Self);
+  FTextAlignmentPanel.Parent := ParentForm;
+  FTextAlignmentPanel.BevelOuter := bvRaised;
+  FTextAlignmentPanel.Color := COLOR_BACKGROUND;
+  FTextAlignmentPanel.ParentBackground := False;
+  FTextAlignmentPanel.SetBounds(0, 0, 112, 106);
+  FTextAlignmentPanel.Visible := False;
+  for TextAlignment := Low(TScreenLayoutTextAlignment) to
+    High(TScreenLayoutTextAlignment) do
+  begin
+    FTextAlignmentButtons[TextAlignment] :=
+      TScreenLayoutTextAlignmentButton.Create(Self);
+    FTextAlignmentButtons[TextAlignment].Parent := FTextAlignmentPanel;
+    FTextAlignmentButtons[TextAlignment].Alignment := TextAlignment;
+    FTextAlignmentButtons[TextAlignment].SetBounds(
+      5 + (Ord(TextAlignment) mod 3) * 35,
+      5 + (Ord(TextAlignment) div 3) * 32, 32, 29);
+    FTextAlignmentButtons[TextAlignment].OnClick := TextAlignmentClick;
+    // 全体枠フィット中は上下方向の余白がないため、中段の左右配置だけを操作可能にする。
+    FTextAlignmentButtons[TextAlignment].Enabled :=
+      (Ord(TextAlignment) div 3) = 1;
+  end;
 
   // 線幅は即時操作用にツールバーへ残し、低頻度項目だけを詳細へ収容する。
   FMifStrokeStyleCombo.Parent := FDetailsPanel;
@@ -415,6 +448,53 @@ begin
   RefreshState;
 end;
 
+procedure TVectArtLineToolbarControl.ApplyTextAlignment(
+  Value: TScreenLayoutTextAlignment);
+var
+  Command: TVectArtCompoundCommand;
+  I: Integer;
+  Indices: TArray<Integer>;
+  NewData: TScreenLayoutTextData;
+  OldData: TScreenLayoutTextData;
+begin
+  if FUpdating then
+    Exit;
+  Indices := SelectedTextIndices;
+  if (Length(Indices) = 0) or SelectionHasLockedText then
+    Exit;
+  FUpdating := True;
+  try
+    Command := nil;
+    if FEditHistory <> nil then
+      Command := TVectArtCompoundCommand.Create;
+    FDocument.BeginUpdate;
+    try
+      for I := 0 to High(Indices) do
+      begin
+        OldData := CaptureScreenLayoutTextData(
+          TScreenLayoutTextLayer(FDocument[Indices[I]]));
+        if OldData.Alignment = Value then
+          Continue;
+        NewData := OldData;
+        NewData.Alignment := Value;
+        if Command <> nil then
+          Command.Add(TScreenLayoutTextDataCommand.Create(FDocument,
+            Indices[I], OldData, NewData));
+        FDocument.SetTextData(Indices[I], NewData);
+      end;
+    finally
+      FDocument.EndUpdate;
+    end;
+    if (Command <> nil) and (Command.Count > 0) then
+      FEditHistory.AddApplied(Command)
+    else
+      Command.Free;
+  finally
+    FUpdating := False;
+  end;
+  RefreshState;
+end;
+
 procedure TVectArtLineToolbarControl.ApplyTextSpacing(
   IsLetterSpacing: Boolean; Ratio: Single);
 var
@@ -426,7 +506,12 @@ var
 begin
   if FUpdating then
     Exit;
-  Ratio := EnsureRange(Ratio, -0.9, 10.0);
+  if IsLetterSpacing then
+    Ratio := EnsureRange(Ratio, SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
+      SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX)
+  else
+    Ratio := EnsureRange(Ratio, SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN,
+      SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX);
   Indices := SelectedTextIndices;
   if (Length(Indices) = 0) or SelectionHasLockedText then
     Exit;
@@ -779,37 +864,59 @@ begin
   ApplyFontStyle(Button.Style, not Button.Selected);
 end;
 
+procedure TVectArtLineToolbarControl.TextAlignmentClick(Sender: TObject);
+begin
+  if FUpdating or not (Sender is TScreenLayoutTextAlignmentButton) then
+    Exit;
+  ApplyTextAlignment(TScreenLayoutTextAlignmentButton(Sender).Alignment);
+  FTextAlignmentPanel.Visible := False;
+end;
+
+procedure TVectArtLineToolbarControl.TextAlignmentPopupClick(
+  Sender: TObject);
+var
+  Position: TPoint;
+begin
+  if (FTextAlignmentPanel = nil) or
+    (FTextAlignmentPanel.Parent = nil) then
+    Exit;
+  if FTextAlignmentPanel.Visible then
+  begin
+    FTextAlignmentPanel.Visible := False;
+    Exit;
+  end;
+  Position := FTextAlignmentButton.ClientToScreen(Point(
+    FTextAlignmentButton.Width - FTextAlignmentPanel.Width,
+    FTextAlignmentButton.Height + 2));
+  Position := FTextAlignmentPanel.Parent.ScreenToClient(Position);
+  FTextAlignmentPanel.SetBounds(Position.X, Position.Y,
+    FTextAlignmentPanel.Width, FTextAlignmentPanel.Height);
+  FTextAlignmentPanel.BringToFront;
+  FTextAlignmentPanel.Visible := True;
+end;
+
+function TVectArtLineToolbarControl.IsTextAlignmentControl(
+  Control: TControl): Boolean;
+begin
+  Result := False;
+  while Control <> nil do
+  begin
+    if Control = FTextAlignmentPanel then
+      Exit(True);
+    Control := Control.Parent;
+  end;
+end;
+
 function TVectArtLineToolbarControl.FontStyleButton(
   Style: TFontStyle): TScreenLayoutTextStyleButton;
 begin
   Result := FFontStyleButtons[Style];
 end;
 
-procedure TVectArtLineToolbarControl.SpacingEditExit(Sender: TObject);
-var
-  Value: Single;
+function TVectArtLineToolbarControl.TextAlignmentCell(
+  Value: TScreenLayoutTextAlignment): TScreenLayoutTextAlignmentButton;
 begin
-  if FUpdating or not (Sender is TEdit) then
-    Exit;
-  if TryStrToFloat(Trim(TEdit(Sender).Text), Value) then
-    ApplyTextSpacing(Sender = FLetterSpacingEdit, Value / 100)
-  else
-    RefreshState;
-end;
-
-procedure TVectArtLineToolbarControl.SpacingEditKeyDown(Sender: TObject;
-  var Key: Word; Shift: TShiftState);
-begin
-  if Key = VK_RETURN then
-  begin
-    SpacingEditExit(Sender);
-    Key := 0;
-  end
-  else if Key = VK_ESCAPE then
-  begin
-    RefreshState;
-    Key := 0;
-  end;
+  Result := FTextAlignmentButtons[Value];
 end;
 
 procedure TVectArtLineToolbarControl.DetailsClick(Sender: TObject);
@@ -865,24 +972,18 @@ begin
   Canvas.Font.Height := -12;
   Canvas.Font.Color := COLOR_TEXT;
   if (FFontFamilyCombo <> nil) and FFontFamilyCombo.Visible then
-  begin
-    Canvas.TextOut(8, 13, UnicodeText([$30D5, $30A9, $30F3, $30C8]));
-    Canvas.Font.Color := COLOR_LABEL;
-    Canvas.TextOut(378, 13, UnicodeText([$5B57, $9593]));
-    Canvas.TextOut(466, 13, UnicodeText([$884C, $9593]));
-    Canvas.TextOut(458, 13, '%');
-    Canvas.TextOut(546, 13, '%');
-  end
+    Canvas.TextOut(8, 13, UnicodeText([$30D5, $30A9, $30F3, $30C8]))
   else
     Canvas.TextOut(8, 13, UnicodeText([$592A, $3055]));
 end;
 
 procedure TVectArtLineToolbarControl.RefreshState;
 var
+  Alignment: TScreenLayoutTextAlignment;
+  AlignmentValue: TScreenLayoutTextAlignment;
   Color: TColor;
+  CommonAlignment: Boolean;
   CommonFontFamily: Boolean;
-  CommonLetterSpacing: Boolean;
-  CommonLineSpacing: Boolean;
   CommonStyle: Boolean;
   CommonLineCap: Boolean;
   CommonWidth: Boolean;
@@ -900,8 +1001,6 @@ var
   Style: TFontStyle;
   TextIndices: TArray<Integer>;
   FontFamilyValue: string;
-  LetterSpacingValue: Single;
-  LineSpacingValue: Single;
   WidthValue: Single;
 begin
   if FUpdating then
@@ -918,29 +1017,16 @@ begin
       FStrokeWidthEdit.Visible := False;
       FStrokeWidthTrackBar.Visible := False;
       FDetailsButton.Visible := False;
-      FLetterSpacingEdit.Visible := True;
-      FLineSpacingEdit.Visible := True;
+      FTextAlignmentButton.Visible := True;
       for Style := Low(TFontStyle) to High(TFontStyle) do
         FFontStyleButtons[Style].Visible := True;
       FontFamilyValue := TScreenLayoutTextLayer(
         FDocument[TextIndices[0]]).FontFamily;
-      LetterSpacingValue := TScreenLayoutTextLayer(
-        FDocument[TextIndices[0]]).LetterSpacingRatio;
-      LineSpacingValue := TScreenLayoutTextLayer(
-        FDocument[TextIndices[0]]).LineSpacingRatio;
       CommonFontFamily := True;
-      CommonLetterSpacing := True;
-      CommonLineSpacing := True;
       for I := 1 to High(TextIndices) do
       begin
         CommonFontFamily := CommonFontFamily and SameText(FontFamilyValue,
           TScreenLayoutTextLayer(FDocument[TextIndices[I]]).FontFamily);
-        CommonLetterSpacing := CommonLetterSpacing and SameValue(
-          LetterSpacingValue, TScreenLayoutTextLayer(
-            FDocument[TextIndices[I]]).LetterSpacingRatio);
-        CommonLineSpacing := CommonLineSpacing and SameValue(
-          LineSpacingValue, TScreenLayoutTextLayer(
-            FDocument[TextIndices[I]]).LineSpacingRatio);
       end;
       if CommonFontFamily then
         FFontFamilyCombo.ItemIndex :=
@@ -948,17 +1034,26 @@ begin
       else
         FFontFamilyCombo.ItemIndex := -1;
       FFontFamilyCombo.Enabled := not SelectionHasLockedText;
-      if CommonLetterSpacing then
-        FLetterSpacingEdit.Text := FormatFloat('0.##',
-          LetterSpacingValue * 100)
-      else
-        FLetterSpacingEdit.Text := '';
-      if CommonLineSpacing then
-        FLineSpacingEdit.Text := FormatFloat('0.##', LineSpacingValue * 100)
-      else
-        FLineSpacingEdit.Text := '';
-      FLetterSpacingEdit.Enabled := not SelectionHasLockedText;
-      FLineSpacingEdit.Enabled := not SelectionHasLockedText;
+      AlignmentValue := TScreenLayoutTextLayer(
+        FDocument[TextIndices[0]]).Alignment;
+      CommonAlignment := True;
+      for I := 1 to High(TextIndices) do
+        CommonAlignment := CommonAlignment and
+          (AlignmentValue = TScreenLayoutTextLayer(
+            FDocument[TextIndices[I]]).Alignment);
+      FTextAlignmentButton.Enabled := not SelectionHasLockedText;
+      FTextAlignmentButton.Mixed := not CommonAlignment;
+      if CommonAlignment then
+        FTextAlignmentButton.Alignment := AlignmentValue;
+      for Alignment := Low(TScreenLayoutTextAlignment) to
+        High(TScreenLayoutTextAlignment) do
+      begin
+        FTextAlignmentButtons[Alignment].Enabled :=
+          (not SelectionHasLockedText) and
+          ((Ord(Alignment) div 3) = 1);
+        FTextAlignmentButtons[Alignment].Selected := CommonAlignment and
+          (Alignment = AlignmentValue);
+      end;
       for Style := Low(TFontStyle) to High(TFontStyle) do
       begin
         FFontStyleButtons[Style].Selected := True;
@@ -974,8 +1069,8 @@ begin
     begin
       Width := LINE_TOOLBAR_WIDTH;
       FFontFamilyCombo.Visible := False;
-      FLetterSpacingEdit.Visible := False;
-      FLineSpacingEdit.Visible := False;
+      FTextAlignmentButton.Visible := False;
+      FTextAlignmentPanel.Visible := False;
       for Style := Low(TFontStyle) to High(TFontStyle) do
         FFontStyleButtons[Style].Visible := False;
       FStrokeWidthEdit.Visible := True;
@@ -1078,10 +1173,8 @@ begin
     if FFontStyleButtons[Style] <> nil then
       FFontStyleButtons[Style].SetBounds(StyleLeft + Ord(Style) * 32,
         6, 28, 29);
-  if FLetterSpacingEdit <> nil then
-    FLetterSpacingEdit.SetBounds(408, 8, 46, 25);
-  if FLineSpacingEdit <> nil then
-    FLineSpacingEdit.SetBounds(496, 8, 46, 25);
+  if FTextAlignmentButton <> nil then
+    FTextAlignmentButton.SetBounds(374, 6, 34, 29);
   TrackWidth := Max(Width - 176, 60);
   if FStrokeWidthTrackBar <> nil then
     FStrokeWidthTrackBar.SetBounds(40, 4, TrackWidth, 34);

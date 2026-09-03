@@ -19,6 +19,24 @@ const
   DOCUMENT_FORMAT_VERSION = 15;
   DOCUMENT_COORDINATE_ORIGIN = 'center';
 
+function TextAlignmentName(Value: TScreenLayoutTextAlignment): string;
+const
+  NAMES: array[TScreenLayoutTextAlignment] of string = ('topLeft',
+    'topCenter', 'topRight', 'middleLeft', 'middleCenter', 'middleRight',
+    'bottomLeft', 'bottomCenter', 'bottomRight');
+begin
+  Result := NAMES[Value];
+end;
+
+function TextTransformModeName(
+  Value: TScreenLayoutTextTransformMode): string;
+const
+  NAMES: array[TScreenLayoutTextTransformMode] of string =
+    ('uniformScale', 'frameFit');
+begin
+  Result := NAMES[Value];
+end;
+
 procedure AddLayerFilters(Layer: TVectArtLayer; LayerJson: TJSONObject);
 var
   Blur: TScreenLayoutBlurFilter;
@@ -203,6 +221,8 @@ begin
         TextJson.AddPair('text', TextLayer.Text);
         TextJson.AddPair('fontFamily', TextLayer.FontFamily);
         TextJson.AddPair('fontSize', TJSONNumber.Create(TextLayer.FontSize));
+        TextJson.AddPair('alignment',
+          TextAlignmentName(TextLayer.Alignment));
         TextJson.AddPair('bold',
           TJSONBool.Create(fsBold in TextLayer.FontStyle));
         TextJson.AddPair('italic',
@@ -215,6 +235,8 @@ begin
           TJSONNumber.Create(TextLayer.LetterSpacingRatio));
         TextJson.AddPair('lineSpacingRatio',
           TJSONNumber.Create(TextLayer.LineSpacingRatio));
+        TextJson.AddPair('transformMode',
+          TextTransformModeName(TextLayer.TransformMode));
         TextJson.AddPair('wrapWidth', TJSONNumber.Create(TextLayer.WrapWidth));
         TextJson.AddPair('left', TJSONNumber.Create(TextLayer.Bounds.Left));
         TextJson.AddPair('top', TJSONNumber.Create(TextLayer.Bounds.Top));

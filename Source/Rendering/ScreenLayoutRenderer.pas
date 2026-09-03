@@ -619,6 +619,7 @@ var
   TextDecorationPaint: ISkPaint;
   TextLayout: TScreenLayoutTextLayout;
   TextWidth: Single;
+  TextX: Single;
   LetterSpacing: Single;
 
 begin
@@ -740,21 +741,27 @@ begin
           TextLayer.Bounds.Height / TextLayout.Height);
         for J := 0 to High(TextLayout.Lines) do
         begin
-          DrawScreenLayoutTextLine(Canvas, TextLayout.Lines[J], Font, Paint,
-            0, TextLayout.Ascent + J * TextLayout.LineHeight,
-            LetterSpacing);
           TextWidth := MeasureScreenLayoutText(TextLayout.Lines[J], Font,
             LetterSpacing);
+          case Ord(TextLayer.Alignment) mod 3 of
+            1: TextX := (TextLayout.Width - TextWidth) * 0.5;
+            2: TextX := TextLayout.Width - TextWidth;
+          else
+            TextX := 0;
+          end;
+          DrawScreenLayoutTextLine(Canvas, TextLayout.Lines[J], Font, Paint,
+            TextX, TextLayout.Ascent + J * TextLayout.LineHeight,
+            LetterSpacing);
           if (TextWidth > 0) and (fsUnderline in TextLayer.FontStyle) then
-            Canvas.DrawLine(TPointF.Create(0, TextLayout.Ascent +
+            Canvas.DrawLine(TPointF.Create(TextX, TextLayout.Ascent +
               J * TextLayout.LineHeight + TextLayer.FontSize * 0.08),
-              TPointF.Create(TextWidth, TextLayout.Ascent +
+              TPointF.Create(TextX + TextWidth, TextLayout.Ascent +
               J * TextLayout.LineHeight + TextLayer.FontSize * 0.08),
               TextDecorationPaint);
           if (TextWidth > 0) and (fsStrikeOut in TextLayer.FontStyle) then
-            Canvas.DrawLine(TPointF.Create(0, TextLayout.Ascent +
+            Canvas.DrawLine(TPointF.Create(TextX, TextLayout.Ascent +
               J * TextLayout.LineHeight - TextLayer.FontSize * 0.3),
-              TPointF.Create(TextWidth, TextLayout.Ascent +
+              TPointF.Create(TextX + TextWidth, TextLayout.Ascent +
               J * TextLayout.LineHeight - TextLayer.FontSize * 0.3),
               TextDecorationPaint);
         end;

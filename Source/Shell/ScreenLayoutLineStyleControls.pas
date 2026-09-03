@@ -55,10 +55,27 @@ type
     property Font;
   end;
 
+  TScreenLayoutTextAlignmentButton = class(TVectArtDarkButton)
+  private
+    FAlignment: TScreenLayoutTextAlignment;
+    FMixed: Boolean;
+    FSelected: Boolean;
+    procedure SetAlignment(Value: TScreenLayoutTextAlignment);
+    procedure SetMixed(Value: Boolean);
+    procedure SetSelected(Value: Boolean);
+  protected
+    procedure Paint; override;
+  public
+    property Alignment: TScreenLayoutTextAlignment read FAlignment
+      write SetAlignment;
+    property Mixed: Boolean read FMixed write SetMixed;
+    property Selected: Boolean read FSelected write SetSelected;
+  end;
+
 implementation
 
 uses
-  System.Types, Winapi.Windows;
+  System.Types, System.UITypes, Winapi.Windows;
 
 const
   COLOR_BUTTON = TColor($00383838);
@@ -289,6 +306,95 @@ begin
 end;
 
 procedure TScreenLayoutTextStyleButton.SetSelected(Value: Boolean);
+begin
+  if FSelected = Value then
+    Exit;
+  FSelected := Value;
+  Invalidate;
+end;
+
+{ TScreenLayoutTextAlignmentButton }
+
+procedure TScreenLayoutTextAlignmentButton.Paint;
+const
+  LINE_LENGTHS: array[0..2] of Integer = (16, 11, 14);
+var
+  BackgroundColor: TColor;
+  Bounds: TRect;
+  Column: Integer;
+  I: Integer;
+  LeftValue: Integer;
+  Row: Integer;
+  TopValue: Integer;
+begin
+  inherited Paint;
+  Bounds := ClientRect;
+  Dec(Bounds.Right);
+  Dec(Bounds.Bottom);
+  if FSelected then
+  begin
+    if Enabled then
+      BackgroundColor := COLOR_BUTTON_SELECTED
+    else
+      BackgroundColor := COLOR_BUTTON_DISABLED;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := BackgroundColor;
+    Canvas.Pen.Color := COLOR_BUTTON_SELECTED_BORDER;
+    Canvas.Rectangle(Bounds);
+  end;
+  Canvas.Pen.Style := psSolid;
+  if Enabled then
+    Canvas.Pen.Color := COLOR_TEXT
+  else
+    Canvas.Pen.Color := COLOR_BUTTON_BORDER;
+  if FMixed then
+  begin
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := Canvas.Pen.Color;
+    for I := 0 to 2 do
+      Canvas.Ellipse(Width div 2 - 1, Height div 2 - 5 + I * 4,
+        Width div 2 + 2, Height div 2 - 2 + I * 4);
+    Exit;
+  end;
+  Column := Ord(FAlignment) mod 3;
+  Row := Ord(FAlignment) div 3;
+  case Row of
+    0: TopValue := 6;
+    2: TopValue := Height - 13;
+  else
+    TopValue := (Height - 7) div 2;
+  end;
+  for I := 0 to 2 do
+  begin
+    case Column of
+      0: LeftValue := 6;
+      2: LeftValue := Width - 6 - LINE_LENGTHS[I];
+    else
+      LeftValue := (Width - LINE_LENGTHS[I]) div 2;
+    end;
+    Canvas.MoveTo(LeftValue, TopValue + I * 3);
+    Canvas.LineTo(LeftValue + LINE_LENGTHS[I], TopValue + I * 3);
+  end;
+end;
+
+procedure TScreenLayoutTextAlignmentButton.SetAlignment(
+  Value: TScreenLayoutTextAlignment);
+begin
+  if FAlignment = Value then
+    Exit;
+  FAlignment := Value;
+  Invalidate;
+end;
+
+procedure TScreenLayoutTextAlignmentButton.SetMixed(Value: Boolean);
+begin
+  if FMixed = Value then
+    Exit;
+  FMixed := Value;
+  Invalidate;
+end;
+
+procedure TScreenLayoutTextAlignmentButton.SetSelected(Value: Boolean);
 begin
   if FSelected = Value then
     Exit;

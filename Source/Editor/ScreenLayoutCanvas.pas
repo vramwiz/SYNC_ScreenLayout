@@ -73,6 +73,7 @@ type
     procedure DrawTextEditingOverlayDirect2D(ACanvas: TDirect2DCanvas);
     procedure FinishTextEdit(Cancel: Boolean;
       RestoreCanvasFocus: Boolean = True);
+    procedure FinishTextEditAndSelect(RestoreCanvasFocus: Boolean);
     procedure TextEditorCommittedText(Sender: TObject; const Text: string);
     procedure TextEditorComposition(Sender: TObject; const Text: string;
       CursorPosition: Integer; Active: Boolean);
@@ -123,7 +124,7 @@ const
 implementation
 
 uses
-  System.Math, System.Skia, Winapi.D2D1, Vcl.Clipbrd,
+  System.Math, System.Skia, System.UITypes, Winapi.D2D1, Vcl.Clipbrd,
   ScreenLayoutCanvasGuides, ScreenLayoutCanvasPreview,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
   ScreenLayoutGroupCommands,
@@ -169,6 +170,167 @@ begin
   AlphaBlend(Target.Handle, Bounds.Left, Bounds.Top,
     Bounds.Width, Bounds.Height, Bitmap.Canvas.Handle,
     0, 0, Bitmap.Width, Bitmap.Height, Blend);
+end;
+
+procedure BidirectionalArrowHeadPoints(const ArrowStart, ArrowEnd: TPoint;
+  out StartHeadA, StartHeadB, EndHeadA, EndHeadB: TPoint);
+const
+  HEAD_LENGTH = 8.0;
+  HEAD_HALF_WIDTH = 6.0;
+var
+  AxisLength: Single;
+  AxisX: Single;
+  AxisY: Single;
+  PerpendicularX: Single;
+  PerpendicularY: Single;
+begin
+  AxisX := ArrowEnd.X - ArrowStart.X;
+  AxisY := ArrowEnd.Y - ArrowStart.Y;
+  AxisLength := Hypot(AxisX, AxisY);
+  if AxisLength <= 0 then
+  begin
+    StartHeadA := ArrowStart;
+    StartHeadB := ArrowStart;
+    EndHeadA := ArrowEnd;
+    EndHeadB := ArrowEnd;
+    Exit;
+  end;
+  AxisX := AxisX / AxisLength;
+  AxisY := AxisY / AxisLength;
+  PerpendicularX := -AxisY;
+  PerpendicularY := AxisX;
+  StartHeadA := Point(
+    Round(ArrowStart.X + AxisX * HEAD_LENGTH +
+      PerpendicularX * HEAD_HALF_WIDTH),
+    Round(ArrowStart.Y + AxisY * HEAD_LENGTH +
+      PerpendicularY * HEAD_HALF_WIDTH));
+  StartHeadB := Point(
+    Round(ArrowStart.X + AxisX * HEAD_LENGTH -
+      PerpendicularX * HEAD_HALF_WIDTH),
+    Round(ArrowStart.Y + AxisY * HEAD_LENGTH -
+      PerpendicularY * HEAD_HALF_WIDTH));
+  EndHeadA := Point(
+    Round(ArrowEnd.X - AxisX * HEAD_LENGTH +
+      PerpendicularX * HEAD_HALF_WIDTH),
+    Round(ArrowEnd.Y - AxisY * HEAD_LENGTH +
+      PerpendicularY * HEAD_HALF_WIDTH));
+  EndHeadB := Point(
+    Round(ArrowEnd.X - AxisX * HEAD_LENGTH -
+      PerpendicularX * HEAD_HALF_WIDTH),
+    Round(ArrowEnd.Y - AxisY * HEAD_LENGTH -
+      PerpendicularY * HEAD_HALF_WIDTH));
+end;
+
+procedure DrawBidirectionalArrow(Target: TCanvas;
+  const ArrowStart, ArrowEnd: TPoint); overload;
+var
+  EndTriangle: array[0..2] of TPoint;
+  EndHeadA: TPoint;
+  EndHeadB: TPoint;
+  OldBrushColor: TColor;
+  OldBrushStyle: TBrushStyle;
+  OldPenColor: TColor;
+  OldPenStyle: TPenStyle;
+  OldPenWidth: Integer;
+  StartTriangle: array[0..2] of TPoint;
+  StartHeadA: TPoint;
+  StartHeadB: TPoint;
+begin
+  BidirectionalArrowHeadPoints(ArrowStart, ArrowEnd, StartHeadA,
+    StartHeadB, EndHeadA, EndHeadB);
+  OldPenColor := Target.Pen.Color;
+  OldPenStyle := Target.Pen.Style;
+  OldPenWidth := Target.Pen.Width;
+  OldBrushColor := Target.Brush.Color;
+  OldBrushStyle := Target.Brush.Style;
+  Target.Pen.Style := psSolid;
+  Target.Pen.Color := clWhite;
+  Target.Pen.Width := 5;
+  Target.MoveTo(ArrowStart.X, ArrowStart.Y);
+  Target.LineTo(ArrowEnd.X, ArrowEnd.Y);
+  Target.Pen.Color := clBlack;
+  Target.Pen.Width := 2;
+  Target.MoveTo(ArrowStart.X, ArrowStart.Y);
+  Target.LineTo(ArrowEnd.X, ArrowEnd.Y);
+  StartTriangle[0] := ArrowStart;
+  StartTriangle[1] := StartHeadA;
+  StartTriangle[2] := StartHeadB;
+  EndTriangle[0] := ArrowEnd;
+  EndTriangle[1] := EndHeadA;
+  EndTriangle[2] := EndHeadB;
+  Target.Brush.Style := bsSolid;
+  Target.Brush.Color := clBlack;
+  Target.Pen.Color := clWhite;
+  Target.Pen.Width := 2;
+  Target.Polygon(StartTriangle);
+  Target.Polygon(EndTriangle);
+  Target.Pen.Color := OldPenColor;
+  Target.Pen.Style := OldPenStyle;
+  Target.Pen.Width := OldPenWidth;
+  Target.Brush.Color := OldBrushColor;
+  Target.Brush.Style := OldBrushStyle;
+end;
+
+procedure DrawBidirectionalArrow(Target: TDirect2DCanvas;
+  const ArrowStart, ArrowEnd: TPoint); overload;
+var
+  EndTriangle: array[0..2] of TPoint;
+  EndHeadA: TPoint;
+  EndHeadB: TPoint;
+  OldBrushColor: TColor;
+  OldBrushStyle: TBrushStyle;
+  OldPenColor: TColor;
+  OldPenStyle: TPenStyle;
+  OldPenWidth: Integer;
+  StartTriangle: array[0..2] of TPoint;
+  StartHeadA: TPoint;
+  StartHeadB: TPoint;
+begin
+  BidirectionalArrowHeadPoints(ArrowStart, ArrowEnd, StartHeadA,
+    StartHeadB, EndHeadA, EndHeadB);
+  OldPenColor := Target.Pen.Color;
+  OldPenStyle := Target.Pen.Style;
+  OldPenWidth := Target.Pen.Width;
+  OldBrushColor := Target.Brush.Color;
+  OldBrushStyle := Target.Brush.Style;
+  Target.Pen.Style := psSolid;
+  Target.Pen.Color := clWhite;
+  Target.Pen.Width := 5;
+  Target.MoveTo(ArrowStart.X, ArrowStart.Y);
+  Target.LineTo(ArrowEnd.X, ArrowEnd.Y);
+  Target.Pen.Color := clBlack;
+  Target.Pen.Width := 2;
+  Target.MoveTo(ArrowStart.X, ArrowStart.Y);
+  Target.LineTo(ArrowEnd.X, ArrowEnd.Y);
+  StartTriangle[0] := ArrowStart;
+  StartTriangle[1] := StartHeadA;
+  StartTriangle[2] := StartHeadB;
+  EndTriangle[0] := ArrowEnd;
+  EndTriangle[1] := EndHeadA;
+  EndTriangle[2] := EndHeadB;
+  Target.Brush.Style := bsSolid;
+  Target.Brush.Color := clBlack;
+  Target.Pen.Color := clWhite;
+  Target.Pen.Width := 2;
+  Target.Polygon(StartTriangle);
+  Target.Polygon(EndTriangle);
+  Target.Pen.Color := OldPenColor;
+  Target.Pen.Style := OldPenStyle;
+  Target.Pen.Width := OldPenWidth;
+  Target.Brush.Color := OldBrushColor;
+  Target.Brush.Style := OldBrushStyle;
+end;
+
+function HorizontalTextAlignmentOffset(
+  Alignment: TScreenLayoutTextAlignment; LayoutWidth,
+  LineWidth: Single): Single;
+begin
+  case Ord(Alignment) mod 3 of
+    1: Result := (LayoutWidth - LineWidth) * 0.5;
+    2: Result := LayoutWidth - LineWidth;
+  else
+    Result := 0;
+  end;
 end;
 
 constructor TVectArtCanvasControl.Create(AOwner: TComponent);
@@ -342,7 +504,10 @@ var
   GuideRect: TRect;
   I: Integer;
   Layer: TScreenLayoutTextLayer;
+  Layout: TScreenLayoutTextLayout;
   LineHeight: Single;
+  LineOffset: Single;
+  LineWidth: Single;
   PrefixText: string;
   SelectedText: string;
   SelectionEnd: Integer;
@@ -367,6 +532,9 @@ begin
       CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
         Layer.FontFamily, Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
         Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
+      Layout := BuildScreenLayoutTextLayout(FTextBuffer, Layer.FontFamily,
+        Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
+        Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
       ACanvas.Font.Name := Layer.FontFamily;
       ACanvas.Font.Height := -Max(Round(Layer.FontSize * FZoom), 1);
       ACanvas.Font.Style := Layer.FontStyle;
@@ -381,11 +549,17 @@ begin
           SpanStart - CaretLines[I].StartIndex);
         SelectedText := Copy(FTextBuffer, SpanStart + 1,
           SpanEnd - SpanStart);
+        LineWidth := MeasureScreenLayoutText(CaretLines[I].Text, Font,
+          Layer.FontSize * Layer.LetterSpacingRatio);
+        LineOffset := HorizontalTextAlignmentOffset(Layer.Alignment,
+          Layout.Width, LineWidth);
         SelectionRect := Rect(
-          ToScreenX(FTextGuideBounds.Left + MeasureScreenLayoutText(
+          ToScreenX(FTextGuideBounds.Left + LineOffset +
+            MeasureScreenLayoutText(
             PrefixText, Font, Layer.FontSize * Layer.LetterSpacingRatio)),
           ToScreenY(FTextGuideBounds.Top + I * LineHeight),
-          ToScreenX(FTextGuideBounds.Left + MeasureScreenLayoutText(
+          ToScreenX(FTextGuideBounds.Left + LineOffset +
+            MeasureScreenLayoutText(
             PrefixText + SelectedText, Font,
             Layer.FontSize * Layer.LetterSpacingRatio)),
           ToScreenY(FTextGuideBounds.Top + (I + 1) * LineHeight));
@@ -421,7 +595,10 @@ var
   GuideRect: TRect;
   I: Integer;
   Layer: TScreenLayoutTextLayer;
+  Layout: TScreenLayoutTextLayout;
   LineHeight: Single;
+  LineOffset: Single;
+  LineWidth: Single;
   PrefixText: string;
   SelectedText: string;
   SelectionEnd: Integer;
@@ -446,6 +623,9 @@ begin
       CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
         Layer.FontFamily, Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
         Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
+      Layout := BuildScreenLayoutTextLayout(FTextBuffer, Layer.FontFamily,
+        Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
+        Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
       ACanvas.Font.Name := Layer.FontFamily;
       ACanvas.Font.Height := -Max(Round(Layer.FontSize * FZoom), 1);
       ACanvas.Font.Style := Layer.FontStyle;
@@ -460,11 +640,17 @@ begin
           SpanStart - CaretLines[I].StartIndex);
         SelectedText := Copy(FTextBuffer, SpanStart + 1,
           SpanEnd - SpanStart);
+        LineWidth := MeasureScreenLayoutText(CaretLines[I].Text, Font,
+          Layer.FontSize * Layer.LetterSpacingRatio);
+        LineOffset := HorizontalTextAlignmentOffset(Layer.Alignment,
+          Layout.Width, LineWidth);
         SelectionRect := Rect(
-          ToScreenX(FTextGuideBounds.Left + MeasureScreenLayoutText(
+          ToScreenX(FTextGuideBounds.Left + LineOffset +
+            MeasureScreenLayoutText(
             PrefixText, Font, Layer.FontSize * Layer.LetterSpacingRatio)),
           ToScreenY(FTextGuideBounds.Top + I * LineHeight),
-          ToScreenX(FTextGuideBounds.Left + MeasureScreenLayoutText(
+          ToScreenX(FTextGuideBounds.Left + LineOffset +
+            MeasureScreenLayoutText(
             PrefixText + SelectedText, Font,
             Layer.FontSize * Layer.LetterSpacingRatio)),
           ToScreenY(FTextGuideBounds.Top + (I + 1) * LineHeight));
@@ -563,6 +749,17 @@ begin
   end;
 end;
 
+procedure TVectArtCanvasControl.FinishTextEditAndSelect(
+  RestoreCanvasFocus: Boolean);
+begin
+  if not FTextEditing then
+    Exit;
+  FinishTextEdit(False, RestoreCanvasFocus);
+  if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetText) then
+    FEditorState.CurrentTool := vetSelect;
+end;
+
 procedure TVectArtCanvasControl.TextEditorCommittedText(Sender: TObject;
   const Text: string);
 begin
@@ -598,7 +795,7 @@ end;
 procedure TVectArtCanvasControl.TextEditorExit(Sender: TObject);
 begin
   if FTextEditing and not FTextEnding then
-    FinishTextEdit(False);
+    FinishTextEditAndSelect(False);
 end;
 
 procedure TVectArtCanvasControl.MoveTextCaretVertical(Direction: Integer;
@@ -646,12 +843,17 @@ procedure TVectArtCanvasControl.SetTextCaretFromClientPoint(X, Y: Integer;
   ExtendSelection: Boolean);
 var
   Center: TPointF;
+  Font: ISkFont;
   Layout: TScreenLayoutTextLayout;
   Layer: TScreenLayoutTextLayer;
+  LineIndex: Integer;
+  LineWidth: Single;
   LocalPoint: TPointF;
   LogicalPoint: TPointF;
   ScaleX: Single;
   ScaleY: Single;
+  TargetX: Single;
+  TargetY: Single;
 begin
   if not FTextEditing or (FDocument = nil) or
     (FTextLayerIndex <= 0) or (FTextLayerIndex >= FDocument.LayerCount) or
@@ -672,10 +874,21 @@ begin
     Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
   ScaleX := Layer.Bounds.Width / Max(Layout.Width, 1.0);
   ScaleY := Layer.Bounds.Height / Max(Layout.Height, Layer.FontSize);
+  TargetX := (LocalPoint.X - Layer.Bounds.Left) /
+    Max(ScaleX, 0.0001);
+  TargetY := (LocalPoint.Y - Layer.Bounds.Top) /
+    Max(ScaleY, 0.0001);
+  LineIndex := EnsureRange(Floor(TargetY /
+    Max(Layout.LineHeight, 1.0)), 0, High(Layout.Lines));
+  Font := CreateScreenLayoutTextFont(Layer.FontFamily, Layer.FontSize,
+    Layer.FontStyle);
+  LineWidth := MeasureScreenLayoutText(Layout.Lines[LineIndex], Font,
+    Layer.FontSize * Layer.LetterSpacingRatio);
+  TargetX := TargetX - HorizontalTextAlignmentOffset(Layer.Alignment,
+    Layout.Width, LineWidth);
   FTextCaretIndex := ScreenLayoutTextCaretIndexAtPoint(FTextBuffer,
     Layer.FontFamily, Layer.FontSize, Layer.WrapWidth,
-    (LocalPoint.X - Layer.Bounds.Left) / Max(ScaleX, 0.0001),
-    (LocalPoint.Y - Layer.Bounds.Top) / Max(ScaleY, 0.0001),
+    TargetX, TargetY,
     Layer.FontStyle, Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
   if not ExtendSelection then
     FTextSelectionAnchor := FTextCaretIndex;
@@ -964,6 +1177,7 @@ var
   FullLayout: TScreenLayoutTextLayout;
   LastLine: Integer;
   Layer: TScreenLayoutTextLayer;
+  LineWidth: Single;
   Prefix: string;
   ScaleX: Single;
   ScaleY: Single;
@@ -991,10 +1205,18 @@ begin
   CaretPoint := TPointF.Create(Layer.Bounds.Left,
     Layer.Bounds.Top + LastLine * CaretLayout.LineHeight * ScaleY);
   if Length(CaretLayout.Lines) > 0 then
-    CaretPoint.X := CaretPoint.X + MeasureScreenLayoutText(
-      CaretLayout.Lines[LastLine], CreateScreenLayoutTextFont(
+  begin
+    LineWidth := MeasureScreenLayoutText(FullLayout.Lines[
+      Min(LastLine, High(FullLayout.Lines))], CreateScreenLayoutTextFont(
         Layer.FontFamily, Layer.FontSize, Layer.FontStyle),
-      Layer.FontSize * Layer.LetterSpacingRatio) * ScaleX;
+      Layer.FontSize * Layer.LetterSpacingRatio);
+    CaretPoint.X := CaretPoint.X +
+      HorizontalTextAlignmentOffset(Layer.Alignment, FullLayout.Width,
+        LineWidth) * ScaleX + MeasureScreenLayoutText(
+          CaretLayout.Lines[LastLine], CreateScreenLayoutTextFont(
+            Layer.FontFamily, Layer.FontSize, Layer.FontStyle),
+          Layer.FontSize * Layer.LetterSpacingRatio) * ScaleX;
+  end;
   Center := TPointF.Create((Layer.Bounds.Left + Layer.Bounds.Right) * 0.5,
     (Layer.Bounds.Top + Layer.Bounds.Bottom) * 0.5);
   CaretPoint := RotatePointAround(CaretPoint, Center,
@@ -1026,13 +1248,16 @@ begin
   Data := CaptureScreenLayoutTextData(
     TScreenLayoutTextLayer(FDocument[FTextLayerIndex]));
   Data.Text := FTextBuffer;
-  Data.WrapWidth := Max(FTextGuideBounds.Width, 1.0);
-  Layout := BuildScreenLayoutTextLayout(Data.Text, Data.FontFamily,
-    Data.FontSize, Data.WrapWidth, Data.FontStyle, Data.LetterSpacingRatio,
-    Data.LineSpacingRatio);
-  Data.Bounds := TRectF.Create(FTextGuideBounds.Left, FTextGuideBounds.Top,
-    FTextGuideBounds.Left + Max(Layout.Width, 1.0),
-    FTextGuideBounds.Top + Max(Layout.Height, Data.FontSize));
+  if FTextNewLayer then
+  begin
+    Data.WrapWidth := Max(FTextGuideBounds.Width, 1.0);
+    Layout := BuildScreenLayoutTextLayout(Data.Text, Data.FontFamily,
+      Data.FontSize, Data.WrapWidth, Data.FontStyle, Data.LetterSpacingRatio,
+      Data.LineSpacingRatio);
+    Data.Bounds := TRectF.Create(FTextGuideBounds.Left, FTextGuideBounds.Top,
+      FTextGuideBounds.Left + Max(Layout.Width, 1.0),
+      FTextGuideBounds.Top + Max(Layout.Height, Data.FontSize));
+  end;
   FDocument.SetTextData(FTextLayerIndex, Data);
   UpdateTextEditorBounds;
   Invalidate;
@@ -1184,6 +1409,13 @@ end;
 procedure TVectArtCanvasControl.KeyDown(var Key: Word;
   Shift: TShiftState);
 begin
+  if (Key = VK_ESCAPE) and FInteraction.CancelTextSpacingDrag then
+  begin
+    Key := 0;
+    MouseCapture := False;
+    Invalidate;
+    Exit;
+  end;
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   if FShapeCreation.KeyDown(Key, Shift) then
@@ -1265,18 +1497,7 @@ begin
         SetTextCaretFromClientPoint(X, Y, ssShift in Shift);
         Exit;
       end;
-      if (FEditorState <> nil) and
-        (FEditorState.CurrentTool = vetText) and
-        (TextLayerIndex > 0) and
-        (FDocument[TextLayerIndex] is TScreenLayoutTextLayer) then
-      begin
-        FinishTextEdit(False, False);
-        BeginExistingTextEdit(TextLayerIndex);
-        SetTextCaretFromClientPoint(X, Y, ssShift in Shift);
-        Exit;
-      end;
-      FinishTextEdit(False);
-      Exit;
+      FinishTextEditAndSelect(False);
     end;
     if CanFocus then
       SetFocus;
@@ -1467,7 +1688,7 @@ begin
     Invalidate;
     Exit;
   end;
-  if FGroupDrag.UpdateMoveOrResize(X, Y, FZoom) then
+  if FGroupDrag.UpdateMoveOrResize(Shift, X, Y, FZoom) then
   begin
     if FGroupDrag.Mode = slgdmMove then
       Cursor := crSizeAll
@@ -1724,6 +1945,9 @@ end;
 procedure TVectArtCanvasControl.PaintDirect2D;
 var
   ArcHandles: TScreenLayoutArcAngleHandles;
+  TextSpacingHandles: TScreenLayoutTextSpacingHandles;
+  TextSpacingIsLetter: Boolean;
+  TextSpacingRatio: Single;
   ArcLayer: TScreenLayoutArcLayer;
   ArcPreview: TArray<TPoint>;
   BezierHandles: TScreenLayoutBezierHandles;
@@ -2163,6 +2387,33 @@ begin
               ArcHandles.EndHandle.Top, ArcHandles.EndHandle.Right,
               ArcHandles.EndHandle.Bottom);
           end;
+          if not FTextEditing and
+            FInteraction.SelectedTextSpacingHandles(TextSpacingHandles) then
+          begin
+            DrawBidirectionalArrow(Direct2DCanvas,
+              TextSpacingHandles.LetterLineStart,
+              TextSpacingHandles.LetterLineEnd);
+            if TextSpacingHandles.HasLineSpacing then
+              DrawBidirectionalArrow(Direct2DCanvas,
+                TextSpacingHandles.LineLineStart,
+                TextSpacingHandles.LineLineEnd);
+            if FInteraction.TextSpacingDragValue(TextSpacingIsLetter,
+              TextSpacingRatio) then
+            begin
+              Direct2DCanvas.Brush.Style := bsClear;
+              Direct2DCanvas.Font.Color := clWhite;
+              if TextSpacingIsLetter then
+                Direct2DCanvas.TextOut(
+                  TextSpacingHandles.LetterHandle.Right + 4,
+                  TextSpacingHandles.LetterHandle.Top - 2,
+                  Format('字間 %.0f%%', [TextSpacingRatio * 100]))
+              else
+                Direct2DCanvas.TextOut(TextSpacingHandles.LineHandle.Right + 4,
+                  TextSpacingHandles.LineHandle.Top - 2,
+                  Format('行間 %.0f%%', [TextSpacingRatio * 100]));
+              Direct2DCanvas.Brush.Style := bsSolid;
+            end;
+          end;
         end;
       end;
       PathVertexRects := FInteraction.SelectedPathVertexRects;
@@ -2328,6 +2579,9 @@ end;
 procedure TVectArtCanvasControl.PaintGDI;
 var
   ArcHandles: TScreenLayoutArcAngleHandles;
+  TextSpacingHandles: TScreenLayoutTextSpacingHandles;
+  TextSpacingIsLetter: Boolean;
+  TextSpacingRatio: Single;
   ArcLayer: TScreenLayoutArcLayer;
   ArcPreview: TArray<TPoint>;
   BezierHandles: TScreenLayoutBezierHandles;
@@ -2718,6 +2972,30 @@ begin
         Canvas.Ellipse(ArcHandles.StartHandle);
         Canvas.Brush.Color := TColor($0048A8F8);
         Canvas.Ellipse(ArcHandles.EndHandle);
+      end;
+      if not FTextEditing and
+        FInteraction.SelectedTextSpacingHandles(TextSpacingHandles) then
+      begin
+        DrawBidirectionalArrow(Canvas, TextSpacingHandles.LetterLineStart,
+          TextSpacingHandles.LetterLineEnd);
+        if TextSpacingHandles.HasLineSpacing then
+          DrawBidirectionalArrow(Canvas, TextSpacingHandles.LineLineStart,
+            TextSpacingHandles.LineLineEnd);
+        if FInteraction.TextSpacingDragValue(TextSpacingIsLetter,
+          TextSpacingRatio) then
+        begin
+          Canvas.Brush.Style := bsClear;
+          Canvas.Font.Color := clWhite;
+          if TextSpacingIsLetter then
+            Canvas.TextOut(TextSpacingHandles.LetterHandle.Right + 4,
+              TextSpacingHandles.LetterHandle.Top - 2,
+              Format('字間 %.0f%%', [TextSpacingRatio * 100]))
+          else
+            Canvas.TextOut(TextSpacingHandles.LineHandle.Right + 4,
+              TextSpacingHandles.LineHandle.Top - 2,
+              Format('行間 %.0f%%', [TextSpacingRatio * 100]));
+          Canvas.Brush.Style := bsSolid;
+        end;
       end;
     end;
   end;

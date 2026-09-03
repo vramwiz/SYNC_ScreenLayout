@@ -4,7 +4,7 @@ unit ScreenLayoutGroupInteraction;
 interface
 
 uses
-  System.Types, ScreenLayoutDocument, ScreenLayoutEditHistory,
+  System.Classes, System.Types, ScreenLayoutDocument, ScreenLayoutEditHistory,
   ScreenLayoutEditorState, ScreenLayoutSelectionGeometry;
 
 type
@@ -25,6 +25,8 @@ type
     FRotationStartAngle: Single;
     FStartBounds: TRectF;
     FStartPoint: TPoint;
+    FTextLayer: TScreenLayoutTextLayer;
+    FTextTransformModeStart: TScreenLayoutTextTransformMode;
     function GetActive: Boolean;
     procedure Reset;
   public
@@ -42,7 +44,8 @@ type
     // 適用済みの変形量を1回のUndo単位として履歴へ確定する。
     function Finish(EditHistory: TVectArtEditHistory): Boolean;
     // 現在のマウス位置に対応する移動または拡大縮小をDocumentへ反映する。
-    function UpdateMoveOrResize(X, Y: Integer; Zoom: Single): Boolean;
+    function UpdateMoveOrResize(Shift: TShiftState;
+      X, Y: Integer; Zoom: Single): Boolean;
     // 現在角度に対応する回転差分をDocumentへ反映する。
     function UpdateRotation(CurrentAngle: Single): Boolean;
     property Active: Boolean read GetActive;
@@ -87,6 +90,12 @@ begin
   FResizeHandle := Handle;
   FStartBounds := Bounds;
   FCurrentBounds := Bounds;
+  if (Length(FLayers) = 1) and
+    (FLayers[0] is TScreenLayoutTextLayer) then
+  begin
+    FTextLayer := TScreenLayoutTextLayer(FLayers[0]);
+    FTextTransformModeStart := FTextLayer.TransformMode;
+  end;
   FMode := slgdmResize;
 end;
 
@@ -121,10 +130,17 @@ begin
             Command.Add(TScreenLayoutTranslateLayerCommand.Create(
               FDocument, FLayers[I], FDX, FDY));
       slgdmResize:
+      begin
         if not FStartBounds.EqualsTo(FCurrentBounds) then
           for I := 0 to High(FLayers) do
             Command.Add(TScreenLayoutScaleLayerCommand.Create(
               FDocument, FLayers[I], FStartBounds, FCurrentBounds));
+        if (FTextLayer <> nil) and
+          (FTextLayer.TransformMode <> FTextTransformModeStart) then
+          Command.Add(TScreenLayoutTextTransformModeCommand.Create(
+            FDocument, FTextLayer, FTextTransformModeStart,
+            FTextLayer.TransformMode));
+      end;
       slgdmRotate:
         if not SameValue(FRotationDegrees, 0.0) then
           for I := 0 to High(FLayers) do
@@ -153,15 +169,22 @@ begin
   FDY := 0;
   FResizeHandle := vshNone;
   FRotationDegrees := 0;
+  FTextLayer := nil;
 end;
 
 function TScreenLayoutGroupDrag.UpdateMoveOrResize(
-  X, Y: Integer; Zoom: Single): Boolean;
+  Shift: TShiftState; X, Y: Integer; Zoom: Single): Boolean;
 var
+  Anchor: TPointF;
   DX: Single;
   DY: Single;
+  HandlePoint: TPointF;
   I: Integer;
+  MinimumScale: Single;
+  Scale: Single;
   TargetBounds: TRectF;
+  VectorX: Single;
+  VectorY: Single;
 begin
   Result := FMode in [slgdmMove, slgdmResize];
   if not Result then
@@ -190,6 +213,81 @@ begin
     if FResizeHandle in [vshBottomLeft, vshBottom, vshBottomRight] then
       TargetBounds.Bottom := Max(FStartBounds.Top + 1,
         FStartBounds.Bottom + DY);
+    if FTextLayer <> nil then
+    begin
+      if ssCtrl in Shift then
+        FTextLayer.TransformMode := slttmFrameFit
+      else if ssShift in Shift then
+        FTextLayer.TransformMode := slttmUniformScale;
+      if FTextLayer.TransformMode = slttmUniformScale then
+      begin
+        case FResizeHandle of
+          vshTopLeft:
+          begin
+            HandlePoint := FStartBounds.TopLeft;
+            Anchor := FStartBounds.BottomRight;
+          end;
+          vshTop:
+          begin
+            HandlePoint := TPointF.Create(FStartBounds.CenterPoint.X,
+              FStartBounds.Top);
+            Anchor := TPointF.Create(FStartBounds.CenterPoint.X,
+              FStartBounds.Bottom);
+          end;
+          vshTopRight:
+          begin
+            HandlePoint := TPointF.Create(FStartBounds.Right,
+              FStartBounds.Top);
+            Anchor := TPointF.Create(FStartBounds.Left,
+              FStartBounds.Bottom);
+          end;
+          vshRight:
+          begin
+            HandlePoint := TPointF.Create(FStartBounds.Right,
+              FStartBounds.CenterPoint.Y);
+            Anchor := TPointF.Create(FStartBounds.Left,
+              FStartBounds.CenterPoint.Y);
+          end;
+          vshBottomRight:
+          begin
+            HandlePoint := FStartBounds.BottomRight;
+            Anchor := FStartBounds.TopLeft;
+          end;
+          vshBottom:
+          begin
+            HandlePoint := TPointF.Create(FStartBounds.CenterPoint.X,
+              FStartBounds.Bottom);
+            Anchor := TPointF.Create(FStartBounds.CenterPoint.X,
+              FStartBounds.Top);
+          end;
+          vshBottomLeft:
+          begin
+            HandlePoint := TPointF.Create(FStartBounds.Left,
+              FStartBounds.Bottom);
+            Anchor := TPointF.Create(FStartBounds.Right,
+              FStartBounds.Top);
+          end;
+        else
+          HandlePoint := TPointF.Create(FStartBounds.Left,
+            FStartBounds.CenterPoint.Y);
+          Anchor := TPointF.Create(FStartBounds.Right,
+            FStartBounds.CenterPoint.Y);
+        end;
+        VectorX := HandlePoint.X - Anchor.X;
+        VectorY := HandlePoint.Y - Anchor.Y;
+        Scale := ((HandlePoint.X + DX - Anchor.X) * VectorX +
+          (HandlePoint.Y + DY - Anchor.Y) * VectorY) /
+          Max(VectorX * VectorX + VectorY * VectorY, 0.001);
+        MinimumScale := Max(1 / Max(FStartBounds.Width, 0.001),
+          1 / Max(FStartBounds.Height, 0.001));
+        Scale := Max(Scale, MinimumScale);
+        TargetBounds := TRectF.Create(
+          Anchor.X + (FStartBounds.Left - Anchor.X) * Scale,
+          Anchor.Y + (FStartBounds.Top - Anchor.Y) * Scale,
+          Anchor.X + (FStartBounds.Right - Anchor.X) * Scale,
+          Anchor.Y + (FStartBounds.Bottom - Anchor.Y) * Scale);
+      end;
+    end;
     for I := 0 to High(FLayers) do
       ScaleScreenLayoutLayer(FLayers[I], FCurrentBounds, TargetBounds);
     FCurrentBounds := TargetBounds;

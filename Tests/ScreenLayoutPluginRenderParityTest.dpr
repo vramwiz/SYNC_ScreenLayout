@@ -191,6 +191,8 @@ begin
     clWhite));
   TScreenLayoutTextLayer(Group[Group.ChildCount - 1]).FontStyle :=
     [fsBold, fsItalic, fsUnderline, fsStrikeOut];
+  TScreenLayoutTextLayer(Group[Group.ChildCount - 1]).Alignment :=
+    sltaMiddleCenter;
   TScreenLayoutTextLayer(Group[Group.ChildCount - 1]).LetterSpacingRatio :=
     0.2;
   TScreenLayoutTextLayer(Group[Group.ChildCount - 1]).LineSpacingRatio := 0.3;

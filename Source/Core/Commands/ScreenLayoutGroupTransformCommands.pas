@@ -37,6 +37,22 @@ type
     procedure Undo; override;
   end;
 
+  // グループ内Textの直接リサイズで選択した変形モードを可逆にする。
+  TScreenLayoutTextTransformModeCommand = class(TVectArtEditCommand)
+  private
+    FDocument: TVectArtDocument;
+    FLayer: TScreenLayoutTextLayer;
+    FNewMode: TScreenLayoutTextTransformMode;
+    FOldMode: TScreenLayoutTextTransformMode;
+    procedure Apply(Mode: TScreenLayoutTextTransformMode);
+  public
+    constructor Create(ADocument: TVectArtDocument;
+      Layer: TScreenLayoutTextLayer; OldMode,
+      NewMode: TScreenLayoutTextTransformMode);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
   // 共通中心と回転量を保持し、グループ内レイヤーの回転を可逆にする。
   TScreenLayoutRotateLayerCommand = class(TVectArtEditCommand)
   private
@@ -124,6 +140,36 @@ end;
 procedure TScreenLayoutScaleLayerCommand.Undo;
 begin
   Scale(FTargetBounds, FSourceBounds);
+end;
+
+procedure TScreenLayoutTextTransformModeCommand.Apply(
+  Mode: TScreenLayoutTextTransformMode);
+begin
+  if (FDocument = nil) or (FLayer = nil) then
+    Exit;
+  FLayer.TransformMode := Mode;
+  FDocument.Changed;
+end;
+
+constructor TScreenLayoutTextTransformModeCommand.Create(
+  ADocument: TVectArtDocument; Layer: TScreenLayoutTextLayer;
+  OldMode, NewMode: TScreenLayoutTextTransformMode);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FLayer := Layer;
+  FOldMode := OldMode;
+  FNewMode := NewMode;
+end;
+
+procedure TScreenLayoutTextTransformModeCommand.Execute;
+begin
+  Apply(FNewMode);
+end;
+
+procedure TScreenLayoutTextTransformModeCommand.Undo;
+begin
+  Apply(FOldMode);
 end;
 
 constructor TScreenLayoutRotateLayerCommand.Create(

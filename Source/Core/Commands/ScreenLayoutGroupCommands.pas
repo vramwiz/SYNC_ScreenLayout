@@ -361,6 +361,7 @@ begin
     Result := TScreenLayoutTextLayer.Create(NewName, TextLayer.Bounds,
       TextLayer.Text, TextLayer.FontFamily, TextLayer.FontSize,
       TextLayer.WrapWidth, TextLayer.FillColor);
+    TScreenLayoutTextLayer(Result).Alignment := TextLayer.Alignment;
     TScreenLayoutTextLayer(Result).FontStyle := TextLayer.FontStyle;
     TScreenLayoutTextLayer(Result).LetterSpacingRatio :=
       TextLayer.LetterSpacingRatio;
@@ -368,6 +369,8 @@ begin
       TextLayer.LineSpacingRatio;
     TScreenLayoutTextLayer(Result).RotationDegrees :=
       TextLayer.RotationDegrees;
+    TScreenLayoutTextLayer(Result).TransformMode :=
+      TextLayer.TransformMode;
   end
   else if Source is TScreenLayoutEllipseLayer then
   begin

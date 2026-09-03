@@ -88,6 +88,50 @@ begin
   Result := TJSONString(RequireValue(Parent, Name, TJSONString)).Value;
 end;
 
+function ReadOptionalString(Parent: TJSONObject; const Name,
+  DefaultValue: string): string;
+var
+  Value: TJSONValue;
+begin
+  Value := Parent.GetValue(Name);
+  if Value = nil then
+    Exit(DefaultValue);
+  if not (Value is TJSONString) then
+    raise EConvertError.CreateFmt('JSON field "%s" has an invalid type',
+      [Name]);
+  Result := TJSONString(Value).Value;
+end;
+
+function ParseTextAlignment(const Value: string): TScreenLayoutTextAlignment;
+const
+  NAMES: array[TScreenLayoutTextAlignment] of string = ('topLeft',
+    'topCenter', 'topRight', 'middleLeft', 'middleCenter', 'middleRight',
+    'bottomLeft', 'bottomCenter', 'bottomRight');
+var
+  Alignment: TScreenLayoutTextAlignment;
+begin
+  for Alignment := Low(TScreenLayoutTextAlignment) to
+    High(TScreenLayoutTextAlignment) do
+    if SameText(Value, NAMES[Alignment]) then
+      Exit(Alignment);
+  raise EConvertError.CreateFmt('Invalid text alignment: %s', [Value]);
+end;
+
+function ParseTextTransformMode(
+  const Value: string): TScreenLayoutTextTransformMode;
+const
+  NAMES: array[TScreenLayoutTextTransformMode] of string =
+    ('uniformScale', 'frameFit');
+var
+  Mode: TScreenLayoutTextTransformMode;
+begin
+  for Mode := Low(TScreenLayoutTextTransformMode) to
+    High(TScreenLayoutTextTransformMode) do
+    if SameText(Value, NAMES[Mode]) then
+      Exit(Mode);
+  raise EConvertError.CreateFmt('Invalid text transform mode: %s', [Value]);
+end;
+
 function ParseFilter(Value: TJSONValue): TScreenLayoutFilter;
 var
   Blur: TScreenLayoutBlurFilter;
@@ -374,6 +418,8 @@ begin
         end;
         if LayerTypes[I] = 'text' then
         begin
+          TextValue.Alignment := ParseTextAlignment(ReadOptionalString(
+            LayerJson, 'alignment', 'topLeft'));
           TextValue.Name := ReadString(LayerJson, 'name');
           TextValue.Text := ReadString(LayerJson, 'text');
           TextValue.FontFamily := ReadString(LayerJson, 'fontFamily');
@@ -388,9 +434,15 @@ begin
           if ReadOptionalBoolean(LayerJson, 'strikeOut', False) then
             Include(TextValue.FontStyle, fsStrikeOut);
           TextValue.LetterSpacingRatio := EnsureRange(ReadOptionalSingle(
-            LayerJson, 'letterSpacingRatio', 0), -0.9, 10.0);
+            LayerJson, 'letterSpacingRatio', 0),
+            SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
+            SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX);
           TextValue.LineSpacingRatio := EnsureRange(ReadOptionalSingle(
-            LayerJson, 'lineSpacingRatio', 0), -0.9, 10.0);
+            LayerJson, 'lineSpacingRatio', 0),
+            SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN,
+            SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX);
+          TextValue.TransformMode := ParseTextTransformMode(
+            ReadOptionalString(LayerJson, 'transformMode', 'uniformScale'));
           TextValue.WrapWidth := Max(ReadSingle(LayerJson, 'wrapWidth'), 1.0);
           TextValue.Bounds := TRectF.Create(
             ReadSingle(LayerJson, 'left'), ReadSingle(LayerJson, 'top'),

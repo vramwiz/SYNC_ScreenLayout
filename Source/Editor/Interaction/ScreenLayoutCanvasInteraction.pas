@@ -14,8 +14,19 @@ type
   TVectArtCanvasDragMode = (vcdmNone, vcdmMove, vcdmResize, vcdmRotate,
     vcdmRangeSelect, vcdmRoundedRadius, vcdmRoundedCornerRadius,
     vcdmArcStartAngle, vcdmArcEndAngle,
+    vcdmTextLetterSpacing, vcdmTextLineSpacing,
     vcdmPathVertex, vcdmPathBezierHandle, vcdmShapeVertex,
     vcdmShapeBezierHandle);
+
+  TScreenLayoutTextSpacingHandles = record
+    LetterLineStart: TPoint; // 字間の左右矢印を構成する軸の始点。
+    LetterLineEnd: TPoint;   // 字間の左右矢印を構成する軸の終点。
+    LetterHandle: TRect;     // 字間矢印の画面座標上の当たり判定範囲。
+    LineLineStart: TPoint;   // 行間の上下矢印を構成する軸の始点。
+    LineLineEnd: TPoint;     // 行間の上下矢印を構成する軸の終点。
+    LineHandle: TRect;       // 行間矢印の画面座標上の当たり判定範囲。
+    HasLineSpacing: Boolean; // 複数行で行間操作を表示する場合にTrue。
+  end;
 
   TScreenLayoutArcAngleHandles = record
     StartHandle: TRect; // 開始角を変更する画面座標上のハンドル。
@@ -49,6 +60,7 @@ type
     FDragIsGroup: Boolean;
     FDragIsPath: Boolean;
     FDragIsShape: Boolean; // 単一Shapeの輪郭を直接変形している状態。
+    FDragIsText: Boolean;  // 単一Textの変形モードを伴う枠操作中ならTrue。
     FDragMode: TVectArtCanvasDragMode;
     FMoveLayerIndices: TArray<Integer>;
     FMoveStartBounds: TArray<TRectF>;
@@ -70,6 +82,12 @@ type
     FDragStartImagePoints: TVectArtImagePoints;
     FDragStartPathVertices: TArray<TScreenLayoutVertex>;
     FDragStartShapeContours: TArray<TScreenLayoutContour>; // 単一Shapeの変更前輪郭。
+    FTextSpacingStartData: TArray<TScreenLayoutTextData>;
+    FTextSpacingLayerIndices: TArray<Integer>;
+    FTextSpacingCenter: TPointF;
+    FTextSpacingRotation: Single;
+    FTextSpacingFontSize: Single;
+    FTextResizeStartData: TScreenLayoutTextData;
     FPathInteraction: TScreenLayoutPathInteraction;
     FPathStructureEditingEnabled: Boolean;
     FShapeInteraction: TScreenLayoutShapeInteraction;
@@ -88,7 +106,7 @@ type
     FZoom: Single;
     procedure EndDrag;
     procedure ApplyRangeSelection;
-    procedure ApplyResizeSelection(X, Y: Integer);
+    procedure ApplyResizeSelection(Shift: TShiftState; X, Y: Integer);
     procedure ApplyImageResize(X, Y: Integer);
     procedure CaptureMoveSelection;
     procedure CommitBoundsCommand;
@@ -98,6 +116,8 @@ type
     procedure CommitImagePointsCommand;
     procedure CommitPathVerticesCommand;
     procedure CommitShapeContoursCommand;
+    procedure CommitTextSpacingCommand;
+    procedure CommitTextResizeCommand;
     function AxisAlignedResizedBounds(X, Y: Integer;
       RotationDegrees: Single): TRectF;
     function GetDragging: Boolean;
@@ -107,6 +127,7 @@ type
     function HitTestLayer(X, Y: Integer): Integer;
     function LayerScreenRect(Index: Integer): TRect;
     function ResizedBounds(X, Y: Integer): TRectF;
+    function UniformResizedBounds(X, Y: Integer): TRectF;
     function SelectionContainsLockedLayer: Boolean;
     function SelectedLayersFrameOffset: Integer;
     function SelectedLayerSelectionGeometry(
@@ -119,6 +140,8 @@ type
       TArray<TScreenLayoutRoundedCornerHandle>;
     function SelectedRoundedRectangleRadiusHandle(
       out HandleRect: TRect): Boolean;
+    function SelectedTextSpacingHandlesCore(
+      out Handles: TScreenLayoutTextSpacingHandles): Boolean;
     function ToLogicalX(Value: Single): Single;
     function ToLogicalY(Value: Single): Single;
     function ToScreenX(Value: Single): Integer;
@@ -147,6 +170,8 @@ type
     function MouseMove(Shift: TShiftState; X, Y: Integer): Boolean;
     // ドラッグ結果をUndo履歴へ確定し、操作を終了した場合にTrueを返す。
     function MouseUp(Button: TMouseButton): Boolean;
+    // 進行中の字間・行間ドラッグを開始前の状態へ戻す。
+    function CancelTextSpacingDrag: Boolean;
     // 単一選択されたPathのアンカーを画面座標の矩形列として返す。
     function SelectedPathVertexRects: TArray<TRect>;
     // 単一選択されたShapeの全輪郭アンカーを画面座標の矩形列として返す。
@@ -162,6 +187,12 @@ type
     // 単一選択中の楕円弧について、開始角と終了角の編集ハンドルを返す。
     function SelectedArcAngleHandles(
       out Handles: TScreenLayoutArcAngleHandles): Boolean;
+    // 選択Textの字間・行間を直接編集する寸法線とハンドルを返す。
+    function SelectedTextSpacingHandles(
+      out Handles: TScreenLayoutTextSpacingHandles): Boolean;
+    // 字間・行間ドラッグ中の種別と現在比率を、数値プレビュー表示用に返す。
+    function TextSpacingDragValue(out IsLetterSpacing: Boolean;
+      out Ratio: Single): Boolean;
     // 単一選択中の角丸四角について、4隅共通の半径ハンドルを返す。
     function RoundedRectangleRadiusHandle(out HandleRect: TRect): Boolean;
     // 4隅の個別半径を選択・調整するハンドルを返す。
@@ -185,8 +216,8 @@ uses
   ScreenLayoutGroupTransformCommands,
   ScreenLayoutInteractionGeometry, ScreenLayoutLayerGeometry,
   ScreenLayoutShapeEditCommands, ScreenLayoutPathOperations,
-  ScreenLayoutShapeOperations,
-  ScreenLayoutShapePath;
+  ScreenLayoutShapeOperations, ScreenLayoutShapePath,
+  ScreenLayoutTextCommands, ScreenLayoutTextGeometry;
 
 const
   MIN_RECTANGLE_SIZE = 16.0;
@@ -196,6 +227,10 @@ const
   ROUNDED_CORNER_HANDLE_SIZE = 8;
   ROUNDED_CORNER_HANDLE_MIN_OFFSET = 22;
   ARC_ANGLE_HANDLE_SIZE = 12;
+  TEXT_SPACING_ARROW_HALF_LENGTH = 20;
+  TEXT_SPACING_ARROW_OUTSIDE_OFFSET = 24;
+  TEXT_SPACING_HIT_ALONG_HALF_LENGTH = 23;
+  TEXT_SPACING_HIT_CROSS_HALF_LENGTH = 10;
 
 function RoundedCornerCursor(
   Corner: TScreenLayoutRoundedCorner): TCursor;
@@ -274,6 +309,180 @@ function TVectArtCanvasInteraction.ToScreenY(Value: Single): Integer;
 begin
   Result := LogicalToScreenY(Value, FCanvasBounds, FZoom,
     FDocument.CanvasLayer.Height);
+end;
+
+function PointHitsTextSpacingArrow(const Value, ArrowStart,
+  ArrowEnd: TPoint): Boolean;
+var
+  AlongDistance: Single;
+  AxisLength: Single;
+  AxisX: Single;
+  AxisY: Single;
+  CenterX: Single;
+  CenterY: Single;
+  CrossDistance: Single;
+  OffsetX: Single;
+  OffsetY: Single;
+begin
+  AxisX := ArrowEnd.X - ArrowStart.X;
+  AxisY := ArrowEnd.Y - ArrowStart.Y;
+  AxisLength := Hypot(AxisX, AxisY);
+  if AxisLength <= 0 then
+    Exit(False);
+  AxisX := AxisX / AxisLength;
+  AxisY := AxisY / AxisLength;
+  CenterX := (ArrowStart.X + ArrowEnd.X) * 0.5;
+  CenterY := (ArrowStart.Y + ArrowEnd.Y) * 0.5;
+  OffsetX := Value.X - CenterX;
+  OffsetY := Value.Y - CenterY;
+  AlongDistance := Abs(OffsetX * AxisX + OffsetY * AxisY);
+  CrossDistance := Abs(OffsetX * -AxisY + OffsetY * AxisX);
+  Result := (AlongDistance <= TEXT_SPACING_HIT_ALONG_HALF_LENGTH) and
+    (CrossDistance <= TEXT_SPACING_HIT_CROSS_HALF_LENGTH);
+end;
+
+function TVectArtCanvasInteraction.SelectedTextSpacingHandlesCore(
+  out Handles: TScreenLayoutTextSpacingHandles): Boolean;
+var
+  ArrowCenter: TPointF;
+  AxisLength: Single;
+  AxisX: Single;
+  AxisY: Single;
+  BottomCenter: TPointF;
+  BottomRight: TPointF;
+  Geometry: TVectArtSelectionGeometry;
+  I: Integer;
+  Layer: TScreenLayoutTextLayer;
+  Layout: TScreenLayoutTextLayout;
+  LogicalQuad: TVectArtQuad;
+  RightCenter: TPointF;
+  ScreenQuad: TVectArtScreenQuad;
+  Selection: TArray<Integer>;
+
+  function RectCenterPoint(const Value: TRect): TPointF;
+  begin
+    Result := TPointF.Create((Value.Left + Value.Right) * 0.5,
+      (Value.Top + Value.Bottom) * 0.5);
+  end;
+
+  procedure BuildArrow(const FirstHandleCenter, SecondHandleCenter: TPointF;
+    OutwardDirection: Single; out ArrowStart, ArrowEnd: TPoint;
+    out HitRect: TRect);
+  var
+    CrossX: Single;
+    CrossY: Single;
+    HitPoint0: TPointF;
+    HitPoint1: TPointF;
+    HitPoint2: TPointF;
+    HitPoint3: TPointF;
+  begin
+    AxisX := SecondHandleCenter.X - FirstHandleCenter.X;
+    AxisY := SecondHandleCenter.Y - FirstHandleCenter.Y;
+    AxisLength := Hypot(AxisX, AxisY);
+    if AxisLength > 0 then
+    begin
+      AxisX := AxisX / AxisLength;
+      AxisY := AxisY / AxisLength;
+    end;
+    ArrowCenter := TPointF.Create(
+      (FirstHandleCenter.X + SecondHandleCenter.X) * 0.5 +
+        -AxisY * OutwardDirection * TEXT_SPACING_ARROW_OUTSIDE_OFFSET,
+      (FirstHandleCenter.Y + SecondHandleCenter.Y) * 0.5 +
+        AxisX * OutwardDirection * TEXT_SPACING_ARROW_OUTSIDE_OFFSET);
+    ArrowStart := Point(
+      Round(ArrowCenter.X - AxisX * TEXT_SPACING_ARROW_HALF_LENGTH),
+      Round(ArrowCenter.Y - AxisY * TEXT_SPACING_ARROW_HALF_LENGTH));
+    ArrowEnd := Point(
+      Round(ArrowCenter.X + AxisX * TEXT_SPACING_ARROW_HALF_LENGTH),
+      Round(ArrowCenter.Y + AxisY * TEXT_SPACING_ARROW_HALF_LENGTH));
+    CrossX := -AxisY;
+    CrossY := AxisX;
+    HitPoint0 := TPointF.Create(ArrowCenter.X - AxisX *
+      TEXT_SPACING_HIT_ALONG_HALF_LENGTH - CrossX *
+      TEXT_SPACING_HIT_CROSS_HALF_LENGTH, ArrowCenter.Y - AxisY *
+      TEXT_SPACING_HIT_ALONG_HALF_LENGTH - CrossY *
+      TEXT_SPACING_HIT_CROSS_HALF_LENGTH);
+    HitPoint1 := TPointF.Create(ArrowCenter.X + AxisX *
+      TEXT_SPACING_HIT_ALONG_HALF_LENGTH - CrossX *
+      TEXT_SPACING_HIT_CROSS_HALF_LENGTH, ArrowCenter.Y + AxisY *
+      TEXT_SPACING_HIT_ALONG_HALF_LENGTH - CrossY *
+      TEXT_SPACING_HIT_CROSS_HALF_LENGTH);
+    HitPoint2 := TPointF.Create(ArrowCenter.X + AxisX *
+      TEXT_SPACING_HIT_ALONG_HALF_LENGTH + CrossX *
+      TEXT_SPACING_HIT_CROSS_HALF_LENGTH, ArrowCenter.Y + AxisY *
+      TEXT_SPACING_HIT_ALONG_HALF_LENGTH + CrossY *
+      TEXT_SPACING_HIT_CROSS_HALF_LENGTH);
+    HitPoint3 := TPointF.Create(ArrowCenter.X - AxisX *
+      TEXT_SPACING_HIT_ALONG_HALF_LENGTH + CrossX *
+      TEXT_SPACING_HIT_CROSS_HALF_LENGTH, ArrowCenter.Y - AxisY *
+      TEXT_SPACING_HIT_ALONG_HALF_LENGTH + CrossY *
+      TEXT_SPACING_HIT_CROSS_HALF_LENGTH);
+    HitRect := Rect(Floor(Min(Min(HitPoint0.X, HitPoint1.X),
+      Min(HitPoint2.X, HitPoint3.X))),
+      Floor(Min(Min(HitPoint0.Y, HitPoint1.Y),
+      Min(HitPoint2.Y, HitPoint3.Y))),
+      Ceil(Max(Max(HitPoint0.X, HitPoint1.X),
+      Max(HitPoint2.X, HitPoint3.X))) + 1,
+      Ceil(Max(Max(HitPoint0.Y, HitPoint1.Y),
+      Max(HitPoint2.Y, HitPoint3.Y))) + 1);
+  end;
+begin
+  Handles := Default(TScreenLayoutTextSpacingHandles);
+  Result := False;
+  if (FDocument = nil) or (FZoom <= 0) or
+    (FDocument.SelectionCount = 0) or (FDocument.SelectedIndex <= 0) or
+    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextLayer) then
+    Exit;
+  Selection := FDocument.GetSelectedLayerIndices;
+  for I := 0 to High(Selection) do
+    if not (FDocument[Selection[I]] is TScreenLayoutTextLayer) or
+      FDocument[Selection[I]].Locked then
+      Exit;
+  Layer := TScreenLayoutTextLayer(FDocument[FDocument.SelectedIndex]);
+  Layout := BuildScreenLayoutTextLayout(Layer.Text, Layer.FontFamily,
+    Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
+    Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
+  LogicalQuad := RectangleCorners(Layer.Bounds, Layer.RotationDegrees);
+  for I := 0 to High(ScreenQuad) do
+    ScreenQuad[I] := Point(ToScreenX(LogicalQuad[I].X),
+      ToScreenY(LogicalQuad[I].Y));
+  Geometry := BuildRotatedSelectionGeometry(ScreenQuad,
+    SelectionFrameOffset(0, FZoom));
+  BottomCenter := RectCenterPoint(Geometry.Handles[vshBottom]);
+  BottomRight := RectCenterPoint(Geometry.Handles[vshBottomRight]);
+  RightCenter := RectCenterPoint(Geometry.Handles[vshRight]);
+  BuildArrow(BottomCenter, BottomRight, 1, Handles.LetterLineStart,
+    Handles.LetterLineEnd, Handles.LetterHandle);
+  BuildArrow(RightCenter, BottomRight, -1, Handles.LineLineStart,
+    Handles.LineLineEnd, Handles.LineHandle);
+  Handles.HasLineSpacing := Length(Layout.Lines) > 1;
+  Result := True;
+end;
+
+function TVectArtCanvasInteraction.SelectedTextSpacingHandles(
+  out Handles: TScreenLayoutTextSpacingHandles): Boolean;
+begin
+  Result := SelectedTextSpacingHandlesCore(Handles);
+end;
+
+function TVectArtCanvasInteraction.TextSpacingDragValue(
+  out IsLetterSpacing: Boolean; out Ratio: Single): Boolean;
+var
+  Layer: TScreenLayoutTextLayer;
+begin
+  IsLetterSpacing := FDragMode = vcdmTextLetterSpacing;
+  Ratio := 0;
+  Result := (FDragMode in [vcdmTextLetterSpacing,
+    vcdmTextLineSpacing]) and (FDocument <> nil) and
+    (FDragLayerIndex > 0) and (FDragLayerIndex < FDocument.LayerCount) and
+    (FDocument[FDragLayerIndex] is TScreenLayoutTextLayer);
+  if not Result then
+    Exit;
+  Layer := TScreenLayoutTextLayer(FDocument[FDragLayerIndex]);
+  if IsLetterSpacing then
+    Ratio := Layer.LetterSpacingRatio
+  else
+    Ratio := Layer.LineSpacingRatio;
 end;
 
 function TVectArtCanvasInteraction.SelectedArcAngleHandlesCore(
@@ -439,6 +648,7 @@ var
   Handle: TVectArtSelectionHandle;
   LayerIndex: Integer;
   SelectionRect: TRect;
+  TextSpacingHandles: TScreenLayoutTextSpacingHandles;
   VertexRect: TRect;
   VertexCursor: TCursor;
 begin
@@ -455,6 +665,10 @@ begin
     Exit(RoundedCornerCursor(FSelectedRoundedCorner));
   if FDragMode in [vcdmArcStartAngle, vcdmArcEndAngle] then
     Exit(crCross);
+  if FDragMode = vcdmTextLetterSpacing then
+    Exit(crSizeWE);
+  if FDragMode = vcdmTextLineSpacing then
+    Exit(crSizeNS);
   if FDragMode = vcdmRangeSelect then
     Exit(crCross);
   if FDragMode in [vcdmPathVertex, vcdmPathBezierHandle, vcdmShapeVertex,
@@ -485,6 +699,18 @@ begin
     (PtInRect(ArcHandles.StartHandle, Point(X, Y)) or
      PtInRect(ArcHandles.EndHandle, Point(X, Y))) then
     Exit(crCross);
+  if SelectedTextSpacingHandlesCore(TextSpacingHandles) then
+  begin
+    if PointHitsTextSpacingArrow(Point(X, Y),
+      TextSpacingHandles.LetterLineStart,
+      TextSpacingHandles.LetterLineEnd) then
+      Exit(crSizeWE);
+    if TextSpacingHandles.HasLineSpacing and
+      PointHitsTextSpacingArrow(Point(X, Y),
+        TextSpacingHandles.LineLineStart,
+        TextSpacingHandles.LineLineEnd) then
+      Exit(crSizeNS);
+  end;
   if SelectedRoundedRectangleRadiusHandle(SelectionRect) and
     not FDocument[FDocument.SelectedIndex].Locked and
     PtInRect(SelectionRect, Point(X, Y)) then
@@ -548,6 +774,43 @@ begin
   if not SameValue(FRotationStartValue, NewValue) then
     FEditHistory.AddApplied(TVectArtRotationCommand.Create(FDocument,
       FDragLayerIndex, FRotationStartValue, NewValue));
+end;
+
+procedure TVectArtCanvasInteraction.CommitTextSpacingCommand;
+var
+  Command: TVectArtCompoundCommand;
+  I: Integer;
+  NewData: TScreenLayoutTextData;
+  OldData: TScreenLayoutTextData;
+begin
+  if (FEditHistory = nil) or (FDocument = nil) then
+    Exit;
+  Command := TVectArtCompoundCommand.Create;
+  for I := 0 to High(FTextSpacingLayerIndices) do
+  begin
+    if (FTextSpacingLayerIndices[I] <= 0) or
+      (FTextSpacingLayerIndices[I] >= FDocument.LayerCount) or
+      not (FDocument[FTextSpacingLayerIndices[I]] is
+        TScreenLayoutTextLayer) then
+      Continue;
+    OldData := FTextSpacingStartData[I];
+    NewData := CaptureScreenLayoutTextData(TScreenLayoutTextLayer(
+      FDocument[FTextSpacingLayerIndices[I]]));
+    if SameValue(OldData.LetterSpacingRatio,
+        NewData.LetterSpacingRatio) and
+      SameValue(OldData.LineSpacingRatio, NewData.LineSpacingRatio) and
+      SameValue(OldData.Bounds.Left, NewData.Bounds.Left) and
+      SameValue(OldData.Bounds.Top, NewData.Bounds.Top) and
+      SameValue(OldData.Bounds.Right, NewData.Bounds.Right) and
+      SameValue(OldData.Bounds.Bottom, NewData.Bounds.Bottom) then
+      Continue;
+    Command.Add(TScreenLayoutTextDataCommand.Create(FDocument,
+      FTextSpacingLayerIndices[I], OldData, NewData));
+  end;
+  if Command.Count > 0 then
+    FEditHistory.AddApplied(Command)
+  else
+    Command.Free;
 end;
 
 procedure TVectArtCanvasInteraction.CommitArcAnglesCommand;
@@ -734,7 +997,8 @@ begin
   FDocument.SetImagePoints(FDragLayerIndex, NewPoints);
 end;
 
-procedure TVectArtCanvasInteraction.ApplyResizeSelection(X, Y: Integer);
+procedure TVectArtCanvasInteraction.ApplyResizeSelection(
+  Shift: TShiftState; X, Y: Integer);
 var
   I: Integer;
   ImagePointIndex: Integer;
@@ -746,8 +1010,23 @@ var
   ScaleX: Single;
   ScaleY: Single;
   StartBounds: TRectF;
+  TextLayer: TScreenLayoutTextLayer;
 begin
-  NewSelectionBounds := ResizedBounds(X, Y);
+  if FDragIsText and (FDragLayerIndex > 0) and
+    (FDocument[FDragLayerIndex] is TScreenLayoutTextLayer) then
+  begin
+    TextLayer := TScreenLayoutTextLayer(FDocument[FDragLayerIndex]);
+    if ssCtrl in Shift then
+      TextLayer.TransformMode := slttmFrameFit
+    else if ssShift in Shift then
+      TextLayer.TransformMode := slttmUniformScale;
+    if TextLayer.TransformMode = slttmUniformScale then
+      NewSelectionBounds := UniformResizedBounds(X, Y)
+    else
+      NewSelectionBounds := ResizedBounds(X, Y);
+  end
+  else
+    NewSelectionBounds := ResizedBounds(X, Y);
   if FDragIsGroup and (FDragLayerIndex > 0) and
     (FDocument[FDragLayerIndex] is TScreenLayoutGroupLayer) then
   begin
@@ -1024,6 +1303,26 @@ begin
     Command.Free;
 end;
 
+procedure TVectArtCanvasInteraction.CommitTextResizeCommand;
+var
+  NewData: TScreenLayoutTextData;
+begin
+  if (FEditHistory = nil) or (FDocument = nil) or
+    (FDragLayerIndex <= 0) or
+    not (FDocument[FDragLayerIndex] is TScreenLayoutTextLayer) then
+    Exit;
+  NewData := CaptureScreenLayoutTextData(
+    TScreenLayoutTextLayer(FDocument[FDragLayerIndex]));
+  if SameValue(FTextResizeStartData.Bounds.Left, NewData.Bounds.Left) and
+    SameValue(FTextResizeStartData.Bounds.Top, NewData.Bounds.Top) and
+    SameValue(FTextResizeStartData.Bounds.Right, NewData.Bounds.Right) and
+    SameValue(FTextResizeStartData.Bounds.Bottom, NewData.Bounds.Bottom) and
+    (FTextResizeStartData.TransformMode = NewData.TransformMode) then
+    Exit;
+  FEditHistory.AddApplied(TScreenLayoutTextDataCommand.Create(FDocument,
+    FDragLayerIndex, FTextResizeStartData, NewData));
+end;
+
 procedure TVectArtCanvasInteraction.EndDrag;
 begin
   FDragMode := vcdmNone;
@@ -1035,6 +1334,7 @@ begin
   FDragIsGroup := False;
   FDragIsPath := False;
   FDragIsShape := False;
+  FDragIsText := False;
   FMoveOccurred := False;
   FToggleSelectionModeOnClick := False;
   SetLength(FMoveLayerIndices, 0);
@@ -1051,6 +1351,8 @@ begin
   FGroupRotationDegrees := 0;
   SetLength(FDragStartPathVertices, 0);
   SetLength(FDragStartShapeContours, 0);
+  SetLength(FTextSpacingLayerIndices, 0);
+  SetLength(FTextSpacingStartData, 0);
 end;
 
 function TVectArtCanvasInteraction.GetDragging: Boolean;
@@ -1566,6 +1868,7 @@ var
   CenterY: Single;
   CornerHandle: TScreenLayoutRoundedCornerHandle;
   CornerHandles: TArray<TScreenLayoutRoundedCornerHandle>;
+  CtrlTextResize: Boolean;
   Geometry: TVectArtSelectionGeometry;
   ImageBounds: TRectF;
   ImageLayer: TVectArtImageLayer;
@@ -1579,6 +1882,11 @@ var
   SelectionRect: TRect;
   ShapeBounds: TRectF;
   ShapeLayer: TScreenLayoutShapeLayer;
+  TextLayer: TScreenLayoutTextLayer;
+  TextData: TScreenLayoutTextData;
+  TextSelection: TArray<Integer>;
+  TextSpacingHandles: TScreenLayoutTextSpacingHandles;
+  I: Integer;
   VertexCaptureNeeded: Boolean;
   WasSelected: Boolean;
 begin
@@ -1598,7 +1906,23 @@ begin
     Exit(False);
   if Button <> mbLeft then
     Exit;
-  if ssCtrl in Shift then
+  CtrlTextResize := False;
+  if (ssCtrl in Shift) and (FDocument.SelectionCount = 1) and
+    (FDocument.SelectedIndex > 0) and
+    (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextLayer) and
+    not FDocument[FDocument.SelectedIndex].Locked then
+  begin
+    SelectionRect := SelectedLayersScreenRect;
+    if not SelectionRect.IsEmpty then
+    begin
+      if not SelectedLayerSelectionGeometry(Geometry) then
+        Geometry := BuildSelectionGeometry(SelectionRect,
+          SelectedLayersFrameOffset);
+      CtrlTextResize := HitTestSelectionHandle(Point(X, Y), Geometry) <>
+        vshNone;
+    end;
+  end;
+  if (ssCtrl in Shift) and not CtrlTextResize then
   begin
     FDragLayerIndex := HitTestLayer(X, Y);
     if FDragLayerIndex > 0 then
@@ -1609,6 +1933,57 @@ begin
   end;
   FPathInteraction.ClearSelection;
   FShapeInteraction.ClearSelection;
+  if SelectedTextSpacingHandlesCore(TextSpacingHandles) then
+  begin
+    if PointHitsTextSpacingArrow(Point(X, Y),
+      TextSpacingHandles.LetterLineStart,
+      TextSpacingHandles.LetterLineEnd) then
+      FDragMode := vcdmTextLetterSpacing
+    else if TextSpacingHandles.HasLineSpacing and
+      PointHitsTextSpacingArrow(Point(X, Y),
+        TextSpacingHandles.LineLineStart,
+        TextSpacingHandles.LineLineEnd) then
+      FDragMode := vcdmTextLineSpacing;
+    if FDragMode in [vcdmTextLetterSpacing, vcdmTextLineSpacing] then
+    begin
+      TextSelection := FDocument.GetSelectedLayerIndices;
+      SetLength(FTextSpacingLayerIndices, Length(TextSelection));
+      SetLength(FTextSpacingStartData, Length(TextSelection));
+      for I := 0 to High(TextSelection) do
+      begin
+        FTextSpacingLayerIndices[I] := TextSelection[I];
+        FTextSpacingStartData[I] := CaptureScreenLayoutTextData(
+          TScreenLayoutTextLayer(FDocument[TextSelection[I]]));
+      end;
+      FDragLayerIndex := FDocument.SelectedIndex;
+      TextLayer := TScreenLayoutTextLayer(FDocument[FDragLayerIndex]);
+      FTextSpacingRotation := TextLayer.RotationDegrees;
+      FTextSpacingFontSize := Max(TextLayer.FontSize, 1.0);
+      FTextSpacingCenter := TextLayer.Bounds.CenterPoint;
+      FDragStartMouse := Point(X, Y);
+      if ssDouble in Shift then
+      begin
+        FDocument.BeginUpdate;
+        try
+          for I := 0 to High(FTextSpacingLayerIndices) do
+          begin
+            TextData := FTextSpacingStartData[I];
+            if FDragMode = vcdmTextLetterSpacing then
+              TextData.LetterSpacingRatio := 0
+            else
+              TextData.LineSpacingRatio := 0;
+            FDocument.SetTextData(FTextSpacingLayerIndices[I], TextData);
+          end;
+        finally
+          FDocument.EndUpdate;
+        end;
+        CommitTextSpacingCommand;
+        EndDrag;
+        Exit(False);
+      end;
+      Exit(True);
+    end;
+  end;
   if not SelectionContainsLockedLayer and
     SelectedArcAngleHandlesCore(ArcHandles) then
   begin
@@ -1777,6 +2152,11 @@ begin
           (FDocument[FDragLayerIndex] is TVectArtPathLayer);
         FDragIsShape := (FDocument.SelectionCount = 1) and
           (FDocument[FDragLayerIndex] is TScreenLayoutShapeLayer);
+        FDragIsText := (FDocument.SelectionCount = 1) and
+          (FDocument[FDragLayerIndex] is TScreenLayoutTextLayer);
+        if FDragIsText then
+          FTextResizeStartData := CaptureScreenLayoutTextData(
+            TScreenLayoutTextLayer(FDocument[FDragLayerIndex]));
         if FDragIsGroup then
         begin
           if not TryGetScreenLayoutLayerBounds(
@@ -1945,6 +2325,7 @@ var
   CenterY: Single;
   CurrentMouseAngle: Single;
   DesiredRotation: Single;
+  DeltaRatio: Single;
   DX: Single;
   DY: Single;
   I: Integer;
@@ -1966,6 +2347,8 @@ var
   RoundedBounds: TRectF;
   RoundedRotation: Single;
   ShapeBounds: TRectF;
+  TextCenter: TPointF;
+  TextData: TScreenLayoutTextData;
 begin
   Result := False;
   if FDragMode = vcdmNone then
@@ -1988,6 +2371,46 @@ begin
   if FDragMode in [vcdmShapeVertex, vcdmShapeBezierHandle] then
   begin
     FShapeInteraction.DragTo(Shift, X, Y);
+    Exit(True);
+  end;
+  if FDragMode in [vcdmTextLetterSpacing, vcdmTextLineSpacing] then
+  begin
+    if Length(FTextSpacingLayerIndices) = 0 then
+      Exit(True);
+    TextCenter := FTextSpacingCenter;
+    LocalPoint := RotatePointAround(TPointF.Create(ToLogicalX(X),
+      ToLogicalY(Y)), TextCenter, -FTextSpacingRotation);
+    LocalStartPoint := RotatePointAround(TPointF.Create(
+      ToLogicalX(FDragStartMouse.X), ToLogicalY(FDragStartMouse.Y)),
+      TextCenter, -FTextSpacingRotation);
+    if FDragMode = vcdmTextLetterSpacing then
+      DeltaRatio := (LocalPoint.X - LocalStartPoint.X) /
+        FTextSpacingFontSize
+    else
+      DeltaRatio := (LocalPoint.Y - LocalStartPoint.Y) /
+        FTextSpacingFontSize;
+    if ssShift in Shift then
+      DeltaRatio := DeltaRatio * 0.2;
+    FDocument.BeginUpdate;
+    try
+      for I := 0 to High(FTextSpacingLayerIndices) do
+      begin
+        TextData := FTextSpacingStartData[I];
+        if FDragMode = vcdmTextLetterSpacing then
+          TextData.LetterSpacingRatio := EnsureRange(
+            TextData.LetterSpacingRatio + DeltaRatio,
+            SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
+            SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX)
+        else
+          TextData.LineSpacingRatio := EnsureRange(
+            TextData.LineSpacingRatio + DeltaRatio,
+            SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN,
+            SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX);
+        FDocument.SetTextData(FTextSpacingLayerIndices[I], TextData);
+      end;
+    finally
+      FDocument.EndUpdate;
+    end;
     Exit(True);
   end;
   if FDragMode in [vcdmArcStartAngle, vcdmArcEndAngle] then
@@ -2298,7 +2721,7 @@ begin
   else if FDragIsImage then
     ApplyImageResize(X, Y)
   else
-    ApplyResizeSelection(X, Y);
+    ApplyResizeSelection(Shift, X, Y);
   Result := True;
 end;
 
@@ -2335,6 +2758,8 @@ begin
         CommitPathVerticesCommand
       else if FDragIsShape then
         CommitShapeContoursCommand
+      else if FDragIsText then
+        CommitTextResizeCommand
       else
         CommitBoundsCommand;
     if FDragMode = vcdmRotate then
@@ -2358,10 +2783,38 @@ begin
       CommitRoundedRadiusCommand;
     if FDragMode in [vcdmArcStartAngle, vcdmArcEndAngle] then
       CommitArcAnglesCommand;
+    if FDragMode in [vcdmTextLetterSpacing, vcdmTextLineSpacing] then
+      CommitTextSpacingCommand;
     if FToggleSelectionModeOnClick and not FMoveOccurred then
       FAxisAlignedSelection := not FAxisAlignedSelection;
     EndDrag;
   end;
+end;
+
+function TVectArtCanvasInteraction.CancelTextSpacingDrag: Boolean;
+var
+  I: Integer;
+begin
+  Result := FDragMode in [vcdmTextLetterSpacing,
+    vcdmTextLineSpacing];
+  if not Result then
+    Exit;
+  if FDocument <> nil then
+  begin
+    FDocument.BeginUpdate;
+    try
+      for I := 0 to High(FTextSpacingLayerIndices) do
+        if (FTextSpacingLayerIndices[I] > 0) and
+          (FTextSpacingLayerIndices[I] < FDocument.LayerCount) and
+          (FDocument[FTextSpacingLayerIndices[I]] is
+            TScreenLayoutTextLayer) then
+          FDocument.SetTextData(FTextSpacingLayerIndices[I],
+            FTextSpacingStartData[I]);
+    finally
+      FDocument.EndUpdate;
+    end;
+  end;
+  EndDrag;
 end;
 
 function TVectArtCanvasInteraction.SelectedPathVertexRects: TArray<TRect>;
@@ -2497,6 +2950,114 @@ begin
   Result := TRectF.Create(NewCenter.X - NewWidth * 0.5,
     NewCenter.Y - NewHeight * 0.5, NewCenter.X + NewWidth * 0.5,
     NewCenter.Y + NewHeight * 0.5);
+end;
+
+function TVectArtCanvasInteraction.UniformResizedBounds(
+  X, Y: Integer): TRectF;
+var
+  Anchor: TPointF;
+  Center: TPointF;
+  CurrentLogical: TPointF;
+  DesiredHandle: TPointF;
+  HandlePoint: TPointF;
+  LocalCurrent: TPointF;
+  LocalStart: TPointF;
+  MinimumScale: Single;
+  NewAnchor: TPointF;
+  NewCenter: TPointF;
+  RotationDegrees: Single;
+  Scale: Single;
+  StartAnchor: TPointF;
+  StartLogical: TPointF;
+  VectorX: Single;
+  VectorY: Single;
+begin
+  Result := FDragStartBounds;
+  if (FDocument = nil) or (FDragLayerIndex <= 0) or
+    not (FDocument[FDragLayerIndex] is TScreenLayoutTextLayer) then
+    Exit;
+  Center := FDragStartBounds.CenterPoint;
+  case FDragHandle of
+    vshTopLeft:
+    begin
+      HandlePoint := FDragStartBounds.TopLeft;
+      Anchor := FDragStartBounds.BottomRight;
+    end;
+    vshTop:
+    begin
+      HandlePoint := TPointF.Create(Center.X, FDragStartBounds.Top);
+      Anchor := TPointF.Create(Center.X, FDragStartBounds.Bottom);
+    end;
+    vshTopRight:
+    begin
+      HandlePoint := TPointF.Create(FDragStartBounds.Right,
+        FDragStartBounds.Top);
+      Anchor := TPointF.Create(FDragStartBounds.Left,
+        FDragStartBounds.Bottom);
+    end;
+    vshRight:
+    begin
+      HandlePoint := TPointF.Create(FDragStartBounds.Right, Center.Y);
+      Anchor := TPointF.Create(FDragStartBounds.Left, Center.Y);
+    end;
+    vshBottomRight:
+    begin
+      HandlePoint := FDragStartBounds.BottomRight;
+      Anchor := FDragStartBounds.TopLeft;
+    end;
+    vshBottom:
+    begin
+      HandlePoint := TPointF.Create(Center.X, FDragStartBounds.Bottom);
+      Anchor := TPointF.Create(Center.X, FDragStartBounds.Top);
+    end;
+    vshBottomLeft:
+    begin
+      HandlePoint := TPointF.Create(FDragStartBounds.Left,
+        FDragStartBounds.Bottom);
+      Anchor := TPointF.Create(FDragStartBounds.Right,
+        FDragStartBounds.Top);
+    end;
+    vshLeft:
+    begin
+      HandlePoint := TPointF.Create(FDragStartBounds.Left, Center.Y);
+      Anchor := TPointF.Create(FDragStartBounds.Right, Center.Y);
+    end;
+  else
+    Exit;
+  end;
+  RotationDegrees := TScreenLayoutTextLayer(
+    FDocument[FDragLayerIndex]).RotationDegrees;
+  StartLogical := TPointF.Create(ToLogicalX(FDragStartMouse.X),
+    ToLogicalY(FDragStartMouse.Y));
+  CurrentLogical := TPointF.Create(ToLogicalX(X), ToLogicalY(Y));
+  LocalStart := RotatePointAround(StartLogical, Center, -RotationDegrees);
+  LocalCurrent := RotatePointAround(CurrentLogical, Center,
+    -RotationDegrees);
+  DesiredHandle := TPointF.Create(
+    HandlePoint.X + LocalCurrent.X - LocalStart.X,
+    HandlePoint.Y + LocalCurrent.Y - LocalStart.Y);
+  VectorX := HandlePoint.X - Anchor.X;
+  VectorY := HandlePoint.Y - Anchor.Y;
+  Scale := ((DesiredHandle.X - Anchor.X) * VectorX +
+    (DesiredHandle.Y - Anchor.Y) * VectorY) /
+    Max(VectorX * VectorX + VectorY * VectorY, 0.001);
+  MinimumScale := Max(MIN_RECTANGLE_SIZE /
+    Max(FDragStartBounds.Width, 0.001), MIN_RECTANGLE_SIZE /
+    Max(FDragStartBounds.Height, 0.001));
+  Scale := Max(Scale, MinimumScale);
+  Result := TRectF.Create(
+    Anchor.X + (FDragStartBounds.Left - Anchor.X) * Scale,
+    Anchor.Y + (FDragStartBounds.Top - Anchor.Y) * Scale,
+    Anchor.X + (FDragStartBounds.Right - Anchor.X) * Scale,
+    Anchor.Y + (FDragStartBounds.Bottom - Anchor.Y) * Scale);
+  if not SameValue(RotationDegrees, 0.0) then
+  begin
+    NewCenter := Result.CenterPoint;
+    StartAnchor := RotatePointAround(Anchor, Center, RotationDegrees);
+    NewAnchor := RotatePointAround(Anchor, NewCenter, RotationDegrees);
+    Result.Offset(StartAnchor.X - NewAnchor.X,
+      StartAnchor.Y - NewAnchor.Y);
+  end;
 end;
 
 function TVectArtCanvasInteraction.ResizedBounds(X, Y: Integer): TRectF;

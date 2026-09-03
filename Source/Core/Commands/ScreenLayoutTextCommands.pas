@@ -62,6 +62,7 @@ begin
   Result := Default(TScreenLayoutTextData);
   if Layer = nil then
     Exit;
+  Result.Alignment := Layer.Alignment;
   Result.Bounds := Layer.Bounds;
   Result.FontFamily := Layer.FontFamily;
   Result.FontSize := Layer.FontSize;
@@ -74,6 +75,7 @@ begin
   Result.RotationDegrees := Layer.RotationDegrees;
   Result.Text := Layer.Text;
   Result.TextColor := Layer.FillColor;
+  Result.TransformMode := Layer.TransformMode;
   Result.Visible := Layer.Visible;
   Result.WrapWidth := Layer.WrapWidth;
 end;

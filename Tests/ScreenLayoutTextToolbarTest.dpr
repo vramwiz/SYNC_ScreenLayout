@@ -70,6 +70,22 @@ begin
       'stroke width edit remained visible for text selection');
     Check(Toolbar.FontFamilyCombo.ItemIndex = 0,
       'selected font family was not reflected in the combo');
+    Check(Toolbar.TextAlignmentButton.Visible,
+      'text alignment popup button was hidden for text selection');
+    Check(not Toolbar.TextAlignmentPanel.Visible,
+      'text alignment popup was initially visible');
+    Check(not Toolbar.TextAlignmentCell(sltaTopLeft).Enabled,
+      'top alignment remained enabled in whole-frame fit mode');
+    Check(Toolbar.TextAlignmentCell(sltaMiddleLeft).Enabled,
+      'horizontal alignment was disabled in whole-frame fit mode');
+    Check(not Toolbar.TextAlignmentCell(sltaBottomRight).Enabled,
+      'bottom alignment remained enabled in whole-frame fit mode');
+    Toolbar.TextAlignmentButton.Click;
+    Check(Toolbar.TextAlignmentPanel.Visible,
+      'text alignment popup did not open');
+    Toolbar.TextAlignmentButton.Click;
+    Check(not Toolbar.TextAlignmentPanel.Visible,
+      'text alignment popup did not close');
 
     NewFontFamily := Toolbar.FontFamilyCombo.Items[1];
     Toolbar.ApplyFontFamily(NewFontFamily);
@@ -94,6 +110,18 @@ begin
     Check(fsBold in TScreenLayoutTextLayer(Document[1]).FontStyle,
       'bold style redo failed');
 
+    Toolbar.ApplyTextAlignment(sltaMiddleCenter);
+    Check(TScreenLayoutTextLayer(Document[1]).Alignment = sltaMiddleCenter,
+      'text alignment was not applied');
+    Check(Toolbar.TextAlignmentCell(sltaMiddleCenter).Selected,
+      'alignment popup did not reflect the selected alignment');
+    History.Undo;
+    Check(TScreenLayoutTextLayer(Document[1]).Alignment = sltaTopLeft,
+      'text alignment undo failed');
+    History.Redo;
+    Check(TScreenLayoutTextLayer(Document[1]).Alignment = sltaMiddleCenter,
+      'text alignment redo failed');
+
     Toolbar.ApplyTextSpacing(True, 0.25);
     Toolbar.ApplyTextSpacing(False, 0.5);
     Check(TScreenLayoutTextLayer(Document[1]).LetterSpacingRatio = 0.25,
@@ -107,9 +135,25 @@ begin
     Check(TScreenLayoutTextLayer(Document[1]).LineSpacingRatio = 0.5,
       'line spacing redo failed');
 
+    Toolbar.ApplyTextSpacing(True, 20.0);
+    Check(TScreenLayoutTextLayer(Document[1]).LetterSpacingRatio =
+      SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX,
+      'letter spacing API exceeded its upper limit');
+    History.Undo;
+    Toolbar.ApplyTextSpacing(False, 20.0);
+    Check(TScreenLayoutTextLayer(Document[1]).LineSpacingRatio =
+      SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX,
+      'line spacing API exceeded its upper limit');
+    History.Undo;
+
+    TScreenLayoutTextLayer(Document[1]).TransformMode := slttmFrameFit;
     Json := SerializeVectArtDocument(Document);
     Check(Pos('"bold":true', Json) > 0,
       'bold style was not written to JSON');
+    Check(Pos('"alignment":"middleCenter"', Json) > 0,
+      'text alignment was not written to JSON');
+    Check(Pos('"transformMode":"frameFit"', Json) > 0,
+      'text transform mode was not written to JSON');
     LoadedDocument := TVectArtDocument.Create;
     try
       Check(TryDeserializeVectArtDocument(Json, LoadedDocument,
@@ -122,11 +166,17 @@ begin
         0.25, 'letter spacing was not restored from JSON');
       Check(TScreenLayoutTextLayer(LoadedDocument[1]).LineSpacingRatio =
         0.5, 'line spacing was not restored from JSON');
+      Check(TScreenLayoutTextLayer(LoadedDocument[1]).Alignment =
+        sltaMiddleCenter, 'text alignment was not restored from JSON');
+      Check(TScreenLayoutTextLayer(LoadedDocument[1]).TransformMode =
+        slttmFrameFit, 'text transform mode was not restored from JSON');
     finally
       LoadedDocument.Free;
     end;
 
     LegacyJson := StringReplace(Json, ',"bold":true', '', []);
+    LegacyJson := StringReplace(LegacyJson,
+      ',"alignment":"middleCenter"', '', []);
     LegacyJson := StringReplace(LegacyJson, ',"italic":false', '', []);
     LegacyJson := StringReplace(LegacyJson, ',"underline":false', '', []);
     LegacyJson := StringReplace(LegacyJson, ',"strikeOut":false', '', []);
@@ -134,6 +184,8 @@ begin
       ',"letterSpacingRatio":0.25', '', []);
     LegacyJson := StringReplace(LegacyJson,
       ',"lineSpacingRatio":0.5', '', []);
+    LegacyJson := StringReplace(LegacyJson,
+      ',"transformMode":"frameFit"', '', []);
     LoadedDocument := TVectArtDocument.Create;
     try
       Check(TryDeserializeVectArtDocument(LegacyJson, LoadedDocument,
@@ -145,6 +197,11 @@ begin
         'missing letter spacing did not default to zero');
       Check(TScreenLayoutTextLayer(LoadedDocument[1]).LineSpacingRatio = 0,
         'missing line spacing did not default to zero');
+      Check(TScreenLayoutTextLayer(LoadedDocument[1]).Alignment =
+        sltaTopLeft, 'missing alignment did not default to top-left');
+      Check(TScreenLayoutTextLayer(LoadedDocument[1]).TransformMode =
+        slttmUniformScale,
+        'missing transform mode did not default to uniform scale');
     finally
       LoadedDocument.Free;
     end;
@@ -155,6 +212,8 @@ begin
       'font family combo remained enabled for a locked text layer');
     Check(not Toolbar.FontStyleButton(fsBold).Enabled,
       'font style button remained enabled for a locked text layer');
+    Check(not Toolbar.TextAlignmentButton.Enabled,
+      'alignment button remained enabled for a locked text layer');
   finally
     State.Free;
     History.Free;

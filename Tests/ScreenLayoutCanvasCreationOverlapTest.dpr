@@ -4,8 +4,11 @@ program ScreenLayoutCanvasCreationOverlapTest;
 
 uses
   System.Classes,
+  System.Math,
   System.SysUtils,
   System.Types,
+  Winapi.Messages,
+  Winapi.Windows,
   Vcl.Controls,
   Vcl.Forms,
   Vcl.Graphics,
@@ -30,6 +33,8 @@ type
 
   TTestCanvasControl = class(TVectArtCanvasControl)
   public
+    procedure ClickAt(const PointValue: TPoint);
+    procedure DoubleClickSelected;
     procedure DragCreate(const StartPoint, EndPoint: TPoint);
   end;
 
@@ -52,6 +57,17 @@ begin
   MouseUp(mbLeft, [], EndPoint.X, EndPoint.Y);
 end;
 
+procedure TTestCanvasControl.ClickAt(const PointValue: TPoint);
+begin
+  MouseDown(mbLeft, [], PointValue.X, PointValue.Y);
+  MouseUp(mbLeft, [], PointValue.X, PointValue.Y);
+end;
+
+procedure TTestCanvasControl.DoubleClickSelected;
+begin
+  DblClick;
+end;
+
 procedure Run;
 var
   CanvasControl: TTestCanvasControl;
@@ -64,6 +80,8 @@ var
   Harness: TDocumentRefreshHarness;
   History: TVectArtEditHistory;
   PropertiesFrame: TObjectPropertiesFrame;
+  ResizedBounds: TRectF;
+  ResizedWrapWidth: Single;
 begin
   Document := TVectArtDocument.Create;
   EditorState := TVectArtEditorState.Create;
@@ -109,6 +127,53 @@ begin
       'overlapping rectangle was not created');
     Check(Document.SelectedIndex = 2,
       'newly created overlapping rectangle was not selected');
+
+    EditorState.OpenGroup := nil;
+    EditorState.CurrentTool := vetText;
+    CanvasControl.DragCreate(Point(190, 90), Point(235, 130));
+    Check(Document.LayerCount = 4,
+      'text frame was not created for the focus-finish test');
+    Check(Document[3] is TScreenLayoutTextLayer,
+      'created text frame has the wrong layer type');
+    Check(Form.ActiveControl <> nil,
+      'text input control did not receive focus');
+    SendMessage(Form.ActiveControl.Handle, WM_CHAR, Ord('A'), 0);
+    Application.ProcessMessages;
+    Check(TScreenLayoutTextLayer(Document[3]).Text = 'A',
+      'test text was not committed through the input control');
+    CanvasControl.ClickAt(Point(150, 150));
+    Check(EditorState.CurrentTool = vetSelect,
+      'clicking outside edited text did not activate selection mode');
+    Check(Document.LayerCount = 4,
+      'clicking outside edited text created another text frame');
+    Check(TScreenLayoutTextLayer(Document[3]).Text = 'A',
+      'clicking outside edited text did not preserve committed input');
+    Check(Document.SelectedIndex = 2,
+      Format('the finish click was not continued as a selection click (%d)',
+        [Document.SelectedIndex]));
+
+    ResizedBounds := TRectF.Create(-70, -35, 65, 55);
+    ResizedWrapWidth := TScreenLayoutTextLayer(Document[3]).WrapWidth;
+    TScreenLayoutTextLayer(Document[3]).Bounds := ResizedBounds;
+    Document.SelectedIndex := 3;
+    CanvasControl.DoubleClickSelected;
+    Check(Form.ActiveControl <> nil,
+      'existing text input control did not receive focus');
+    SendMessage(Form.ActiveControl.Handle, WM_CHAR, Ord('B'), 0);
+    Application.ProcessMessages;
+    CanvasControl.ClickAt(Point(150, 150));
+    Check(SameValue(TScreenLayoutTextLayer(Document[3]).Bounds.Left,
+      ResizedBounds.Left) and
+      SameValue(TScreenLayoutTextLayer(Document[3]).Bounds.Top,
+      ResizedBounds.Top) and
+      SameValue(TScreenLayoutTextLayer(Document[3]).Bounds.Right,
+      ResizedBounds.Right) and
+      SameValue(TScreenLayoutTextLayer(Document[3]).Bounds.Bottom,
+      ResizedBounds.Bottom),
+      're-editing text reset the resized bounds');
+    Check(SameValue(TScreenLayoutTextLayer(Document[3]).WrapWidth,
+      ResizedWrapWidth),
+      're-editing text changed the existing wrap width');
   finally
     Document.OnChanged := nil;
     PropertiesFrame.Context := nil;

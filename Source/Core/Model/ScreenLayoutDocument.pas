@@ -8,7 +8,18 @@ uses
   System.Classes, System.Generics.Collections, System.SysUtils, System.Types,
   Vcl.Graphics, ScreenLayoutFilters;
 
+const
+  SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN = -0.5;
+  SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX = 1.0;
+  SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN = -0.5;
+  SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX = 3.0;
+
 type
+  TScreenLayoutTextAlignment = (sltaTopLeft, sltaTopCenter,
+    sltaTopRight, sltaMiddleLeft, sltaMiddleCenter, sltaMiddleRight,
+    sltaBottomLeft, sltaBottomCenter, sltaBottomRight);
+  TScreenLayoutTextTransformMode = (slttmUniformScale, slttmFrameFit);
+
   TVectArtLayerKind = (vlkCanvas, vlkRectangle, vlkRoundedRectangle,
     vlkPath, vlkImage, vlkShape, vlkEllipse, vlkArc, vlkRectangleLine,
     vlkRoundedRectangleLine, vlkEllipseLine, vlkEllipseArcShape, vlkText,
@@ -174,29 +185,38 @@ type
 
   TScreenLayoutTextLayer = class(TVectArtRectangleLayer)
   private
+    FAlignment: TScreenLayoutTextAlignment;
     FFontFamily: string;
     FFontSize: Single;
     FFontStyle: TFontStyles;
     FLetterSpacingRatio: Single;
     FLineSpacingRatio: Single;
     FText: string;
+    FTransformMode: TScreenLayoutTextTransformMode;
     FWrapWidth: Single;
+    procedure SetLetterSpacingRatio(Value: Single);
+    procedure SetLineSpacingRatio(Value: Single);
   public
     constructor Create(const AName: string; const ABounds: TRectF;
       const AText, AFontFamily: string; AFontSize, AWrapWidth: Single;
       ATextColor: TColor);
+    property Alignment: TScreenLayoutTextAlignment read FAlignment
+      write FAlignment;
     property FontFamily: string read FFontFamily write FFontFamily;
     property FontSize: Single read FFontSize write FFontSize;
     property FontStyle: TFontStyles read FFontStyle write FFontStyle;
     property LetterSpacingRatio: Single read FLetterSpacingRatio
-      write FLetterSpacingRatio;
+      write SetLetterSpacingRatio;
     property LineSpacingRatio: Single read FLineSpacingRatio
-      write FLineSpacingRatio;
+      write SetLineSpacingRatio;
     property Text: string read FText write FText;
+    property TransformMode: TScreenLayoutTextTransformMode
+      read FTransformMode write FTransformMode;
     property WrapWidth: Single read FWrapWidth write FWrapWidth;
   end;
 
   TScreenLayoutTextData = record
+    Alignment: TScreenLayoutTextAlignment; // 枠内の上中下と左中央右を組み合わせた配置。
     Bounds: TRectF;          // 文字の組版実寸または変形後の表示範囲。
     FontFamily: string;      // Skiaへ渡す優先フォントファミリー。
     FontSize: Single;        // 変形前の文書座標単位フォントサイズ。
@@ -209,6 +229,7 @@ type
     RotationDegrees: Single; // 中心回りの時計回り角度。
     Text: string;            // 明示改行を含むUnicode文字列。
     TextColor: TColor;       // 本文色。基底のFillColorと同じ値を保持する。
+    TransformMode: TScreenLayoutTextTransformMode; // 枠変形時の縦横比拘束方式。
     Visible: Boolean;        // 描画対象に含める状態。
     WrapWidth: Single;       // 入力時の自動折り返し幅。
   end;
@@ -922,7 +943,22 @@ begin
   FText := AText;
   FFontFamily := AFontFamily;
   FFontSize := Max(AFontSize, 1.0);
+  FTransformMode := slttmUniformScale;
   FWrapWidth := Max(AWrapWidth, 1.0);
+end;
+
+procedure TScreenLayoutTextLayer.SetLetterSpacingRatio(Value: Single);
+begin
+  FLetterSpacingRatio := EnsureRange(Value,
+    SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
+    SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX);
+end;
+
+procedure TScreenLayoutTextLayer.SetLineSpacingRatio(Value: Single);
+begin
+  FLineSpacingRatio := EnsureRange(Value,
+    SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN,
+    SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX);
 end;
 
 { TScreenLayoutRectangleLineLayer }
@@ -1457,12 +1493,14 @@ begin
   Result := EnsureRange(Index, 1, FLayers.Count);
   TextLayer := TScreenLayoutTextLayer.Create(Data.Name, Data.Bounds,
     Data.Text, Data.FontFamily, Data.FontSize, Data.WrapWidth, Data.TextColor);
+  TextLayer.Alignment := Data.Alignment;
   TextLayer.FontStyle := Data.FontStyle;
   TextLayer.LetterSpacingRatio := Data.LetterSpacingRatio;
   TextLayer.LineSpacingRatio := Data.LineSpacingRatio;
   TextLayer.Locked := Data.Locked;
   TextLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
   TextLayer.RotationDegrees := Data.RotationDegrees;
+  TextLayer.TransformMode := Data.TransformMode;
   TextLayer.Visible := Data.Visible;
   FLayers.Insert(Result, TextLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
@@ -1891,6 +1929,7 @@ begin
   if not Result then
     Exit;
   TextLayer := TScreenLayoutTextLayer(FLayers[Index]);
+  Data.Alignment := TextLayer.Alignment;
   Data.Bounds := TextLayer.Bounds;
   Data.FontFamily := TextLayer.FontFamily;
   Data.FontSize := TextLayer.FontSize;
@@ -1903,6 +1942,7 @@ begin
   Data.RotationDegrees := TextLayer.RotationDegrees;
   Data.Text := TextLayer.Text;
   Data.TextColor := TextLayer.FillColor;
+  Data.TransformMode := TextLayer.TransformMode;
   Data.Visible := TextLayer.Visible;
   Data.WrapWidth := TextLayer.WrapWidth;
   FLayers.Delete(Index);
@@ -2420,20 +2460,24 @@ begin
     not (FLayers[Index] is TScreenLayoutTextLayer) then
     Exit;
   TextLayer := TScreenLayoutTextLayer(FLayers[Index]);
+  TextLayer.Alignment := Data.Alignment;
   TextLayer.Bounds := Data.Bounds;
   TextLayer.FillColor := Data.TextColor;
   TextLayer.FontFamily := Data.FontFamily;
   TextLayer.FontSize := Max(Data.FontSize, 1.0);
   TextLayer.FontStyle := Data.FontStyle;
   TextLayer.LetterSpacingRatio := EnsureRange(Data.LetterSpacingRatio,
-    -0.9, 10.0);
+    SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
+    SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX);
   TextLayer.LineSpacingRatio := EnsureRange(Data.LineSpacingRatio,
-    -0.9, 10.0);
+    SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN,
+    SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX);
   TextLayer.Locked := Data.Locked;
   TextLayer.Name := Data.Name;
   TextLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
   TextLayer.RotationDegrees := Data.RotationDegrees;
   TextLayer.Text := Data.Text;
+  TextLayer.TransformMode := Data.TransformMode;
   TextLayer.Visible := Data.Visible;
   TextLayer.WrapWidth := Max(Data.WrapWidth, 1.0);
   Changed;
