@@ -121,6 +121,7 @@
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJsonWriter.pas"/>
         <DCCReference Include="Source\Editor\ScreenLayoutCanvas.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutCanvasInteraction.pas"/>
+        <DCCReference Include="Source\Editor\Interaction\ScreenLayoutTextPathCharacterInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutContextMenuInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutFilterInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutGroupInteraction.pas"/>

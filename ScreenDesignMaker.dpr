@@ -56,6 +56,8 @@ uses
   ScreenLayoutDocumentJsonWriter in 'Source\Persistence\ScreenLayoutDocumentJsonWriter.pas',
   ScreenLayoutCanvas in 'Source\Editor\ScreenLayoutCanvas.pas',
   ScreenLayoutCanvasInteraction in 'Source\Editor\Interaction\ScreenLayoutCanvasInteraction.pas',
+  ScreenLayoutTextPathCharacterInteraction in
+    'Source\Editor\Interaction\ScreenLayoutTextPathCharacterInteraction.pas',
   ScreenLayoutContextMenuInteraction in 'Source\Editor\Interaction\ScreenLayoutContextMenuInteraction.pas',
   ScreenLayoutFilterInteraction in 'Source\Editor\Interaction\ScreenLayoutFilterInteraction.pas',
   ScreenLayoutGroupInteraction in 'Source\Editor\Interaction\ScreenLayoutGroupInteraction.pas',

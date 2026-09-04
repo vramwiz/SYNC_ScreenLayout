@@ -8,7 +8,7 @@ uses
   ScreenLayoutDocument, ScreenLayoutEditHistory,
   ScreenLayoutEditCommands,
   ScreenLayoutPathInteraction, ScreenLayoutSelectionGeometry,
-  ScreenLayoutShapeInteraction;
+  ScreenLayoutShapeInteraction, ScreenLayoutTextPathCharacterInteraction;
 
 type
   TVectArtCanvasDragMode = (vcdmNone, vcdmMove, vcdmResize, vcdmRotate,
@@ -99,15 +99,9 @@ type
     FTextSpacingFontSize: Single;
     FTextSpacingGapIndex: Integer;
     FTextResizeStartData: TScreenLayoutTextData;
-    FSelectedTextPathCharacter: Integer;
-    FTextPathCharacterAdvanceWidthStart: Single;
-    FTextPathCharacterAnchor: TPoint;
     FTextPathCharacterClickCandidate: Integer;
-    FTextPathCharacterMousePathDistanceStart: Single;
-    FTextPathCharacterOffsetStart: Single;
-    FTextPathCharacterPathDistanceStart: Single;
-    FTextPathCharacterScaleStart: Single;
-    FTextPathCharacterStartData: TScreenLayoutTextData;
+    FTextPathCharacterInteraction:
+      TScreenLayoutTextPathCharacterInteraction;
     FPathInteraction: TScreenLayoutPathInteraction;
     FPathStructureEditingEnabled: Boolean;
     FShapeInteraction: TScreenLayoutShapeInteraction;
@@ -138,7 +132,6 @@ type
     procedure CommitShapeContoursCommand;
     procedure CommitTextSpacingCommand;
     procedure CommitTextPathRotationCommand;
-    procedure CommitTextPathCharacterTransformCommand;
     procedure CommitTextResizeCommand;
     function AxisAlignedResizedBounds(X, Y: Integer;
       RotationDegrees: Single): TRectF;
@@ -156,7 +149,6 @@ type
       out Geometry: TVectArtSelectionGeometry): Boolean;
     function SelectedLayersLogicalRect: TRectF;
     function SelectedLayersScreenRect: TRect;
-    function TextPathCharacterAt(X, Y: Integer): Integer;
     function SelectedArcAngleHandlesCore(
       out Handles: TScreenLayoutArcAngleHandles): Boolean;
     function SelectedRoundedRectangleCornerHandles:
@@ -275,38 +267,6 @@ const
   TEXT_SPACING_ARROW_OUTSIDE_OFFSET = 24;
   TEXT_SPACING_HIT_ALONG_HALF_LENGTH = 23;
   TEXT_SPACING_HIT_CROSS_HALF_LENGTH = 10;
-  TEXT_PATH_CHARACTER_HIT_PADDING = 6;
-
-function HitTestTextPathCharacterHandle(const PointValue: TPoint;
-  const Geometry: TVectArtSelectionGeometry): TVectArtSelectionHandle;
-var
-  Center: TPoint;
-  DistanceSquared: Single;
-  Handle: TVectArtSelectionHandle;
-  HitRect: TRect;
-  NearestDistanceSquared: Single;
-begin
-  Result := vshNone;
-  NearestDistanceSquared := MaxSingle;
-  for Handle := vshTopLeft to vshLeft do
-    if not Geometry.Handles[Handle].IsEmpty then
-    begin
-      HitRect := Geometry.Handles[Handle];
-      InflateRect(HitRect, TEXT_PATH_CHARACTER_HIT_PADDING,
-        TEXT_PATH_CHARACTER_HIT_PADDING);
-      if PtInRect(HitRect, PointValue) then
-      begin
-        Center := Geometry.Handles[Handle].CenterPoint;
-        DistanceSquared := Sqr(PointValue.X - Center.X) +
-          Sqr(PointValue.Y - Center.Y);
-        if DistanceSquared < NearestDistanceSquared then
-        begin
-          Result := Handle;
-          NearestDistanceSquared := DistanceSquared;
-        end;
-      end;
-    end;
-end;
 
 function RoundedCornerCursor(
   Corner: TScreenLayoutRoundedCorner): TCursor;
@@ -323,8 +283,9 @@ begin
   inherited Create;
   FPathInteraction := TScreenLayoutPathInteraction.Create;
   FShapeInteraction := TScreenLayoutShapeInteraction.Create;
+  FTextPathCharacterInteraction :=
+    TScreenLayoutTextPathCharacterInteraction.Create;
   FDragLayerIndex := -1;
-  FSelectedTextPathCharacter := -1;
   FTextPathCharacterClickCandidate := -1;
   FTextSpacingGapIndex := -1;
   FSelectionModeLayerIndex := -1;
@@ -332,6 +293,7 @@ end;
 
 destructor TVectArtCanvasInteraction.Destroy;
 begin
+  FTextPathCharacterInteraction.Free;
   FPathInteraction.Free;
   FShapeInteraction.Free;
   inherited Destroy;
@@ -350,7 +312,6 @@ begin
   begin
     FAxisAlignedSelection := False;
     FSelectedRoundedCorner := slrcNone;
-    FSelectedTextPathCharacter := -1;
     FSelectionModeLayerIndex := SelectedLayerIndex;
   end;
   FDocument := ADocument;
@@ -358,6 +319,8 @@ begin
   FZoom := AZoom;
   FPathInteraction.Configure(ADocument, FEditHistory, ACanvasBounds, AZoom);
   FShapeInteraction.Configure(ADocument, FEditHistory, ACanvasBounds, AZoom);
+  FTextPathCharacterInteraction.Configure(ADocument, FEditHistory,
+    ACanvasBounds, AZoom);
 end;
 
 procedure TVectArtCanvasInteraction.SetEditHistory(Value: TVectArtEditHistory);
@@ -365,6 +328,8 @@ begin
   FEditHistory := Value;
   FPathInteraction.Configure(FDocument, Value, FCanvasBounds, FZoom);
   FShapeInteraction.Configure(FDocument, Value, FCanvasBounds, FZoom);
+  FTextPathCharacterInteraction.Configure(FDocument, Value,
+    FCanvasBounds, FZoom);
 end;
 
 function TVectArtCanvasInteraction.ToLogicalX(Value: Single): Single;
@@ -429,18 +394,6 @@ begin
     Exit(False);
   for I := 0 to High(Left) do
     if not SameValue(Left[I], Right[I]) then
-      Exit(False);
-  Result := True;
-end;
-
-function SameBooleanArrays(const Left, Right: TArray<Boolean>): Boolean;
-var
-  I: Integer;
-begin
-  if Length(Left) <> Length(Right) then
-    Exit(False);
-  for I := 0 to High(Left) do
-    if Left[I] <> Right[I] then
       Exit(False);
   Result := True;
 end;
@@ -910,10 +863,13 @@ begin
     Exit(crSizeWE);
   if FDragMode = vcdmTextLineSpacing then
     Exit(crSizeNS);
-  if FDragMode = vcdmTextPathCharacterMove then
+  if FDragMode in [vcdmTextPathCharacterMove,
+    vcdmTextPathCharacterResize] then
+  begin
+    if FTextPathCharacterInteraction.CursorAt(X, Y, VertexCursor) then
+      Exit(VertexCursor);
     Exit(crSizeAll);
-  if FDragMode = vcdmTextPathCharacterResize then
-    Exit(crSizeNWSE);
+  end;
   if FDragMode = vcdmRangeSelect then
     Exit(crCross);
   if FDragMode in [vcdmPathVertex, vcdmPathBezierHandle, vcdmShapeVertex,
@@ -969,18 +925,8 @@ begin
     if not FDocument[FDocument.SelectedIndex].Locked and
       PtInRect(CornerHandle.Bounds, Point(X, Y)) then
       Exit(RoundedCornerCursor(CornerHandle.Corner));
-  if SelectedTextPathCharacterGeometry(Geometry) and
-    not FDocument[FDocument.SelectedIndex].Locked then
-  begin
-    Handle := HitTestSelectionHandle(Point(X, Y), Geometry);
-    if Handle <> vshNone then
-      Exit(SelectionHandleCursor(Handle));
-    if TextPathCharacterAt(X, Y) = FSelectedTextPathCharacter then
-      Exit(crSizeAll);
-    Handle := HitTestTextPathCharacterHandle(Point(X, Y), Geometry);
-    if Handle <> vshNone then
-      Exit(SelectionHandleCursor(Handle));
-  end;
+  if FTextPathCharacterInteraction.CursorAt(X, Y, VertexCursor) then
+    Exit(VertexCursor);
   SelectionRect := SelectedLayersScreenRect;
   if not SelectionRect.IsEmpty and not SelectionContainsLockedLayer then
   begin
@@ -1073,27 +1019,6 @@ begin
     FEditHistory.AddApplied(Command)
   else
     Command.Free;
-end;
-
-procedure TVectArtCanvasInteraction.CommitTextPathCharacterTransformCommand;
-var
-  NewData: TScreenLayoutTextData;
-begin
-  if (FEditHistory = nil) or (FDocument = nil) or
-    (FDragLayerIndex <= 0) or
-    not (FDocument[FDragLayerIndex] is TScreenLayoutTextPathLayer) then
-    Exit;
-  NewData := CaptureScreenLayoutTextData(
-    TScreenLayoutTextPathLayer(FDocument[FDragLayerIndex]));
-  if SameSingleArrays(FTextPathCharacterStartData.CharacterPathOffsets,
-      NewData.CharacterPathOffsets) and
-    SameBooleanArrays(FTextPathCharacterStartData.CharacterPositionManual,
-      NewData.CharacterPositionManual) and
-    SameSingleArrays(FTextPathCharacterStartData.CharacterScales,
-      NewData.CharacterScales) then
-    Exit;
-  FEditHistory.AddApplied(TScreenLayoutTextDataCommand.Create(FDocument,
-    FDragLayerIndex, FTextPathCharacterStartData, NewData));
 end;
 
 procedure TVectArtCanvasInteraction.CommitTextSpacingCommand;
@@ -1675,6 +1600,7 @@ begin
   FDragHandle := vshNone;
   FDragLayerIndex := -1;
   FTextPathCharacterClickCandidate := -1;
+  FTextPathCharacterInteraction.EndDrag;
   FPathInteraction.EndDrag;
   FShapeInteraction.EndDrag;
   FDragIsImage := False;
@@ -2221,91 +2147,10 @@ begin
     SelectionFrameOffset(0, FZoom));
 end;
 
-function TVectArtCanvasInteraction.TextPathCharacterAt(X, Y: Integer): Integer;
-var
-  CandidateDistance: Single;
-  Delta: TPointF;
-  HitPadding: Single;
-  I: Integer;
-  Layer: TScreenLayoutTextPathLayer;
-  LocalX: Single;
-  LocalY: Single;
-  NearestDistance: Single;
-  Placements: TArray<TScreenLayoutTextPathPlacement>;
-  PointValue: TPointF;
-begin
-  Result := -1;
-  if (FDocument = nil) or (FDocument.SelectionCount <> 1) or
-    (FDocument.SelectedIndex <= 0) or
-    not (FDocument[FDocument.SelectedIndex] is
-      TScreenLayoutTextPathLayer) then
-    Exit;
-  Layer := TScreenLayoutTextPathLayer(FDocument[FDocument.SelectedIndex]);
-  Placements := BuildScreenLayoutTextPathPlacements(Layer);
-  PointValue := TPointF.Create(ToLogicalX(X), ToLogicalY(Y));
-  HitPadding := TEXT_PATH_CHARACTER_HIT_PADDING / FZoom;
-  NearestDistance := MaxSingle;
-  for I := 0 to High(Placements) do
-  begin
-    Delta := TPointF.Create(PointValue.X - Placements[I].Anchor.X,
-      PointValue.Y - Placements[I].Anchor.Y);
-    LocalX := Delta.X * Placements[I].Tangent.X +
-      Delta.Y * Placements[I].Tangent.Y;
-    LocalY := Delta.X * -Placements[I].Tangent.Y +
-      Delta.Y * Placements[I].Tangent.X;
-    if (LocalX >= -Placements[I].AdvanceWidth * 0.5 - HitPadding) and
-      (LocalX <= Placements[I].AdvanceWidth * 0.5 + HitPadding) and
-      (LocalY >= -Placements[I].CellHeight - HitPadding) and
-      (LocalY <= HitPadding) then
-    begin
-      CandidateDistance := Sqr(LocalX) +
-        Sqr(LocalY + Placements[I].CellHeight * 0.5);
-      if CandidateDistance < NearestDistance then
-      begin
-        Result := Placements[I].CharacterIndex;
-        NearestDistance := CandidateDistance;
-      end;
-    end;
-  end;
-end;
-
 function TVectArtCanvasInteraction.SelectedTextPathCharacterGeometry(
   out Geometry: TVectArtSelectionGeometry): Boolean;
-var
-  I: Integer;
-  J: Integer;
-  Layer: TScreenLayoutTextPathLayer;
-  Placements: TArray<TScreenLayoutTextPathPlacement>;
-  ScreenQuad: TVectArtScreenQuad;
 begin
-  Result := False;
-  Geometry := Default(TVectArtSelectionGeometry);
-  if (FSelectedTextPathCharacter < 0) or (FDocument = nil) or
-    (FDocument.SelectionCount <> 1) or (FDocument.SelectedIndex <= 0) or
-    not (FDocument[FDocument.SelectedIndex] is
-      TScreenLayoutTextPathLayer) then
-    Exit;
-  Layer := TScreenLayoutTextPathLayer(FDocument[FDocument.SelectedIndex]);
-  Placements := BuildScreenLayoutTextPathPlacements(Layer);
-  for I := 0 to High(Placements) do
-    if Placements[I].CharacterIndex = FSelectedTextPathCharacter then
-    begin
-      for J := 0 to High(ScreenQuad) do
-        ScreenQuad[J] := Point(
-          ToScreenX(Placements[I].Corners[J].X),
-          ToScreenY(Placements[I].Corners[J].Y));
-      Geometry := BuildRotatedSelectionGeometry(ScreenQuad,
-        SelectionFrameOffset(0, FZoom));
-      Geometry.Handles[vshTop] := TRect.Empty;
-      Geometry.Handles[vshRight] := TRect.Empty;
-      Geometry.Handles[vshBottom] := TRect.Empty;
-      Geometry.Handles[vshLeft] := TRect.Empty;
-      Geometry.PrimaryRotationHandle := TRect.Empty;
-      Geometry.RotationStem[0] := TPoint.Zero;
-      Geometry.RotationStem[1] := TPoint.Zero;
-      Exit(True);
-    end;
-  FSelectedTextPathCharacter := -1;
+  Result := FTextPathCharacterInteraction.SelectedGeometry(Geometry);
 end;
 
 function TVectArtCanvasInteraction.SelectedLayersScreenRect: TRect;
@@ -2338,9 +2183,7 @@ var
   ArcShapeLayer: TScreenLayoutEllipseArcShapeLayer;
   CenterX: Single;
   CenterY: Single;
-  CharacterGeometry: TVectArtSelectionGeometry;
-  CharacterPathOffsets: TArray<Single>;
-  CharacterScales: TArray<Single>;
+  CharacterDragMode: TScreenLayoutTextPathCharacterDragMode;
   CornerHandle: TScreenLayoutRoundedCornerHandle;
   CornerHandles: TArray<TScreenLayoutRoundedCornerHandle>;
   CtrlTextResize: Boolean;
@@ -2348,9 +2191,7 @@ var
   ImageBounds: TRectF;
   ImageLayer: TVectArtImageLayer;
   PathBounds: TRectF;
-  PathDistance: Single;
   PathLayer: TVectArtPathLayer;
-  PathPoints: TArray<TPointF>;
   RectangleLine: TScreenLayoutRectangleLineLayer;
   RectangleLayer: TVectArtRectangleLayer;
   RadiusHandleRect: TRect;
@@ -2360,8 +2201,6 @@ var
   ShapeBounds: TRectF;
   ShapeLayer: TScreenLayoutShapeLayer;
   TextLayer: TScreenLayoutTextLayer;
-  TextPathLayer: TScreenLayoutTextPathLayer;
-  TextPathPlacements: TArray<TScreenLayoutTextPathPlacement>;
   TextData: TScreenLayoutTextData;
   TextIndividualHandles: TArray<TScreenLayoutTextIndividualSpacingHandle>;
   TextSelection: TArray<Integer>;
@@ -2551,77 +2390,21 @@ begin
       Exit(True);
     end;
   FSelectedRoundedCorner := slrcNone;
-  if not SelectionContainsLockedLayer and
-    SelectedTextPathCharacterGeometry(CharacterGeometry) then
+  if not SelectionContainsLockedLayer then
   begin
-    FDragHandle := HitTestSelectionHandle(Point(X, Y), CharacterGeometry);
-    if (FDragHandle = vshNone) and
-      (TextPathCharacterAt(X, Y) <> FSelectedTextPathCharacter) then
-      FDragHandle := HitTestTextPathCharacterHandle(
-        Point(X, Y), CharacterGeometry);
-    if FDragHandle <> vshNone then
+    CharacterDragMode := FTextPathCharacterInteraction.BeginDragAt(X, Y);
+    if CharacterDragMode <> sltpcdmNone then
     begin
-      FDragMode := vcdmTextPathCharacterResize;
       FDragLayerIndex := FDocument.SelectedIndex;
-      TextPathLayer := TScreenLayoutTextPathLayer(
-        FDocument[FDragLayerIndex]);
-      FTextPathCharacterStartData :=
-        CaptureScreenLayoutTextData(TextPathLayer);
-      CharacterScales :=
-        FTextPathCharacterStartData.CharacterScales;
-      if FSelectedTextPathCharacter < Length(CharacterScales) then
-        FTextPathCharacterScaleStart :=
-          CharacterScales[FSelectedTextPathCharacter]
-      else
-        FTextPathCharacterScaleStart := 1.0;
-      TextPathPlacements :=
-        BuildScreenLayoutTextPathPlacements(TextPathLayer);
-      for I := 0 to High(TextPathPlacements) do
-        if TextPathPlacements[I].CharacterIndex =
-          FSelectedTextPathCharacter then
-        begin
-          FTextPathCharacterAnchor := Point(
-            ToScreenX(TextPathPlacements[I].Anchor.X),
-            ToScreenY(TextPathPlacements[I].Anchor.Y));
-          Break;
-        end;
       FDragStartMouse := Point(X, Y);
+      if CharacterDragMode = sltpcdmMove then
+        FDragMode := vcdmTextPathCharacterMove
+      else
+      begin
+        FDragMode := vcdmTextPathCharacterResize;
+        FDragHandle := FTextPathCharacterInteraction.DragHandle;
+      end;
       Exit(True);
-    end;
-    if TextPathCharacterAt(X, Y) = FSelectedTextPathCharacter then
-    begin
-      TextPathLayer := TScreenLayoutTextPathLayer(
-        FDocument[FDocument.SelectedIndex]);
-      TextPathPlacements :=
-        BuildScreenLayoutTextPathPlacements(TextPathLayer);
-      PathPoints := FlattenScreenLayoutPathVertices(
-        TextPathLayer.EditablePathVertices, 32);
-      if ScreenLayoutPolylineNearestDistance(PathPoints,
-        TPointF.Create(ToLogicalX(X), ToLogicalY(Y)), PathDistance) then
-        for I := 0 to High(TextPathPlacements) do
-          if TextPathPlacements[I].CharacterIndex =
-            FSelectedTextPathCharacter then
-          begin
-            FDragMode := vcdmTextPathCharacterMove;
-            FDragLayerIndex := FDocument.SelectedIndex;
-            FTextPathCharacterStartData :=
-              CaptureScreenLayoutTextData(TextPathLayer);
-            CharacterPathOffsets :=
-              FTextPathCharacterStartData.CharacterPathOffsets;
-            if FSelectedTextPathCharacter <
-              Length(CharacterPathOffsets) then
-              FTextPathCharacterOffsetStart :=
-                CharacterPathOffsets[FSelectedTextPathCharacter]
-            else
-              FTextPathCharacterOffsetStart := 0;
-            FTextPathCharacterAdvanceWidthStart :=
-              TextPathPlacements[I].AdvanceWidth;
-            FTextPathCharacterPathDistanceStart :=
-              TextPathPlacements[I].PathDistance;
-            FTextPathCharacterMousePathDistanceStart := PathDistance;
-            FDragStartMouse := Point(X, Y);
-            Exit(True);
-          end;
     end;
   end;
   SelectionRect := SelectedLayersScreenRect;
@@ -2825,7 +2608,8 @@ begin
       if WasSelected and (FDocument.SelectionCount = 1) and
         (FDocument.SelectedIndex = FDragLayerIndex) and
         (FDocument[FDragLayerIndex] is TScreenLayoutTextPathLayer) then
-        FTextPathCharacterClickCandidate := TextPathCharacterAt(X, Y);
+        FTextPathCharacterClickCandidate :=
+          FTextPathCharacterInteraction.CharacterAt(X, Y);
       FToggleSelectionModeOnClick := WasSelected and
         (FDocument.SelectionCount = 1) and
         (FDocument.SelectedIndex = FDragLayerIndex) and
@@ -2938,10 +2722,6 @@ var
   ArcShapeLayer: TScreenLayoutEllipseArcShapeLayer;
   CenterX: Single;
   CenterY: Single;
-  CharacterPathOffsets: TArray<Single>;
-  CharacterPositionManual: TArray<Boolean>;
-  CharacterScales: TArray<Single>;
-  CurrentDistance: Single;
   CurrentMouseAngle: Single;
   DesiredRotation: Single;
   DeltaRatio: Single;
@@ -2956,9 +2736,6 @@ var
   NewShapeContours: TArray<TScreenLayoutContour>;
   ImageBounds: TRectF;
   PathBounds: TRectF;
-  PathDistance: Single;
-  PathLength: Single;
-  PathPoints: TArray<TPointF>;
   RectangleLine: TScreenLayoutRectangleLineLayer;
   RectangleLayer: TVectArtRectangleLayer;
   LocalPoint: TPointF;
@@ -2969,10 +2746,8 @@ var
   RoundedBounds: TRectF;
   RoundedRotation: Single;
   ShapeBounds: TRectF;
-  StartDistance: Single;
   TextCenter: TPointF;
   TextData: TScreenLayoutTextData;
-  TextPathLayer: TScreenLayoutTextPathLayer;
 begin
   Result := False;
   if FDragMode = vcdmNone then
@@ -2997,84 +2772,11 @@ begin
     FShapeInteraction.DragTo(Shift, X, Y);
     Exit(True);
   end;
-  if FDragMode = vcdmTextPathCharacterMove then
+  if FDragMode in [vcdmTextPathCharacterMove,
+    vcdmTextPathCharacterResize] then
   begin
-    TextPathLayer := TScreenLayoutTextPathLayer(
-      FDocument[FDragLayerIndex]);
-    PathPoints := FlattenScreenLayoutPathVertices(
-      TextPathLayer.EditablePathVertices, 32);
-    if not ScreenLayoutPolylineNearestDistance(PathPoints,
-      TPointF.Create(ToLogicalX(X), ToLogicalY(Y)), PathDistance) then
-      Exit(True);
-    PathLength := ScreenLayoutPolylineLength(PathPoints);
-    PathDistance := EnsureRange(FTextPathCharacterPathDistanceStart +
-      PathDistance - FTextPathCharacterMousePathDistanceStart,
-      FTextPathCharacterAdvanceWidthStart * 0.5,
-      PathLength - FTextPathCharacterAdvanceWidthStart * 0.5);
-    TextData := FTextPathCharacterStartData;
-    CharacterPathOffsets := Copy(TextData.CharacterPathOffsets);
-    I := Length(CharacterPathOffsets);
-    if I <= FSelectedTextPathCharacter then
-    begin
-      SetLength(CharacterPathOffsets, FSelectedTextPathCharacter + 1);
-      while I < Length(CharacterPathOffsets) do
-      begin
-        CharacterPathOffsets[I] := 0;
-        Inc(I);
-      end;
-    end;
-    CharacterPathOffsets[FSelectedTextPathCharacter] :=
-      FTextPathCharacterOffsetStart + PathDistance -
-      FTextPathCharacterPathDistanceStart;
-    TextData.CharacterPathOffsets := CharacterPathOffsets;
-    CharacterPositionManual := Copy(TextData.CharacterPositionManual);
-    I := Length(CharacterPositionManual);
-    if I <= FSelectedTextPathCharacter then
-    begin
-      SetLength(CharacterPositionManual,
-        FSelectedTextPathCharacter + 1);
-      while I < Length(CharacterPositionManual) do
-      begin
-        CharacterPositionManual[I] := False;
-        Inc(I);
-      end;
-    end;
-    CharacterPositionManual[FSelectedTextPathCharacter] := True;
-    TextData.CharacterPositionManual := CharacterPositionManual;
-    FDocument.SetTextData(FDragLayerIndex, TextData);
-    FMoveOccurred := True;
-    Exit(True);
-  end;
-  if FDragMode = vcdmTextPathCharacterResize then
-  begin
-    StartDistance := Hypot(FDragStartMouse.X - FTextPathCharacterAnchor.X,
-      FDragStartMouse.Y - FTextPathCharacterAnchor.Y);
-    CurrentDistance := Hypot(X - FTextPathCharacterAnchor.X,
-      Y - FTextPathCharacterAnchor.Y);
-    if StartDistance <= 0.001 then
-      Exit(True);
-    DeltaRatio := CurrentDistance / StartDistance;
-    if ssShift in Shift then
-      DeltaRatio := 1.0 + (DeltaRatio - 1.0) * 0.1;
-    TextData := FTextPathCharacterStartData;
-    CharacterScales := Copy(TextData.CharacterScales);
-    I := Length(CharacterScales);
-    if I <= FSelectedTextPathCharacter then
-    begin
-      SetLength(CharacterScales, FSelectedTextPathCharacter + 1);
-      while I < Length(CharacterScales) do
-      begin
-        CharacterScales[I] := 1.0;
-        Inc(I);
-      end;
-    end;
-    CharacterScales[FSelectedTextPathCharacter] := EnsureRange(
-      FTextPathCharacterScaleStart * DeltaRatio,
-      SCREEN_LAYOUT_TEXT_PATH_CHARACTER_SCALE_MIN,
-      SCREEN_LAYOUT_TEXT_PATH_CHARACTER_SCALE_MAX);
-    TextData.CharacterScales := CharacterScales;
-    FDocument.SetTextData(FDragLayerIndex, TextData);
-    FMoveOccurred := True;
+    if FTextPathCharacterInteraction.DragTo(Shift, X, Y) then
+      FMoveOccurred := True;
     Exit(True);
   end;
   if FDragMode in [vcdmTextLetterSpacing, vcdmTextLineSpacing,
@@ -3533,11 +3235,12 @@ begin
       CommitTextSpacingCommand;
     if FDragMode in [vcdmTextPathCharacterMove,
       vcdmTextPathCharacterResize] then
-      CommitTextPathCharacterTransformCommand;
+      FTextPathCharacterInteraction.CommitDrag;
     if FToggleSelectionModeOnClick and not FMoveOccurred then
       FAxisAlignedSelection := not FAxisAlignedSelection;
     if (FTextPathCharacterClickCandidate >= 0) and not FMoveOccurred then
-      FSelectedTextPathCharacter := FTextPathCharacterClickCandidate;
+      FTextPathCharacterInteraction.SelectedCharacter :=
+        FTextPathCharacterClickCandidate;
     EndDrag;
   end;
 end;
