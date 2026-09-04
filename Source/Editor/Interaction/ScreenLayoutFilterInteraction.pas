@@ -67,7 +67,8 @@ implementation
 uses
   System.Math,
   ScreenLayoutFilterCommands, ScreenLayoutGeometry,
-  ScreenLayoutLayerGeometry, ScreenLayoutOverlayPrimitives;
+  ScreenLayoutLayerGeometry, ScreenLayoutOverlayHandles,
+  ScreenLayoutOverlayPrimitives, ScreenLayoutOverlayShapes;
 
 const
   BLUR_EFFECT_RADIUS_MULTIPLIER = 3.0; // Skiaの効果範囲計算と同じ広がり。

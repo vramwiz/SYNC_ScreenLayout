@@ -8,7 +8,11 @@ uses
   System.UITypes,
   Vcl.Graphics,
   ScreenLayoutOverlayPrimitives in
-    '..\Source\Rendering\ScreenLayoutOverlayPrimitives.pas';
+    '..\Source\Rendering\Overlay\ScreenLayoutOverlayPrimitives.pas',
+  ScreenLayoutOverlayShapes in
+    '..\Source\Rendering\Overlay\ScreenLayoutOverlayShapes.pas',
+  ScreenLayoutOverlayHandles in
+    '..\Source\Rendering\Overlay\ScreenLayoutOverlayHandles.pas';
 
 procedure Check(Condition: Boolean; const MessageText: string);
 begin

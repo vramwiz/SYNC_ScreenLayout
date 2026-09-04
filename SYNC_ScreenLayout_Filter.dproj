@@ -104,7 +104,9 @@
         <DCCReference Include="Source\Rendering\ScreenLayoutRenderer.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutCanvasGuides.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutCanvasPreview.pas"/>
-        <DCCReference Include="Source\Rendering\ScreenLayoutOverlayPrimitives.pas"/>
+        <DCCReference Include="Source\Rendering\Overlay\ScreenLayoutOverlayPrimitives.pas"/>
+        <DCCReference Include="Source\Rendering\Overlay\ScreenLayoutOverlayShapes.pas"/>
+        <DCCReference Include="Source\Rendering\Overlay\ScreenLayoutOverlayHandles.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutTextEditOverlay.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutShapePath.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutContext.pas"/>

@@ -32,8 +32,8 @@ procedure DrawStyledPreviewLine(Target: TDirect2DCanvas;
 implementation
 
 uses
-  System.Math, System.UITypes, Winapi.D2D1, ScreenLayoutOverlayPrimitives,
-  ScreenLayoutRenderer;
+  System.Math, System.UITypes, Winapi.D2D1, ScreenLayoutOverlayHandles,
+  ScreenLayoutOverlayPrimitives, ScreenLayoutRenderer;
 
 type
   TPreviewLineSegment = record

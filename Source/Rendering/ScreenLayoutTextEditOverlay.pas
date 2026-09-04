@@ -32,7 +32,7 @@ implementation
 
 uses
   System.Math, System.Skia, ScreenLayoutGeometry, ScreenLayoutTextEditing,
-  ScreenLayoutOverlayPrimitives, ScreenLayoutTextGeometry;
+  ScreenLayoutOverlayShapes, ScreenLayoutTextGeometry;
 
 type
   TScreenLayoutTextSelectionRun = record

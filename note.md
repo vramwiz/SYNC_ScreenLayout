@@ -215,7 +215,9 @@
   トンボ位置は表示矩形を基準とし、ビュー内に入る部分だけを表示する。これらは編集補助表示だけで、Documentおよび
   プラグイン出力へ含めない。補助線は `ScreenLayoutCanvasGuides` に分離し、
   `ScreenLayoutCanvasGuideTest`で表示矩形に対する固定トンボ座標を確認する。この対応はいったん完了とする。
-- 編集補助表示の描画は `ScreenLayoutOverlayPrimitives` へ共通化した。GDI／Direct2Dの両方で
+- 編集補助表示は `Source\Rendering\Overlay` 配下へまとめ、線と折れ線を
+  `ScreenLayoutOverlayPrimitives`、矩形・楕円・円弧などの輪郭を `ScreenLayoutOverlayShapes`、
+  操作点を `ScreenLayoutOverlayHandles` が担当する。GDI／Direct2Dの両方で
   白2pxの細い外縁へ黒または意味色の1px中心線を重ね、描画後にペンとブラシの状態を復元する。
   選択枠、回転表示、パスガイド、頂点、ベジェ制御線、範囲選択枠、文字入力枠、フィルター操作表示、
   作成中の直線・パス・円弧・矩形・楕円・角丸矩形、および字間・行間の双方向矢印は

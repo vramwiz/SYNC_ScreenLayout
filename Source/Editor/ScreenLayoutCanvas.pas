@@ -68,6 +68,7 @@ type
     FZoom: Single;
     procedure CalculateCanvasBounds;
     procedure ConfigureInteraction;
+    function EditingTextPath: Boolean;
     procedure EndPan;
     procedure PaintDirect2D;
     procedure PaintGDI;
@@ -152,7 +153,9 @@ uses
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
   ScreenLayoutGroupCommands,
   ScreenLayoutLayerGeometry,
+  ScreenLayoutOverlayHandles,
   ScreenLayoutOverlayPrimitives,
+  ScreenLayoutOverlayShapes,
   ScreenLayoutPathOperations,
   ScreenLayoutShapeOperations, ScreenLayoutTextCommands,
   ScreenLayoutTextGeometry, ScreenLayoutTextPathGeometry,
@@ -1131,6 +1134,17 @@ begin
     (FReferenceBackground.Height > 0);
 end;
 
+// 文字入力中はPathガイドだけを維持し、入力確定まで変形用の枠とハンドルを隠す。
+function TVectArtCanvasControl.EditingTextPath: Boolean;
+begin
+  Result := FTextEditing and
+    (((FEditorState <> nil) and
+      (FEditorState.OpenGroupChild is TScreenLayoutTextPathLayer)) or
+     ((FDocument <> nil) and (FDocument.SelectionCount = 1) and
+      (FDocument.SelectedIndex > 0) and
+      (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextPathLayer)));
+end;
+
 procedure TVectArtCanvasControl.CalculateCanvasBounds;
 var
   AvailableHeight: Integer;
@@ -2019,8 +2033,7 @@ begin
       end;
       if (FEditorState <> nil) and
         (FEditorState.OpenGroupChild <> nil) and
-        not (FTextEditing and (FEditorState.OpenGroupChild is
-          TScreenLayoutTextPathLayer)) and
+        not EditingTextPath and
         TryGetOpenGroupSelectionBounds(FEditorState, RotatedBounds) then
       begin
         LayerRect := Rect(ToScreenX(RotatedBounds.Left),
@@ -2148,10 +2161,7 @@ begin
         end;
       if (SelectionLayerRect.Width > 0) and
         (SelectionLayerRect.Height > 0) and
-        not (FTextEditing and (FDocument.SelectionCount = 1) and
-          (FDocument.SelectedIndex > 0) and
-          (FDocument[FDocument.SelectedIndex] is
-            TScreenLayoutTextPathLayer)) then
+        not EditingTextPath then
       begin
         if (FDocument.SelectionCount = 1) and
           (FDocument.SelectedIndex > 0) and
@@ -2640,8 +2650,7 @@ begin
     DrawOverlayFrameRect(Canvas, LayerRect, COLOR_OPEN_GROUP, psDash);
   end;
   if (FEditorState <> nil) and (FEditorState.OpenGroupChild <> nil) and
-    not (FTextEditing and (FEditorState.OpenGroupChild is
-      TScreenLayoutTextPathLayer)) and
+    not EditingTextPath and
     TryGetOpenGroupSelectionBounds(FEditorState, RotatedBounds) then
   begin
     LayerRect := Rect(ToScreenX(RotatedBounds.Left),
@@ -2765,10 +2774,7 @@ begin
       end;
     end;
   if (SelectionLayerRect.Width > 0) and (SelectionLayerRect.Height > 0) and
-    not (FTextEditing and (FDocument.SelectionCount = 1) and
-      (FDocument.SelectedIndex > 0) and
-      (FDocument[FDocument.SelectedIndex] is
-        TScreenLayoutTextPathLayer)) then
+    not EditingTextPath then
   begin
     if (FDocument.SelectionCount = 1) and
       (FDocument.SelectedIndex > 0) and
