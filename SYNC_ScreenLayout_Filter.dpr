@@ -37,6 +37,7 @@ uses
   ScreenLayoutGeometry in 'Source\Core\Geometry\ScreenLayoutGeometry.pas',
   ScreenLayoutEllipseGeometry in 'Source\Core\Geometry\ScreenLayoutEllipseGeometry.pas',
   ScreenLayoutTextGeometry in 'Source\Core\Geometry\ScreenLayoutTextGeometry.pas',
+  ScreenLayoutTextPathGeometry in 'Source\Core\Geometry\ScreenLayoutTextPathGeometry.pas',
   ScreenLayoutTextOutlineGeometry in 'Source\Core\Geometry\ScreenLayoutTextOutlineGeometry.pas',
   ScreenLayoutPathOperations in 'Source\Core\Geometry\ScreenLayoutPathOperations.pas',
   ScreenLayoutShapeOperations in 'Source\Core\Geometry\ScreenLayoutShapeOperations.pas',

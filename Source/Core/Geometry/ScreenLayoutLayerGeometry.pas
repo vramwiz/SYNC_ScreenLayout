@@ -18,7 +18,8 @@ implementation
 
 uses
   System.Math, ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
-  ScreenLayoutPathOperations, ScreenLayoutShapeOperations;
+  ScreenLayoutPathOperations, ScreenLayoutShapeOperations,
+  ScreenLayoutTextPathGeometry;
 
 function ScreenLayoutImagePointsBounds(
   const Points: TVectArtImagePoints): TRectF;
@@ -79,7 +80,13 @@ begin
       end;
     Exit;
   end;
-  if Layer is TVectArtImageLayer then
+  if Layer is TScreenLayoutTextPathLayer then
+  begin
+    Result := TryGetScreenLayoutTextPathBounds(
+      TScreenLayoutTextPathLayer(Layer), Bounds);
+    Exit;
+  end
+  else if Layer is TVectArtImageLayer then
     Bounds := ScreenLayoutImagePointsBounds(TVectArtImageLayer(Layer).Points)
   else if Layer is TVectArtPathLayer then
     Bounds := ScreenLayoutPathVerticesBounds(TVectArtPathLayer(Layer).Vertices)
@@ -120,6 +127,7 @@ var
   ImageLayer: TVectArtImageLayer;
   NewCenter: TPointF;
   Points: TVectArtImagePoints;
+  TextPathLayer: TScreenLayoutTextPathLayer;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
   if Layer is TScreenLayoutGroupLayer then
@@ -127,6 +135,14 @@ begin
     GroupLayer := TScreenLayoutGroupLayer(Layer);
     for I := 0 to GroupLayer.ChildCount - 1 do
       RotateScreenLayoutLayer(GroupLayer[I], Center, Degrees);
+  end
+  else if Layer is TScreenLayoutTextPathLayer then
+  begin
+    TextPathLayer := TScreenLayoutTextPathLayer(Layer);
+    Vertices := RotateScreenLayoutPathVertices(
+      TextPathLayer.EditablePathVertices, Center, Degrees);
+    TextPathLayer.AssignEditablePathVertices(Vertices);
+    TextPathLayer.RotationDegrees := TextPathLayer.RotationDegrees + Degrees;
   end
   else if Layer is TVectArtImageLayer then
   begin
@@ -191,6 +207,7 @@ var
   Points: TVectArtImagePoints;
   Radii: TScreenLayoutCornerRadii;
   ScaleValue: Single;
+  TextPathLayer: TScreenLayoutTextPathLayer;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
   if (SourceBounds.Width <= 0.0001) or
@@ -201,6 +218,17 @@ begin
     GroupLayer := TScreenLayoutGroupLayer(Layer);
     for I := 0 to GroupLayer.ChildCount - 1 do
       ScaleScreenLayoutLayer(GroupLayer[I], SourceBounds, TargetBounds);
+  end
+  else if Layer is TScreenLayoutTextPathLayer then
+  begin
+    TextPathLayer := TScreenLayoutTextPathLayer(Layer);
+    Vertices := ScaleScreenLayoutPathVertices(
+      TextPathLayer.EditablePathVertices, SourceBounds, TargetBounds);
+    TextPathLayer.AssignEditablePathVertices(Vertices);
+    // 非等方のグループ変形でも逆変換時に元の文字サイズへ正確に戻せる倍率を使う。
+    ScaleValue := Sqrt(Abs(TargetBounds.Width / SourceBounds.Width) *
+      Abs(TargetBounds.Height / SourceBounds.Height));
+    TextPathLayer.FontSize := Max(TextPathLayer.FontSize * ScaleValue, 1.0);
   end
   else if Layer is TVectArtImageLayer then
   begin
@@ -278,6 +306,7 @@ var
   I: Integer;
   ImageLayer: TVectArtImageLayer;
   Points: TVectArtImagePoints;
+  TextPathLayer: TScreenLayoutTextPathLayer;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
   if Layer is TScreenLayoutGroupLayer then
@@ -285,6 +314,13 @@ begin
     GroupLayer := TScreenLayoutGroupLayer(Layer);
     for I := 0 to GroupLayer.ChildCount - 1 do
       TranslateScreenLayoutLayer(GroupLayer[I], DX, DY);
+  end
+  else if Layer is TScreenLayoutTextPathLayer then
+  begin
+    TextPathLayer := TScreenLayoutTextPathLayer(Layer);
+    Vertices := TranslateScreenLayoutPathVertices(
+      TextPathLayer.EditablePathVertices, DX, DY);
+    TextPathLayer.AssignEditablePathVertices(Vertices);
   end
   else if Layer is TVectArtImageLayer then
   begin

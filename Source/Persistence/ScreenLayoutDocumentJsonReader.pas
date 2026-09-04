@@ -282,6 +282,8 @@ begin
     Data.Text, Data.FontFamily, Data.FontSize, Data.WrapWidth, Data.TextColor,
     Vertices);
   Result.Alignment := Data.Alignment;
+  Result.CharacterPathOffsets := Data.CharacterPathOffsets;
+  Result.CharacterScales := Data.CharacterScales;
   Result.FontStyle := Data.FontStyle;
   Result.LetterSpacingRatio := 0;
   Result.IndividualLetterSpacingRatios := nil;
@@ -336,6 +338,10 @@ var
   ChildSkippedReferenceCount: Integer;
   ChildErrorMessage: string;
   ChildText: string;
+  CharacterPathOffsetIndex: Integer;
+  CharacterPathOffsetsJson: TJSONArray;
+  CharacterScaleIndex: Integer;
+  CharacterScalesJson: TJSONArray;
   ExtractedLayer: TVectArtLayer;
   I: Integer;
   ImageData: TArray<TVectArtImageData>;
@@ -501,6 +507,50 @@ begin
           TextValue.Text := ReadString(LayerJson, 'text');
           TextValue.FontFamily := ReadString(LayerJson, 'fontFamily');
           TextValue.FontSize := Max(ReadSingle(LayerJson, 'fontSize'), 1.0);
+          SetLength(TextValue.CharacterPathOffsets, 0);
+          if (LayerTypes[I] = 'textPath') and
+            (LayerJson.GetValue('characterPathOffsets') <> nil) then
+          begin
+            CharacterPathOffsetsJson := TJSONArray(RequireValue(
+              LayerJson, 'characterPathOffsets', TJSONArray));
+            SetLength(TextValue.CharacterPathOffsets,
+              CharacterPathOffsetsJson.Count);
+            for CharacterPathOffsetIndex := 0 to
+              CharacterPathOffsetsJson.Count - 1 do
+            begin
+              if not (CharacterPathOffsetsJson.Items[
+                CharacterPathOffsetIndex] is TJSONNumber) then
+                raise EConvertError.CreateFmt(
+                  'JSON field "characterPathOffsets[%d]" has an invalid type',
+                  [CharacterPathOffsetIndex]);
+              TextValue.CharacterPathOffsets[CharacterPathOffsetIndex] :=
+                TJSONNumber(CharacterPathOffsetsJson.Items[
+                  CharacterPathOffsetIndex]).AsDouble;
+            end;
+          end;
+          SetLength(TextValue.CharacterScales, 0);
+          if (LayerTypes[I] = 'textPath') and
+            (LayerJson.GetValue('characterScales') <> nil) then
+          begin
+            CharacterScalesJson := TJSONArray(RequireValue(
+              LayerJson, 'characterScales', TJSONArray));
+            SetLength(TextValue.CharacterScales,
+              CharacterScalesJson.Count);
+            for CharacterScaleIndex := 0 to
+              CharacterScalesJson.Count - 1 do
+            begin
+              if not (CharacterScalesJson.Items[CharacterScaleIndex] is
+                TJSONNumber) then
+                raise EConvertError.CreateFmt(
+                  'JSON field "characterScales[%d]" has an invalid type',
+                  [CharacterScaleIndex]);
+              TextValue.CharacterScales[CharacterScaleIndex] :=
+                EnsureRange(TJSONNumber(CharacterScalesJson.Items[
+                  CharacterScaleIndex]).AsDouble,
+                  SCREEN_LAYOUT_TEXT_PATH_CHARACTER_SCALE_MIN,
+                  SCREEN_LAYOUT_TEXT_PATH_CHARACTER_SCALE_MAX);
+            end;
+          end;
           TextValue.FontStyle := [];
           if ReadOptionalBoolean(LayerJson, 'bold', False) then
             Include(TextValue.FontStyle, fsBold);

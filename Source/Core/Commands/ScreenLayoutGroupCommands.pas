@@ -369,6 +369,10 @@ begin
       TextPath.LetterSpacingRatio;
     TScreenLayoutTextPathLayer(Result).IndividualLetterSpacingRatios :=
       TextPath.IndividualLetterSpacingRatios;
+    TScreenLayoutTextPathLayer(Result).CharacterPathOffsets :=
+      TextPath.CharacterPathOffsets;
+    TScreenLayoutTextPathLayer(Result).CharacterScales :=
+      TextPath.CharacterScales;
     TScreenLayoutTextPathLayer(Result).LineSpacingRatio :=
       TextPath.LineSpacingRatio;
     TScreenLayoutTextPathLayer(Result).RotationDegrees :=

@@ -154,7 +154,8 @@ uses
   ScreenLayoutLayerGeometry,
   ScreenLayoutPathOperations,
   ScreenLayoutShapeOperations, ScreenLayoutTextCommands,
-  ScreenLayoutTextGeometry, ScreenLayoutLayerNaming;
+  ScreenLayoutTextGeometry, ScreenLayoutTextPathGeometry,
+  ScreenLayoutLayerNaming;
 
 const
   CANVAS_MARGIN         = 32;
@@ -1916,6 +1917,7 @@ var
   Row: Integer;
   RowEnd: Integer;
   RowStart: Integer;
+  CharacterGeometry: TVectArtSelectionGeometry;
   SelectionGeometry: TVectArtSelectionGeometry;
   SelectionFrameOffsetPixels: Integer;
   SelectionLayerRect: TRect;
@@ -2078,6 +2080,12 @@ begin
             SelectionFrameOffsetPixels := Max(SelectionFrameOffsetPixels,
               SelectionFrameOffset(RectangleLine.StrokeWidth, FZoom));
           end
+          else if Layer is TScreenLayoutTextPathLayer then
+          begin
+            if not TryGetScreenLayoutTextPathBounds(
+              TScreenLayoutTextPathLayer(Layer), RotatedBounds) then
+              Continue;
+          end
           else if Layer is TScreenLayoutArcLayer then
           begin
             ArcLayer := TScreenLayoutArcLayer(Layer);
@@ -2150,6 +2158,18 @@ begin
         (SelectionLayerRect.Height > 0) then
       begin
         if (FDocument.SelectionCount = 1) and
+          (FDocument.SelectedIndex > 0) and
+          (FDocument[FDocument.SelectedIndex] is
+            TScreenLayoutTextPathLayer) then
+        begin
+          SelectionGeometry := BuildSelectionGeometry(SelectionLayerRect,
+            SelectionFrameOffsetPixels);
+          SelectionGeometry.Handles[vshTop] := TRect.Empty;
+          SelectionGeometry.Handles[vshRight] := TRect.Empty;
+          SelectionGeometry.Handles[vshBottom] := TRect.Empty;
+          SelectionGeometry.Handles[vshLeft] := TRect.Empty;
+        end
+        else if (FDocument.SelectionCount = 1) and
           (FDocument.SelectedIndex > 0) and
           (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) then
         begin
@@ -2278,6 +2298,20 @@ begin
             Direct2DCanvas.Polyline(RotationArcPoints);
             Direct2DCanvas.Brush.Color := COLOR_ROTATION_MARK;
             Direct2DCanvas.Polygon(RotationArrowPoints);
+          end;
+          if FInteraction.SelectedTextPathCharacterGeometry(
+            CharacterGeometry) then
+          begin
+            Direct2DCanvas.Pen.Color := TColor($0048A8F8);
+            Direct2DCanvas.Polyline(CharacterGeometry.FramePoints);
+            for Handle := vshTopLeft to vshLeft do
+              if not CharacterGeometry.Handles[Handle].IsEmpty then
+              begin
+                Direct2DCanvas.Brush.Color := clWhite;
+                Direct2DCanvas.FillRect(CharacterGeometry.Handles[Handle]);
+                Direct2DCanvas.Brush.Color := TColor($0048A8F8);
+                Direct2DCanvas.FrameRect(CharacterGeometry.Handles[Handle]);
+              end;
           end;
           CornerHandles := FInteraction.RoundedRectangleCornerHandles;
           for CornerHandle in CornerHandles do
@@ -2583,6 +2617,7 @@ var
   Row: Integer;
   RowEnd: Integer;
   RowStart: Integer;
+  CharacterGeometry: TVectArtSelectionGeometry;
   SelectionGeometry: TVectArtSelectionGeometry;
   SelectionFrameOffsetPixels: Integer;
   SelectionLayerRect: TRect;
@@ -2718,6 +2753,12 @@ begin
         SelectionFrameOffsetPixels := Max(SelectionFrameOffsetPixels,
           SelectionFrameOffset(RectangleLine.StrokeWidth, FZoom));
       end
+      else if Layer is TScreenLayoutTextPathLayer then
+      begin
+        if not TryGetScreenLayoutTextPathBounds(
+          TScreenLayoutTextPathLayer(Layer), RotatedBounds) then
+          Continue;
+      end
       else if Layer is TScreenLayoutArcLayer then
       begin
         ArcLayer := TScreenLayoutArcLayer(Layer);
@@ -2788,6 +2829,18 @@ begin
   if (SelectionLayerRect.Width > 0) and (SelectionLayerRect.Height > 0) then
   begin
     if (FDocument.SelectionCount = 1) and
+      (FDocument.SelectedIndex > 0) and
+      (FDocument[FDocument.SelectedIndex] is
+        TScreenLayoutTextPathLayer) then
+    begin
+      SelectionGeometry := BuildSelectionGeometry(SelectionLayerRect,
+        SelectionFrameOffsetPixels);
+      SelectionGeometry.Handles[vshTop] := TRect.Empty;
+      SelectionGeometry.Handles[vshRight] := TRect.Empty;
+      SelectionGeometry.Handles[vshBottom] := TRect.Empty;
+      SelectionGeometry.Handles[vshLeft] := TRect.Empty;
+    end
+    else if (FDocument.SelectionCount = 1) and
       (FDocument.SelectedIndex > 0) and
       (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) then
     begin
@@ -2907,6 +2960,20 @@ begin
         Canvas.Polyline(RotationArcPoints);
         Canvas.Brush.Color := COLOR_ROTATION_MARK;
         Canvas.Polygon(RotationArrowPoints);
+      end;
+      if FInteraction.SelectedTextPathCharacterGeometry(
+        CharacterGeometry) then
+      begin
+        Canvas.Pen.Color := TColor($0048A8F8);
+        Canvas.Polyline(CharacterGeometry.FramePoints);
+        for Handle := vshTopLeft to vshLeft do
+          if not CharacterGeometry.Handles[Handle].IsEmpty then
+          begin
+            Canvas.Brush.Color := clWhite;
+            Canvas.FillRect(CharacterGeometry.Handles[Handle]);
+            Canvas.Brush.Color := TColor($0048A8F8);
+            Canvas.FrameRect(CharacterGeometry.Handles[Handle]);
+          end;
       end;
       CornerHandles := FInteraction.RoundedRectangleCornerHandles;
       for CornerHandle in CornerHandles do

@@ -9,6 +9,8 @@ uses
   Vcl.Graphics, ScreenLayoutFilters;
 
 const
+  SCREEN_LAYOUT_TEXT_PATH_CHARACTER_SCALE_MIN = 0.1;
+  SCREEN_LAYOUT_TEXT_PATH_CHARACTER_SCALE_MAX = 10.0;
   SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN = -0.5;
   SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX = 1.0;
   SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN = -0.5;
@@ -238,7 +240,13 @@ type
   // 文字書式と、その文字の下辺を沿わせる開いた連続線を1レイヤーに保持する。
   TScreenLayoutTextPathLayer = class(TScreenLayoutTextLayer)
   private
+    FCharacterPathOffsets: TArray<Single>;
+    FCharacterScales: TArray<Single>;
     FVertices: TArray<TScreenLayoutVertex>;
+    function GetCharacterPathOffsets: TArray<Single>;
+    function GetCharacterScales: TArray<Single>;
+    procedure SetCharacterPathOffsets(const Value: TArray<Single>);
+    procedure SetCharacterScales(const Value: TArray<Single>);
   protected
     procedure SetText(const Value: string); override;
   public
@@ -253,11 +261,17 @@ type
       const Value: TArray<TScreenLayoutVertex>); override;
     // このレイヤーが共通Path編集処理を利用できることを返す。
     function SupportsPathEditing: Boolean; override;
+    property CharacterPathOffsets: TArray<Single>
+      read GetCharacterPathOffsets write SetCharacterPathOffsets;
+    property CharacterScales: TArray<Single> read GetCharacterScales
+      write SetCharacterScales;
   end;
 
   TScreenLayoutTextData = record
     Alignment: TScreenLayoutTextAlignment; // 枠内の上中下と左中央右を組み合わせた配置。
     Bounds: TRectF;          // 文字の組版実寸または変形後の表示範囲。
+    CharacterPathOffsets: TArray<Single>; // 文字パスの標準位置からPath方向へずらす距離。
+    CharacterScales: TArray<Single>; // 文字パスの各文字へ適用する個別の均等倍率。
     FontFamily: string;      // Skiaへ渡す優先フォントファミリー。
     FontSize: Single;        // 変形前の文書座標単位フォントサイズ。
     FontStyle: TFontStyles;  // 太字、斜体、下線、取り消し線の組み合わせ。
@@ -1075,14 +1089,53 @@ begin
     AFontSize, AWrapWidth, ATextColor);
   LetterSpacingRatio := 0;
   IndividualLetterSpacingRatios := nil;
+  CharacterPathOffsets := nil;
+  CharacterScales := nil;
   WrapWidth := 0;
   SetText(AText);
   AssignEditablePathVertices(AVertices);
 end;
 
 procedure TScreenLayoutTextPathLayer.SetText(const Value: string);
+var
+  NormalizedValue: string;
 begin
-  inherited SetText(NormalizeScreenLayoutTextPathText(Value));
+  NormalizedValue := NormalizeScreenLayoutTextPathText(Value);
+  if Text <> NormalizedValue then
+  begin
+    SetLength(FCharacterPathOffsets, 0);
+    SetLength(FCharacterScales, 0);
+  end;
+  inherited SetText(NormalizedValue);
+end;
+
+function TScreenLayoutTextPathLayer.GetCharacterPathOffsets:
+  TArray<Single>;
+begin
+  Result := Copy(FCharacterPathOffsets);
+end;
+
+function TScreenLayoutTextPathLayer.GetCharacterScales: TArray<Single>;
+begin
+  Result := Copy(FCharacterScales);
+end;
+
+procedure TScreenLayoutTextPathLayer.SetCharacterPathOffsets(
+  const Value: TArray<Single>);
+begin
+  FCharacterPathOffsets := Copy(Value);
+end;
+
+procedure TScreenLayoutTextPathLayer.SetCharacterScales(
+  const Value: TArray<Single>);
+var
+  I: Integer;
+begin
+  SetLength(FCharacterScales, Length(Value));
+  for I := 0 to High(Value) do
+    FCharacterScales[I] := EnsureRange(Value[I],
+      SCREEN_LAYOUT_TEXT_PATH_CHARACTER_SCALE_MIN,
+      SCREEN_LAYOUT_TEXT_PATH_CHARACTER_SCALE_MAX);
 end;
 
 function TScreenLayoutTextPathLayer.EditablePathVertices:
@@ -2629,6 +2682,13 @@ begin
   TextLayer.FontSize := Max(Data.FontSize, 1.0);
   TextLayer.FontStyle := Data.FontStyle;
   TextLayer.Text := Data.Text;
+  if TextLayer is TScreenLayoutTextPathLayer then
+  begin
+    TScreenLayoutTextPathLayer(TextLayer).CharacterPathOffsets :=
+      Data.CharacterPathOffsets;
+    TScreenLayoutTextPathLayer(TextLayer).CharacterScales :=
+      Data.CharacterScales;
+  end;
   if TextLayer is TScreenLayoutTextPathLayer then
     TextLayer.LetterSpacingRatio := 0
   else

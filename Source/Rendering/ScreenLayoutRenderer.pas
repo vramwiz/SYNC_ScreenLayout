@@ -57,7 +57,8 @@ uses
   TextRendererSkiaRuntime, Winapi.Windows,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
   ScreenLayoutFilters, ScreenLayoutLayerGeometry, ScreenLayoutPathOperations,
-  ScreenLayoutShapePath, ScreenLayoutTextGeometry;
+  ScreenLayoutShapePath, ScreenLayoutTextGeometry,
+  ScreenLayoutTextPathGeometry;
 
 const
   MAX_RENDER_DIMENSION = 16384;
@@ -386,51 +387,23 @@ procedure DrawScreenLayoutTextOnPath(const Canvas: ISkCanvas;
   Layer: TScreenLayoutTextPathLayer; const Font: ISkFont;
   const Paint: ISkPaint);
 var
-  AngleDegrees: Single;
-  CursorDistance: Single;
-  FontMetrics: TSkFontMetrics;
   I: Integer;
-  PathLength: Single;
-  PathPoint: TPointF;
-  PathPoints: TArray<TPointF>;
-  Tangent: TPointF;
-  UnitLength: Integer;
-  UnitText: string;
-  UnitWidth: Single;
+  Placements: TArray<TScreenLayoutTextPathPlacement>;
 begin
-  PathPoints := FlattenScreenLayoutPathVertices(
-    Layer.EditablePathVertices, 32);
-  PathLength := ScreenLayoutPolylineLength(PathPoints);
-  if PathLength <= 0 then
-    Exit;
-  Font.GetMetrics(FontMetrics);
-  CursorDistance := 0;
-  I := 1;
-  while I <= Length(Layer.Text) do
+  Placements := BuildScreenLayoutTextPathPlacements(Layer, Font);
+  for I := 0 to High(Placements) do
   begin
-    if CharInSet(Layer.Text[I], [#10, #13]) then
-      Break;
-    UnitLength := ScreenLayoutTextUnitLengthAt(Layer.Text, I);
-    UnitText := Copy(Layer.Text, I, UnitLength);
-    UnitWidth := Font.MeasureText(UnitText);
-    if (UnitWidth <= 0) or
-      (CursorDistance + UnitWidth > PathLength) then
-      Break;
-    if not ScreenLayoutPolylinePointAtDistance(PathPoints,
-      CursorDistance + UnitWidth * 0.5, PathPoint, Tangent) then
-      Break;
-    AngleDegrees := RadToDeg(ArcTan2(Tangent.Y, Tangent.X));
     Canvas.Save;
     try
-      Canvas.Translate(PathPoint.X, PathPoint.Y);
-      Canvas.Rotate(AngleDegrees);
-      Canvas.DrawSimpleText(UnitText, -UnitWidth * 0.5,
-        -FontMetrics.Descent, Font, Paint);
+      Canvas.Translate(Placements[I].Anchor.X, Placements[I].Anchor.Y);
+      Canvas.Rotate(Placements[I].AngleDegrees);
+      Canvas.Scale(Placements[I].Scale, Placements[I].Scale);
+      Canvas.DrawSimpleText(Placements[I].TextUnit,
+        -Placements[I].AdvanceWidth / Placements[I].Scale * 0.5,
+        -Placements[I].BaselineOffset / Placements[I].Scale, Font, Paint);
     finally
       Canvas.Restore;
     end;
-    CursorDistance := CursorDistance + UnitWidth;
-    Inc(I, UnitLength);
   end;
 end;
 

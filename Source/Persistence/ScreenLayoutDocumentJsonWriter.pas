@@ -144,6 +144,12 @@ var
   ChildIndex: Integer;
   ChildLayer: TVectArtLayer;
   ChildInTemporaryDocument: Boolean;
+  CharacterPathOffsetIndex: Integer;
+  CharacterPathOffsets: TArray<Single>;
+  CharacterPathOffsetsJson: TJSONArray;
+  CharacterScaleIndex: Integer;
+  CharacterScales: TArray<Single>;
+  CharacterScalesJson: TJSONArray;
   I: Integer;
   Image: TVectArtImageLayer;
   ImageJson: TJSONObject;
@@ -263,6 +269,24 @@ begin
         TextJson.AddPair('text', TextLayer.Text);
         TextJson.AddPair('fontFamily', TextLayer.FontFamily);
         TextJson.AddPair('fontSize', TJSONNumber.Create(TextLayer.FontSize));
+        if Layer is TScreenLayoutTextPathLayer then
+        begin
+          CharacterPathOffsetsJson := TJSONArray.Create;
+          CharacterPathOffsets :=
+            TScreenLayoutTextPathLayer(Layer).CharacterPathOffsets;
+          for CharacterPathOffsetIndex := 0 to
+            High(CharacterPathOffsets) do
+            CharacterPathOffsetsJson.Add(
+              CharacterPathOffsets[CharacterPathOffsetIndex]);
+          TextJson.AddPair('characterPathOffsets',
+            CharacterPathOffsetsJson);
+          CharacterScalesJson := TJSONArray.Create;
+          CharacterScales :=
+            TScreenLayoutTextPathLayer(Layer).CharacterScales;
+          for CharacterScaleIndex := 0 to High(CharacterScales) do
+            CharacterScalesJson.Add(CharacterScales[CharacterScaleIndex]);
+          TextJson.AddPair('characterScales', CharacterScalesJson);
+        end;
         TextJson.AddPair('alignment',
           TextAlignmentName(TextLayer.Alignment));
         TextJson.AddPair('bold',

@@ -124,6 +124,13 @@ begin
     Exit;
   Result.Alignment := Layer.Alignment;
   Result.Bounds := Layer.Bounds;
+  if Layer is TScreenLayoutTextPathLayer then
+  begin
+    Result.CharacterPathOffsets :=
+      TScreenLayoutTextPathLayer(Layer).CharacterPathOffsets;
+    Result.CharacterScales :=
+      TScreenLayoutTextPathLayer(Layer).CharacterScales;
+  end;
   Result.FontFamily := Layer.FontFamily;
   Result.FontSize := Layer.FontSize;
   Result.FontStyle := Layer.FontStyle;
@@ -217,6 +224,10 @@ begin
     Copy(OldData.IndividualLetterSpacingRatios);
   FNewData.IndividualLetterSpacingRatios :=
     Copy(NewData.IndividualLetterSpacingRatios);
+  FOldData.CharacterPathOffsets := Copy(OldData.CharacterPathOffsets);
+  FNewData.CharacterPathOffsets := Copy(NewData.CharacterPathOffsets);
+  FOldData.CharacterScales := Copy(OldData.CharacterScales);
+  FNewData.CharacterScales := Copy(NewData.CharacterScales);
 end;
 
 procedure TScreenLayoutTextDataCommand.Execute;

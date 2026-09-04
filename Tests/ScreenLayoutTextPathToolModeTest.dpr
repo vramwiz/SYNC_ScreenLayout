@@ -15,6 +15,8 @@ uses
     '..\Source\Core\Geometry\ScreenLayoutGeometry.pas',
   ScreenLayoutSelectionGeometry in
     '..\Source\Editor\Interaction\ScreenLayoutSelectionGeometry.pas',
+  ScreenLayoutTextPathGeometry in
+    '..\Source\Core\Geometry\ScreenLayoutTextPathGeometry.pas',
   ScreenLayoutShapeCreation in
     '..\Source\Editor\Creation\ScreenLayoutShapeCreation.pas',
   ScreenLayoutDocument in '..\Source\Core\Model\ScreenLayoutDocument.pas',
@@ -24,6 +26,8 @@ uses
     '..\Source\Persistence\ScreenLayoutDocumentJsonWriter.pas',
   ScreenLayoutEditHistory in
     '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
+  ScreenLayoutGroupCommands in
+    '..\Source\Core\Commands\ScreenLayoutGroupCommands.pas',
   ScreenLayoutTextCommands in
     '..\Source\Core\Commands\ScreenLayoutTextCommands.pas',
   ScreenLayoutEditorState in
@@ -46,9 +50,8 @@ var
   I: Integer;
   Interaction: TVectArtCanvasInteraction;
   Layer: TScreenLayoutTextPathLayer;
-  LogicalQuad: TVectArtQuad;
   RotationPoint: TPoint;
-  ScreenQuad: TVectArtScreenQuad;
+  TextBounds: TRectF;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
   Document := TVectArtDocument.Create;
@@ -92,11 +95,11 @@ begin
       SameValue(Vertices[0].Position.Y, 0.0),
       'text path frame move undo did not restore the whole object');
 
-    LogicalQuad := RectangleCorners(Layer.Bounds, Layer.RotationDegrees);
-    for I := 0 to High(ScreenQuad) do
-      ScreenQuad[I] := Point(Round(LogicalQuad[I].X + 100),
-        Round(LogicalQuad[I].Y + 50));
-    Geometry := BuildRotatedSelectionGeometry(ScreenQuad,
+    Check(TryGetScreenLayoutTextPathBounds(Layer, TextBounds),
+      'placed text bounds were not calculated');
+    Geometry := BuildSelectionGeometry(Rect(
+      Round(TextBounds.Left + 100), Round(TextBounds.Top + 50),
+      Round(TextBounds.Right + 100), Round(TextBounds.Bottom + 50)),
       SelectionFrameOffset(0, 1));
     RotationPoint := Geometry.PrimaryRotationHandle.CenterPoint;
     Check(Interaction.MouseDown(mbLeft, [], RotationPoint.X,
@@ -106,9 +109,8 @@ begin
     Check(Interaction.MouseUp(mbLeft),
       'text path rotation did not commit');
     Vertices := Layer.EditablePathVertices;
-    Check(SameValue(Layer.RotationDegrees, 90.0, 0.5) and
-      SameValue(Vertices[0].Position.X, Vertices[1].Position.X, 0.5) and
-      SameValue(Vertices[1].Position.X, Vertices[2].Position.X, 0.5),
+    Check(not SameValue(Layer.RotationDegrees, 0.0, 0.5) and
+      not SameValue(Vertices[0].Position.Y, Vertices[2].Position.Y, 0.5),
       'text path rotation did not rotate frame and path together');
     History.Undo;
     Vertices := Layer.EditablePathVertices;
@@ -116,6 +118,31 @@ begin
       SameValue(Vertices[0].Position.X, -40.0, 0.5) and
       SameValue(Vertices[2].Position.X, 40.0, 0.5),
       'text path rotation undo did not restore the whole object');
+
+    Check(TryGetScreenLayoutTextPathBounds(Layer, TextBounds),
+      'placed text bounds disappeared before resize');
+    Geometry := BuildSelectionGeometry(Rect(
+      Round(TextBounds.Left + 100), Round(TextBounds.Top + 50),
+      Round(TextBounds.Right + 100), Round(TextBounds.Bottom + 50)),
+      SelectionFrameOffset(0, 1));
+    Check(Interaction.MouseDown(mbLeft, [],
+      Geometry.Handles[vshBottomRight].CenterPoint.X,
+      Geometry.Handles[vshBottomRight].CenterPoint.Y),
+      'placed text resize did not start');
+    Check(Interaction.MouseMove([ssLeft],
+      Geometry.Handles[vshBottomRight].CenterPoint.X + 30,
+      Geometry.Handles[vshBottomRight].CenterPoint.Y + 30),
+      'placed text resize did not update');
+    Check(Interaction.MouseUp(mbLeft),
+      'placed text resize did not commit');
+    Vertices := Layer.EditablePathVertices;
+    Check((Layer.FontSize > 20.0) and
+      SameValue(Vertices[0].Position.X, -40.0, 0.5) and
+      SameValue(Vertices[2].Position.X, 40.0, 0.5),
+      'placed text resize changed the path instead of the text size');
+    History.Undo;
+    Check(SameValue(Layer.FontSize, 20.0, 0.01),
+      'placed text resize undo did not restore the font size');
   finally
     Interaction.Free;
     History.Free;
@@ -145,9 +172,163 @@ begin
   end;
 end;
 
+procedure CheckCharacterPlacementCells;
+var
+  I: Integer;
+  Layer: TScreenLayoutTextPathLayer;
+  Placements: TArray<TScreenLayoutTextPathPlacement>;
+  Vertices: TArray<TScreenLayoutVertex>;
+begin
+  SetLength(Vertices, 2);
+  Vertices[0].Position := TPointF.Create(0, 0);
+  Vertices[0].Kind := slvkSharp;
+  Vertices[0].OutgoingSegment := slskLine;
+  Vertices[1].Position := TPointF.Create(200, 0);
+  Vertices[1].Kind := slvkSharp;
+  Vertices[1].OutgoingSegment := slskLine;
+  Layer := TScreenLayoutTextPathLayer.Create('Text Path',
+    TRectF.Create(0, -20, 200, 0), 'ABC', 'Yu Gothic UI', 20, 200,
+    clWhite, Vertices);
+  try
+    Placements := BuildScreenLayoutTextPathPlacements(Layer);
+    Check(Length(Placements) = 3,
+      'text path was not expanded into character placement cells');
+    for I := 0 to High(Placements) do
+    begin
+      Check(SameValue(Placements[I].Anchor.X,
+        (Placements[I].Corners[2].X + Placements[I].Corners[3].X) * 0.5,
+        0.001) and SameValue(Placements[I].Anchor.Y,
+        (Placements[I].Corners[2].Y + Placements[I].Corners[3].Y) * 0.5,
+        0.001), 'character cell bottom center is not its path anchor');
+      Check(SameValue(Placements[I].Anchor.Y, 0.0, 0.001),
+        'character cell bottom center is not on the path');
+    end;
+  finally
+    Layer.Free;
+  end;
+end;
+
+procedure CheckIndividualCharacterResize;
+var
+  CharacterGeometry: TVectArtSelectionGeometry;
+  CharacterPathOffsets: TArray<Single>;
+  CharacterPoint: TPoint;
+  CharacterScales: TArray<Single>;
+  Document: TVectArtDocument;
+  HandlePoint: TPoint;
+  History: TVectArtEditHistory;
+  Interaction: TVectArtCanvasInteraction;
+  Layer: TScreenLayoutTextPathLayer;
+  OriginalPathDistance: Single;
+  Placements: TArray<TScreenLayoutTextPathPlacement>;
+  Vertices: TArray<TScreenLayoutVertex>;
+begin
+  Document := TVectArtDocument.Create;
+  History := TVectArtEditHistory.Create;
+  Interaction := TVectArtCanvasInteraction.Create;
+  try
+    Document.SetCanvasSize(300, 120);
+    SetLength(Vertices, 2);
+    Vertices[0].Position := TPointF.Create(-100, 20);
+    Vertices[0].Kind := slvkSharp;
+    Vertices[0].OutgoingSegment := slskLine;
+    Vertices[1].Position := TPointF.Create(100, 20);
+    Vertices[1].Kind := slvkSharp;
+    Vertices[1].OutgoingSegment := slskLine;
+    Layer := TScreenLayoutTextPathLayer.Create('Text Path',
+      TRectF.Create(-100, 0, 100, 20), 'ABC', 'Yu Gothic UI', 20, 200,
+      clWhite, Vertices);
+    Document.InsertLayer(1, Layer);
+    Document.SelectedIndex := 1;
+    Interaction.EditHistory := History;
+    Interaction.Configure(Document, Rect(0, 0, 300, 120), 1);
+    Check(Length(Layer.CharacterScales) = 0,
+      'new text path has unexpected character scales');
+    Placements := BuildScreenLayoutTextPathPlacements(Layer);
+    CharacterPoint := Point(Round(Placements[1].Anchor.X + 150),
+      Round(Placements[1].Anchor.Y + 60 - Placements[1].CellHeight * 0.5));
+    Check(Interaction.MouseDown(mbLeft, [], CharacterPoint.X,
+      CharacterPoint.Y), 'character selection did not start');
+    Check(Interaction.MouseUp(mbLeft),
+      'character selection did not finish');
+    Check(Length(Layer.CharacterScales) = 0,
+      'character selection changed character scales');
+    Check(Interaction.SelectedTextPathCharacterGeometry(
+      CharacterGeometry), 'selected character frame was not created');
+    HandlePoint := Point(
+      CharacterGeometry.Handles[vshTopRight].Right + 4,
+      CharacterGeometry.Handles[vshTopRight].CenterPoint.Y);
+    Check(Interaction.MouseDown(mbLeft, [], HandlePoint.X, HandlePoint.Y),
+      'expanded individual character resize hit area did not respond');
+    Check(Interaction.MouseMove([ssLeft], HandlePoint.X + 20,
+      HandlePoint.Y - 20), 'individual character resize did not update');
+    Check(Interaction.MouseUp(mbLeft),
+      'individual character resize did not commit');
+    CharacterScales := Layer.CharacterScales;
+    Check((Length(CharacterScales) >= 2) and
+      SameValue(CharacterScales[0], 1.0, 0.001) and
+      (CharacterScales[1] > 1.0),
+      'individual character resize changed an unexpected character');
+    Placements := BuildScreenLayoutTextPathPlacements(Layer);
+    Check(SameValue(Placements[1].Anchor.Y, 20.0, 0.001) and
+      SameValue(Placements[1].Anchor.Y,
+        (Placements[1].Corners[2].Y + Placements[1].Corners[3].Y) * 0.5,
+        0.001), 'resized character bottom center left the path');
+    Vertices := Layer.EditablePathVertices;
+    Check(SameValue(Vertices[0].Position.X, -100.0) and
+      SameValue(Vertices[1].Position.X, 100.0),
+      'individual character resize changed the path');
+    History.Undo;
+    CharacterScales := Layer.CharacterScales;
+    Check(Length(CharacterScales) = 0,
+      Format('individual character resize undo restored %d scales',
+        [Length(CharacterScales)]));
+    History.Redo;
+    CharacterScales := Layer.CharacterScales;
+    Check((Length(CharacterScales) >= 2) and
+      (CharacterScales[1] > 1.0),
+      'individual character resize redo did not restore the scale');
+    Placements := BuildScreenLayoutTextPathPlacements(Layer);
+    OriginalPathDistance := Placements[1].PathDistance;
+    CharacterPoint := Point(Round(Placements[1].Anchor.X + 150),
+      Round(Placements[1].Anchor.Y + 60 -
+        Placements[1].CellHeight * 0.5));
+    Check(Interaction.MouseDown(mbLeft, [], CharacterPoint.X,
+      CharacterPoint.Y), 'individual character move did not start');
+    Check(Interaction.MouseMove([ssLeft], CharacterPoint.X + 25,
+      CharacterPoint.Y), 'individual character move did not update');
+    Check(Interaction.MouseUp(mbLeft),
+      'individual character move did not commit');
+    Placements := BuildScreenLayoutTextPathPlacements(Layer);
+    CharacterPathOffsets := Layer.CharacterPathOffsets;
+    Check((Length(CharacterPathOffsets) >= 2) and
+      SameValue(Placements[1].PathDistance,
+        OriginalPathDistance + 25, 1.0) and
+      SameValue(Placements[1].Anchor.Y, 20.0, 0.001),
+      Format('individual character move distance was %.2f from %.2f; '
+        + 'offset count was %d', [Placements[1].PathDistance,
+          OriginalPathDistance, Length(CharacterPathOffsets)]));
+    History.Undo;
+    Check(Length(Layer.CharacterPathOffsets) = 0,
+      'individual character move undo did not restore its position');
+    History.Redo;
+    Check(Length(Layer.CharacterPathOffsets) >= 2,
+      'individual character move redo did not restore its position');
+    Layer.Text := 'XYZ';
+    Check((Length(Layer.CharacterPathOffsets) = 0) and
+      (Length(Layer.CharacterScales) = 0),
+      'changing text did not discard individual character transforms');
+  finally
+    Interaction.Free;
+    History.Free;
+    Document.Free;
+  end;
+end;
+
 procedure CheckPersistenceAndRendering;
 var
   Buffer: TVectArtRenderBuffer;
+  ClonedLayer: TVectArtLayer;
   Document: TVectArtDocument;
   ErrorMessage: string;
   I: Integer;
@@ -181,7 +362,24 @@ begin
       TRectF.Create(-60, -40, 60, -20), 'Text path', 'Yu Gothic UI',
       24, 120, clWhite, Vertices);
     Layer.LetterSpacingRatio := 0.1;
+    Layer.CharacterPathOffsets := [0.0, 12.0, -4.0];
+    Layer.CharacterScales := [1.0, 1.5, 0.75];
     Document.InsertLayer(1, Layer);
+
+    ClonedLayer := CloneScreenLayoutLayer(Layer, 'Text Path Copy');
+    try
+      Check((ClonedLayer is TScreenLayoutTextPathLayer) and
+        (Length(TScreenLayoutTextPathLayer(
+          ClonedLayer).CharacterPathOffsets) = 3) and
+        SameValue(TScreenLayoutTextPathLayer(
+          ClonedLayer).CharacterPathOffsets[1], 12.0, 0.0001) and
+        (Length(TScreenLayoutTextPathLayer(ClonedLayer).CharacterScales) =
+          3) and SameValue(TScreenLayoutTextPathLayer(
+            ClonedLayer).CharacterScales[1], 1.5, 0.0001),
+        'text path clone did not preserve individual character scales');
+    finally
+      ClonedLayer.Free;
+    end;
 
     Serialized := SerializeVectArtDocument(Document);
     Check(Pos('"type":"textPath"', Serialized) > 0,
@@ -199,6 +397,12 @@ begin
       'contained path vertices changed during JSON round trip');
     Check(SameValue(LoadedLayer.LetterSpacingRatio, 0.0, 0.0001),
       'text path JSON restored discarded letter spacing');
+    Check((Length(LoadedLayer.CharacterScales) = 3) and
+      SameValue(LoadedLayer.CharacterScales[1], 1.5, 0.0001),
+      'text path JSON did not restore individual character scales');
+    Check((Length(LoadedLayer.CharacterPathOffsets) = 3) and
+      SameValue(LoadedLayer.CharacterPathOffsets[1], 12.0, 0.0001),
+      'text path JSON did not restore individual character positions');
 
     TTextRendererSkiaRuntime.Acquire(
       ExtractFilePath(ParamStr(0)) + 'sk4d.dll');
@@ -472,6 +676,8 @@ begin
   CheckSharedPathEditing;
   CheckTextPathFrameTransform;
   CheckSingleLineTextPath;
+  CheckCharacterPlacementCells;
+  CheckIndividualCharacterResize;
   CheckPersistenceAndRendering;
   Writeln('PASS');
 end.

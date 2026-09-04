@@ -28,6 +28,9 @@ function ScreenLayoutPolylineLength(const Points: TArray<TPointF>): Single;
 // 先頭からの距離に対応する座標と接線を返し、点列が無効ならFalseを返す。
 function ScreenLayoutPolylinePointAtDistance(const Points: TArray<TPointF>;
   Distance: Single; out PointValue, Tangent: TPointF): Boolean;
+// 展開済み点列上で指定点に最も近い位置を、先頭からの距離として返す。
+function ScreenLayoutPolylineNearestDistance(const Points: TArray<TPointF>;
+  const PointValue: TPointF; out Distance: Single): Boolean;
 // 指定頂点を鋭角または滑らかなベジェ接続へ変更し、隣接区間も更新する。
 procedure SetScreenLayoutPathVertexKind(var Vertices: TArray<TScreenLayoutVertex>; VertexIndex: Integer;
   Kind: TScreenLayoutVertexKind);
@@ -365,6 +368,51 @@ begin
     end;
   end;
   Result := False;
+end;
+
+function ScreenLayoutPolylineNearestDistance(const Points: TArray<TPointF>;
+  const PointValue: TPointF; out Distance: Single): Boolean;
+var
+  AccumulatedDistance: Single;
+  CandidateDistance: Single;
+  DX: Single;
+  DY: Single;
+  I: Integer;
+  NearestSquaredDistance: Single;
+  Projection: Single;
+  ProjectedX: Single;
+  ProjectedY: Single;
+  SegmentLength: Single;
+  SegmentLengthSquared: Single;
+  SquaredDistance: Single;
+begin
+  Result := False;
+  Distance := 0;
+  NearestSquaredDistance := MaxSingle;
+  AccumulatedDistance := 0;
+  for I := 0 to High(Points) - 1 do
+  begin
+    DX := Points[I + 1].X - Points[I].X;
+    DY := Points[I + 1].Y - Points[I].Y;
+    SegmentLengthSquared := DX * DX + DY * DY;
+    if SegmentLengthSquared <= 0 then
+      Continue;
+    SegmentLength := Sqrt(SegmentLengthSquared);
+    Projection := EnsureRange(((PointValue.X - Points[I].X) * DX +
+      (PointValue.Y - Points[I].Y) * DY) / SegmentLengthSquared, 0.0, 1.0);
+    ProjectedX := Points[I].X + DX * Projection;
+    ProjectedY := Points[I].Y + DY * Projection;
+    SquaredDistance := Sqr(PointValue.X - ProjectedX) +
+      Sqr(PointValue.Y - ProjectedY);
+    CandidateDistance := AccumulatedDistance + SegmentLength * Projection;
+    if SquaredDistance < NearestSquaredDistance then
+    begin
+      NearestSquaredDistance := SquaredDistance;
+      Distance := CandidateDistance;
+      Result := True;
+    end;
+    AccumulatedDistance := AccumulatedDistance + SegmentLength;
+  end;
 end;
 
 procedure SetScreenLayoutPathVertexKind(var Vertices: TArray<TScreenLayoutVertex>; VertexIndex: Integer;

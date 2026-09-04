@@ -95,6 +95,7 @@
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutEllipseGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutTextGeometry.pas"/>
+        <DCCReference Include="Source\Core\Geometry\ScreenLayoutTextPathGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutTextOutlineGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutPathOperations.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutShapeOperations.pas"/>
