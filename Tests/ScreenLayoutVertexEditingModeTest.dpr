@@ -11,7 +11,9 @@ uses
     '..\Source\Editor\Interaction\ScreenLayoutCanvasInteraction.pas',
   ScreenLayoutDocument in '..\Source\Core\Model\ScreenLayoutDocument.pas',
   ScreenLayoutEditHistory in
-    '..\Source\Core\Model\ScreenLayoutEditHistory.pas';
+    '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
+  ScreenLayoutShapeInteraction in
+    '..\Source\Editor\Interaction\ScreenLayoutShapeInteraction.pas';
 
 procedure Check(Condition: Boolean; const MessageText: string);
 begin
@@ -20,13 +22,16 @@ begin
 end;
 
 var
+  BezierHandles: TScreenLayoutBezierHandles;
   CaptureNeeded: Boolean;
   Document: TVectArtDocument;
   History: TVectArtEditHistory;
   Index: Integer;
   Interaction: TVectArtCanvasInteraction;
   Kind: TScreenLayoutVertexKind;
+  OutsideHandlePoint: TPoint;
   PathLayer: TVectArtPathLayer;
+  SelectedVertexRect: TRect;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
   Document := TVectArtDocument.Create;
@@ -93,6 +98,46 @@ begin
       (Kind = slvkBezier) and
       (PathLayer.Vertices[1].Kind = slvkBezier),
       'Path edit mode and selected vertex kind diverged');
+    Check(Interaction.SelectedShapeBezierHandles(BezierHandles),
+      'Path edit did not expose bezier control handles');
+    OutsideHandlePoint := Point(BezierHandles.IncomingRect.Right + 4,
+      BezierHandles.IncomingRect.CenterPoint.Y);
+    Check(Interaction.BezierHandleAt(OutsideHandlePoint.X,
+      OutsideHandlePoint.Y) = slbhIncoming,
+      'expanded incoming bezier handle area was not detected');
+    Check(Interaction.CursorAt(OutsideHandlePoint.X,
+      OutsideHandlePoint.Y) = crSizeAll,
+      'incoming bezier handle hover did not change the cursor');
+    Check(Interaction.MouseDownSelectedVertex(mbLeft, [],
+      OutsideHandlePoint.X, OutsideHandlePoint.Y, CaptureNeeded) and
+      CaptureNeeded, 'expanded incoming bezier handle could not be grabbed');
+    Check(Interaction.MouseUp(mbLeft),
+      'incoming bezier handle drag did not finish');
+    OutsideHandlePoint := Point(BezierHandles.OutgoingRect.Left - 4,
+      BezierHandles.OutgoingRect.CenterPoint.Y);
+    Check(Interaction.BezierHandleAt(OutsideHandlePoint.X,
+      OutsideHandlePoint.Y) = slbhOutgoing,
+      'expanded outgoing bezier handle area was not detected');
+    Check(Interaction.CursorAt(OutsideHandlePoint.X,
+      OutsideHandlePoint.Y) = crSizeAll,
+      'outgoing bezier handle hover did not change the cursor');
+    Check(Interaction.MouseDownSelectedVertex(mbLeft, [],
+      OutsideHandlePoint.X, OutsideHandlePoint.Y, CaptureNeeded) and
+      CaptureNeeded, 'expanded outgoing bezier handle could not be grabbed');
+    Check(Interaction.MouseUp(mbLeft),
+      'outgoing bezier handle drag did not finish');
+    Check(Interaction.SelectedShapeVertexRect(SelectedVertexRect),
+      'Path edit did not expose the selected bezier anchor');
+    OutsideHandlePoint := Point(SelectedVertexRect.CenterPoint.X,
+      SelectedVertexRect.Bottom + 4);
+    Check(Interaction.CursorAt(OutsideHandlePoint.X,
+      OutsideHandlePoint.Y) = crSizeAll,
+      'bezier anchor hover did not change the cursor');
+    Check(Interaction.MouseDownSelectedVertex(mbLeft, [],
+      OutsideHandlePoint.X, OutsideHandlePoint.Y, CaptureNeeded) and
+      CaptureNeeded, 'expanded bezier anchor could not be grabbed');
+    Check(Interaction.MouseUp(mbLeft),
+      'bezier anchor drag did not finish');
     Check(Length(Interaction.SelectedShapeVertexKindButtons) = 0,
       'Path edit exposed the removed vertex kind buttons');
     Check(Interaction.SetSelectedPathVertexKind(slvkSharp),

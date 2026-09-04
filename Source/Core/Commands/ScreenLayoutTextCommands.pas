@@ -128,6 +128,8 @@ begin
   begin
     Result.CharacterPathOffsets :=
       TScreenLayoutTextPathLayer(Layer).CharacterPathOffsets;
+    Result.CharacterPositionManual :=
+      TScreenLayoutTextPathLayer(Layer).CharacterPositionManual;
     Result.CharacterScales :=
       TScreenLayoutTextPathLayer(Layer).CharacterScales;
   end;
@@ -226,6 +228,10 @@ begin
     Copy(NewData.IndividualLetterSpacingRatios);
   FOldData.CharacterPathOffsets := Copy(OldData.CharacterPathOffsets);
   FNewData.CharacterPathOffsets := Copy(NewData.CharacterPathOffsets);
+  FOldData.CharacterPositionManual :=
+    Copy(OldData.CharacterPositionManual);
+  FNewData.CharacterPositionManual :=
+    Copy(NewData.CharacterPositionManual);
   FOldData.CharacterScales := Copy(OldData.CharacterScales);
   FNewData.CharacterScales := Copy(NewData.CharacterScales);
 end;

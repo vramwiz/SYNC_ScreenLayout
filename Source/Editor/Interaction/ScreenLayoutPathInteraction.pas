@@ -87,6 +87,7 @@ uses
 
 const
   VERTEX_HANDLE_SIZE           = 9;
+  BEZIER_VERTEX_HIT_PADDING    = 6;
   BEZIER_CONTROL_HANDLE_SIZE   = 9;
   VERTEX_KIND_BUTTON_GAP       = 4;
   VERTEX_KIND_BUTTON_OFFSET    = 34;
@@ -205,9 +206,13 @@ end;
 function TScreenLayoutPathInteraction.HitTestVertex(X, Y: Integer;
   out VertexIndex: Integer): Boolean;
 var
+  CandidateDistance: Single;
+  CenterX: Integer;
+  CenterY: Integer;
   HalfSize: Integer;
   HandleRect: TRect;
   I: Integer;
+  NearestDistance: Single;
   PathLayer: TVectArtLayer;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
@@ -217,16 +222,26 @@ begin
     Exit;
   Vertices := PathLayer.EditablePathVertices;
   HalfSize := VERTEX_HANDLE_SIZE div 2;
+  NearestDistance := MaxSingle;
   for I := 0 to High(Vertices) do
   begin
-    HandleRect := Rect(ToScreenX(Vertices[I].Position.X) - HalfSize,
-      ToScreenY(Vertices[I].Position.Y) - HalfSize,
-      ToScreenX(Vertices[I].Position.X) - HalfSize + VERTEX_HANDLE_SIZE,
-      ToScreenY(Vertices[I].Position.Y) - HalfSize + VERTEX_HANDLE_SIZE);
+    CenterX := ToScreenX(Vertices[I].Position.X);
+    CenterY := ToScreenY(Vertices[I].Position.Y);
+    HandleRect := Rect(CenterX - HalfSize, CenterY - HalfSize,
+      CenterX - HalfSize + VERTEX_HANDLE_SIZE,
+      CenterY - HalfSize + VERTEX_HANDLE_SIZE);
+    if Vertices[I].Kind = slvkBezier then
+      InflateRect(HandleRect, BEZIER_VERTEX_HIT_PADDING,
+        BEZIER_VERTEX_HIT_PADDING);
     if PtInRect(HandleRect, Point(X, Y)) then
     begin
-      VertexIndex := I;
-      Exit(True);
+      CandidateDistance := Sqr(X - CenterX) + Sqr(Y - CenterY);
+      if CandidateDistance < NearestDistance then
+      begin
+        NearestDistance := CandidateDistance;
+        VertexIndex := I;
+        Result := True;
+      end;
     end;
   end;
 end;
@@ -250,21 +265,21 @@ function TScreenLayoutPathInteraction.HitTestBezierHandle(X, Y: Integer;
   out HandleKind: TScreenLayoutBezierHandleKind): Boolean;
 var
   Handles: TScreenLayoutBezierHandles;
+  VertexRect: TRect;
 begin
   Result := False;
   HandleKind := slbhNone;
   if not SelectedBezierHandles(Handles) then
     Exit;
-  if PtInRect(Handles.IncomingRect, Point(X, Y)) then
-  begin
-    HandleKind := slbhIncoming;
-    Exit(True);
-  end;
-  if PtInRect(Handles.OutgoingRect, Point(X, Y)) then
-  begin
-    HandleKind := slbhOutgoing;
-    Exit(True);
-  end;
+  HandleKind := ScreenLayoutBezierHandleAt(Handles, Point(X, Y));
+  if (HandleKind <> slbhNone) and
+    (((HandleKind = slbhIncoming) and
+      not PtInRect(Handles.IncomingRect, Point(X, Y))) or
+     ((HandleKind = slbhOutgoing) and
+      not PtInRect(Handles.OutgoingRect, Point(X, Y)))) and
+    SelectedVertexRect(VertexRect) and PtInRect(VertexRect, Point(X, Y)) then
+    HandleKind := slbhNone;
+  Result := HandleKind <> slbhNone;
 end;
 
 function TScreenLayoutPathInteraction.HitTestSegment(X, Y: Integer;

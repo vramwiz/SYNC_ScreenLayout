@@ -241,11 +241,14 @@ type
   TScreenLayoutTextPathLayer = class(TScreenLayoutTextLayer)
   private
     FCharacterPathOffsets: TArray<Single>;
+    FCharacterPositionManual: TArray<Boolean>;
     FCharacterScales: TArray<Single>;
     FVertices: TArray<TScreenLayoutVertex>;
     function GetCharacterPathOffsets: TArray<Single>;
+    function GetCharacterPositionManual: TArray<Boolean>;
     function GetCharacterScales: TArray<Single>;
     procedure SetCharacterPathOffsets(const Value: TArray<Single>);
+    procedure SetCharacterPositionManual(const Value: TArray<Boolean>);
     procedure SetCharacterScales(const Value: TArray<Single>);
   protected
     procedure SetText(const Value: string); override;
@@ -263,6 +266,8 @@ type
     function SupportsPathEditing: Boolean; override;
     property CharacterPathOffsets: TArray<Single>
       read GetCharacterPathOffsets write SetCharacterPathOffsets;
+    property CharacterPositionManual: TArray<Boolean>
+      read GetCharacterPositionManual write SetCharacterPositionManual;
     property CharacterScales: TArray<Single> read GetCharacterScales
       write SetCharacterScales;
   end;
@@ -271,6 +276,7 @@ type
     Alignment: TScreenLayoutTextAlignment; // 枠内の上中下と左中央右を組み合わせた配置。
     Bounds: TRectF;          // 文字の組版実寸または変形後の表示範囲。
     CharacterPathOffsets: TArray<Single>; // 文字パスの標準位置からPath方向へずらす距離。
+    CharacterPositionManual: TArray<Boolean>; // 手動位置を自動衝突補正から除外する文字単位フラグ。
     CharacterScales: TArray<Single>; // 文字パスの各文字へ適用する個別の均等倍率。
     FontFamily: string;      // Skiaへ渡す優先フォントファミリー。
     FontSize: Single;        // 変形前の文書座標単位フォントサイズ。
@@ -1090,6 +1096,7 @@ begin
   LetterSpacingRatio := 0;
   IndividualLetterSpacingRatios := nil;
   CharacterPathOffsets := nil;
+  CharacterPositionManual := nil;
   CharacterScales := nil;
   WrapWidth := 0;
   SetText(AText);
@@ -1104,6 +1111,7 @@ begin
   if Text <> NormalizedValue then
   begin
     SetLength(FCharacterPathOffsets, 0);
+    SetLength(FCharacterPositionManual, 0);
     SetLength(FCharacterScales, 0);
   end;
   inherited SetText(NormalizedValue);
@@ -1120,10 +1128,22 @@ begin
   Result := Copy(FCharacterScales);
 end;
 
+function TScreenLayoutTextPathLayer.GetCharacterPositionManual:
+  TArray<Boolean>;
+begin
+  Result := Copy(FCharacterPositionManual);
+end;
+
 procedure TScreenLayoutTextPathLayer.SetCharacterPathOffsets(
   const Value: TArray<Single>);
 begin
   FCharacterPathOffsets := Copy(Value);
+end;
+
+procedure TScreenLayoutTextPathLayer.SetCharacterPositionManual(
+  const Value: TArray<Boolean>);
+begin
+  FCharacterPositionManual := Copy(Value);
 end;
 
 procedure TScreenLayoutTextPathLayer.SetCharacterScales(
@@ -2686,6 +2706,8 @@ begin
   begin
     TScreenLayoutTextPathLayer(TextLayer).CharacterPathOffsets :=
       Data.CharacterPathOffsets;
+    TScreenLayoutTextPathLayer(TextLayer).CharacterPositionManual :=
+      Data.CharacterPositionManual;
     TScreenLayoutTextPathLayer(TextLayer).CharacterScales :=
       Data.CharacterScales;
   end;

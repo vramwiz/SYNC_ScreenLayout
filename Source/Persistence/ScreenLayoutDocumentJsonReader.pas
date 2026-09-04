@@ -283,6 +283,7 @@ begin
     Vertices);
   Result.Alignment := Data.Alignment;
   Result.CharacterPathOffsets := Data.CharacterPathOffsets;
+  Result.CharacterPositionManual := Data.CharacterPositionManual;
   Result.CharacterScales := Data.CharacterScales;
   Result.FontStyle := Data.FontStyle;
   Result.LetterSpacingRatio := 0;
@@ -340,6 +341,8 @@ var
   ChildText: string;
   CharacterPathOffsetIndex: Integer;
   CharacterPathOffsetsJson: TJSONArray;
+  CharacterPositionManualIndex: Integer;
+  CharacterPositionManualJson: TJSONArray;
   CharacterScaleIndex: Integer;
   CharacterScalesJson: TJSONArray;
   ExtractedLayer: TVectArtLayer;
@@ -526,6 +529,28 @@ begin
               TextValue.CharacterPathOffsets[CharacterPathOffsetIndex] :=
                 TJSONNumber(CharacterPathOffsetsJson.Items[
                   CharacterPathOffsetIndex]).AsDouble;
+            end;
+          end;
+          SetLength(TextValue.CharacterPositionManual, 0);
+          if (LayerTypes[I] = 'textPath') and
+            (LayerJson.GetValue('characterPositionManual') <> nil) then
+          begin
+            CharacterPositionManualJson := TJSONArray(RequireValue(
+              LayerJson, 'characterPositionManual', TJSONArray));
+            SetLength(TextValue.CharacterPositionManual,
+              CharacterPositionManualJson.Count);
+            for CharacterPositionManualIndex := 0 to
+              CharacterPositionManualJson.Count - 1 do
+            begin
+              if not (CharacterPositionManualJson.Items[
+                CharacterPositionManualIndex] is TJSONBool) then
+                raise EConvertError.CreateFmt(
+                  'JSON field "characterPositionManual[%d]" has an invalid type',
+                  [CharacterPositionManualIndex]);
+              TextValue.CharacterPositionManual[
+                CharacterPositionManualIndex] :=
+                TJSONBool(CharacterPositionManualJson.Items[
+                  CharacterPositionManualIndex]).AsBoolean;
             end;
           end;
           SetLength(TextValue.CharacterScales, 0);

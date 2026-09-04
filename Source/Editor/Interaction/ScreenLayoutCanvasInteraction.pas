@@ -179,6 +179,8 @@ type
       const ACanvasBounds: TRect; AZoom: Single);
     // 現在位置で開始できる編集操作に対応したカーソルを返す。
     function CursorAt(X, Y: Integer): TCursor;
+    // 拡張当たり判定内のベジェ制御点を返す。
+    function BezierHandleAt(X, Y: Integer): TScreenLayoutBezierHandleKind;
     // 画面座標の最前面にある表示レイヤーを返し、該当しなければ-1を返す。
     function LayerAt(X, Y: Integer): Integer;
     // 修飾キーなしの押下を処理し、マウスキャプチャが必要ならTrueを返す。
@@ -427,6 +429,18 @@ begin
     Exit(False);
   for I := 0 to High(Left) do
     if not SameValue(Left[I], Right[I]) then
+      Exit(False);
+  Result := True;
+end;
+
+function SameBooleanArrays(const Left, Right: TArray<Boolean>): Boolean;
+var
+  I: Integer;
+begin
+  if Length(Left) <> Length(Right) then
+    Exit(False);
+  for I := 0 to High(Left) do
+    if Left[I] <> Right[I] then
       Exit(False);
   Result := True;
 end;
@@ -993,6 +1007,18 @@ begin
     Result := crSizeAll;
 end;
 
+function TVectArtCanvasInteraction.BezierHandleAt(X,
+  Y: Integer): TScreenLayoutBezierHandleKind;
+var
+  Handles: TScreenLayoutBezierHandles;
+begin
+  Result := slbhNone;
+  if (FDocument = nil) or SelectionContainsLockedLayer or
+    not SelectedShapeBezierHandles(Handles) then
+    Exit;
+  Result := ScreenLayoutBezierHandleAt(Handles, Point(X, Y));
+end;
+
 procedure TVectArtCanvasInteraction.CommitRotationCommand;
 var
   ArcLayer: TScreenLayoutArcLayer;
@@ -1061,6 +1087,8 @@ begin
     TScreenLayoutTextPathLayer(FDocument[FDragLayerIndex]));
   if SameSingleArrays(FTextPathCharacterStartData.CharacterPathOffsets,
       NewData.CharacterPathOffsets) and
+    SameBooleanArrays(FTextPathCharacterStartData.CharacterPositionManual,
+      NewData.CharacterPositionManual) and
     SameSingleArrays(FTextPathCharacterStartData.CharacterScales,
       NewData.CharacterScales) then
     Exit;
@@ -2911,6 +2939,7 @@ var
   CenterX: Single;
   CenterY: Single;
   CharacterPathOffsets: TArray<Single>;
+  CharacterPositionManual: TArray<Boolean>;
   CharacterScales: TArray<Single>;
   CurrentDistance: Single;
   CurrentMouseAngle: Single;
@@ -2998,6 +3027,20 @@ begin
       FTextPathCharacterOffsetStart + PathDistance -
       FTextPathCharacterPathDistanceStart;
     TextData.CharacterPathOffsets := CharacterPathOffsets;
+    CharacterPositionManual := Copy(TextData.CharacterPositionManual);
+    I := Length(CharacterPositionManual);
+    if I <= FSelectedTextPathCharacter then
+    begin
+      SetLength(CharacterPositionManual,
+        FSelectedTextPathCharacter + 1);
+      while I < Length(CharacterPositionManual) do
+      begin
+        CharacterPositionManual[I] := False;
+        Inc(I);
+      end;
+    end;
+    CharacterPositionManual[FSelectedTextPathCharacter] := True;
+    TextData.CharacterPositionManual := CharacterPositionManual;
     FDocument.SetTextData(FDragLayerIndex, TextData);
     FMoveOccurred := True;
     Exit(True);

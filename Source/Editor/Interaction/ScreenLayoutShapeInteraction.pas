@@ -95,6 +95,10 @@ type
     property Dragging: Boolean read GetDragging;
   end;
 
+// 表示矩形より広い範囲から最寄りのベジェ制御点を返す。
+function ScreenLayoutBezierHandleAt(const Handles: TScreenLayoutBezierHandles;
+  const PointValue: TPoint): TScreenLayoutBezierHandleKind;
+
 implementation
 
 uses
@@ -103,12 +107,55 @@ uses
 
 const
   VERTEX_HANDLE_SIZE           = 9;
+  BEZIER_VERTEX_HIT_PADDING    = 6;
   BEZIER_CONTROL_HANDLE_SIZE   = 9;
+  BEZIER_CONTROL_HIT_PADDING   = 6;
   VERTEX_KIND_BUTTON_GAP       = 4;
   VERTEX_KIND_BUTTON_OFFSET    = 34;
   VERTEX_KIND_BUTTON_SIZE      = 22;
   SEGMENT_HIT_DISTANCE         = 6.0;
   BEZIER_HIT_SUBDIVISIONS      = 32;
+
+function ScreenLayoutBezierHandleAt(const Handles: TScreenLayoutBezierHandles;
+  const PointValue: TPoint): TScreenLayoutBezierHandleKind;
+var
+  IncomingCenter: TPoint;
+  IncomingDistance: Single;
+  IncomingHitRect: TRect;
+  OutgoingCenter: TPoint;
+  OutgoingDistance: Single;
+  OutgoingHitRect: TRect;
+begin
+  Result := slbhNone;
+  IncomingDistance := MaxSingle;
+  if not Handles.IncomingRect.IsEmpty then
+  begin
+    IncomingHitRect := Handles.IncomingRect;
+    InflateRect(IncomingHitRect, BEZIER_CONTROL_HIT_PADDING,
+      BEZIER_CONTROL_HIT_PADDING);
+    if PtInRect(IncomingHitRect, PointValue) then
+    begin
+      IncomingCenter := Handles.IncomingRect.CenterPoint;
+      IncomingDistance := Sqr(PointValue.X - IncomingCenter.X) +
+        Sqr(PointValue.Y - IncomingCenter.Y);
+      Result := slbhIncoming;
+    end;
+  end;
+  if not Handles.OutgoingRect.IsEmpty then
+  begin
+    OutgoingHitRect := Handles.OutgoingRect;
+    InflateRect(OutgoingHitRect, BEZIER_CONTROL_HIT_PADDING,
+      BEZIER_CONTROL_HIT_PADDING);
+    if PtInRect(OutgoingHitRect, PointValue) then
+    begin
+      OutgoingCenter := Handles.OutgoingRect.CenterPoint;
+      OutgoingDistance := Sqr(PointValue.X - OutgoingCenter.X) +
+        Sqr(PointValue.Y - OutgoingCenter.Y);
+      if OutgoingDistance < IncomingDistance then
+        Result := slbhOutgoing;
+    end;
+  end;
+end;
 
 function DistanceToSegmentParameter(const PointValue, StartPoint,
   EndPoint: TPointF; out Parameter: Single): Single;
@@ -228,11 +275,15 @@ end;
 function TScreenLayoutShapeInteraction.HitTestVertex(X, Y: Integer;
   out ContourIndex, VertexIndex: Integer): Boolean;
 var
+  CandidateDistance: Single;
+  CenterX: Integer;
+  CenterY: Integer;
   CurrentContourIndex: Integer;
   CurrentVertexIndex: Integer;
   Contours: TArray<TScreenLayoutContour>;
   HalfSize: Integer;
   HandleRect: TRect;
+  NearestDistance: Single;
   ShapeLayer: TScreenLayoutShapeLayer;
 begin
   Result := False;
@@ -242,24 +293,32 @@ begin
     Exit;
   Contours := ShapeLayer.Contours;
   HalfSize := VERTEX_HANDLE_SIZE div 2;
+  NearestDistance := MaxSingle;
   for CurrentContourIndex := 0 to High(Contours) do
     for CurrentVertexIndex := 0 to
       High(Contours[CurrentContourIndex].Vertices) do
     begin
-      HandleRect := Rect(
-        ToScreenX(Contours[CurrentContourIndex].Vertices[
-          CurrentVertexIndex].Position.X) - HalfSize,
-        ToScreenY(Contours[CurrentContourIndex].Vertices[
-          CurrentVertexIndex].Position.Y) - HalfSize,
-        ToScreenX(Contours[CurrentContourIndex].Vertices[
-          CurrentVertexIndex].Position.X) - HalfSize + VERTEX_HANDLE_SIZE,
-        ToScreenY(Contours[CurrentContourIndex].Vertices[
-          CurrentVertexIndex].Position.Y) - HalfSize + VERTEX_HANDLE_SIZE);
+      CenterX := ToScreenX(Contours[CurrentContourIndex].Vertices[
+        CurrentVertexIndex].Position.X);
+      CenterY := ToScreenY(Contours[CurrentContourIndex].Vertices[
+        CurrentVertexIndex].Position.Y);
+      HandleRect := Rect(CenterX - HalfSize, CenterY - HalfSize,
+        CenterX - HalfSize + VERTEX_HANDLE_SIZE,
+        CenterY - HalfSize + VERTEX_HANDLE_SIZE);
+      if Contours[CurrentContourIndex].Vertices[
+        CurrentVertexIndex].Kind = slvkBezier then
+        InflateRect(HandleRect, BEZIER_VERTEX_HIT_PADDING,
+          BEZIER_VERTEX_HIT_PADDING);
       if PtInRect(HandleRect, Point(X, Y)) then
       begin
-        ContourIndex := CurrentContourIndex;
-        VertexIndex := CurrentVertexIndex;
-        Exit(True);
+        CandidateDistance := Sqr(X - CenterX) + Sqr(Y - CenterY);
+        if CandidateDistance < NearestDistance then
+        begin
+          NearestDistance := CandidateDistance;
+          ContourIndex := CurrentContourIndex;
+          VertexIndex := CurrentVertexIndex;
+          Result := True;
+        end;
       end;
     end;
 end;
@@ -283,21 +342,21 @@ function TScreenLayoutShapeInteraction.HitTestBezierHandle(X, Y: Integer;
   out HandleKind: TScreenLayoutBezierHandleKind): Boolean;
 var
   Handles: TScreenLayoutBezierHandles;
+  VertexRect: TRect;
 begin
   Result := False;
   HandleKind := slbhNone;
   if not SelectedBezierHandles(Handles) then
     Exit;
-  if PtInRect(Handles.IncomingRect, Point(X, Y)) then
-  begin
-    HandleKind := slbhIncoming;
-    Exit(True);
-  end;
-  if PtInRect(Handles.OutgoingRect, Point(X, Y)) then
-  begin
-    HandleKind := slbhOutgoing;
-    Exit(True);
-  end;
+  HandleKind := ScreenLayoutBezierHandleAt(Handles, Point(X, Y));
+  if (HandleKind <> slbhNone) and
+    (((HandleKind = slbhIncoming) and
+      not PtInRect(Handles.IncomingRect, Point(X, Y))) or
+     ((HandleKind = slbhOutgoing) and
+      not PtInRect(Handles.OutgoingRect, Point(X, Y)))) and
+    SelectedVertexRect(VertexRect) and PtInRect(VertexRect, Point(X, Y)) then
+    HandleKind := slbhNone;
+  Result := HandleKind <> slbhNone;
 end;
 
 function TScreenLayoutShapeInteraction.HitTestSegment(X, Y: Integer;

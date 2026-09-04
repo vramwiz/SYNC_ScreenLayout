@@ -147,6 +147,9 @@ var
   CharacterPathOffsetIndex: Integer;
   CharacterPathOffsets: TArray<Single>;
   CharacterPathOffsetsJson: TJSONArray;
+  CharacterPositionManual: TArray<Boolean>;
+  CharacterPositionManualIndex: Integer;
+  CharacterPositionManualJson: TJSONArray;
   CharacterScaleIndex: Integer;
   CharacterScales: TArray<Single>;
   CharacterScalesJson: TJSONArray;
@@ -280,6 +283,15 @@ begin
               CharacterPathOffsets[CharacterPathOffsetIndex]);
           TextJson.AddPair('characterPathOffsets',
             CharacterPathOffsetsJson);
+          CharacterPositionManualJson := TJSONArray.Create;
+          CharacterPositionManual :=
+            TScreenLayoutTextPathLayer(Layer).CharacterPositionManual;
+          for CharacterPositionManualIndex := 0 to
+            High(CharacterPositionManual) do
+            CharacterPositionManualJson.Add(
+              CharacterPositionManual[CharacterPositionManualIndex]);
+          TextJson.AddPair('characterPositionManual',
+            CharacterPositionManualJson);
           CharacterScalesJson := TJSONArray.Create;
           CharacterScales :=
             TScreenLayoutTextPathLayer(Layer).CharacterScales;

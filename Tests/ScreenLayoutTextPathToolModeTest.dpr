@@ -212,6 +212,7 @@ procedure CheckIndividualCharacterResize;
 var
   CharacterGeometry: TVectArtSelectionGeometry;
   CharacterPathOffsets: TArray<Single>;
+  CharacterPositionManual: TArray<Boolean>;
   CharacterPoint: TPoint;
   CharacterScales: TArray<Single>;
   Document: TVectArtDocument;
@@ -301,7 +302,10 @@ begin
       'individual character move did not commit');
     Placements := BuildScreenLayoutTextPathPlacements(Layer);
     CharacterPathOffsets := Layer.CharacterPathOffsets;
+    CharacterPositionManual := Layer.CharacterPositionManual;
     Check((Length(CharacterPathOffsets) >= 2) and
+      (Length(CharacterPositionManual) >= 2) and
+      CharacterPositionManual[1] and
       SameValue(Placements[1].PathDistance,
         OriginalPathDistance + 25, 1.0) and
       SameValue(Placements[1].Anchor.Y, 20.0, 0.001),
@@ -309,19 +313,73 @@ begin
         + 'offset count was %d', [Placements[1].PathDistance,
           OriginalPathDistance, Length(CharacterPathOffsets)]));
     History.Undo;
-    Check(Length(Layer.CharacterPathOffsets) = 0,
+    Check((Length(Layer.CharacterPathOffsets) = 0) and
+      (Length(Layer.CharacterPositionManual) = 0),
       'individual character move undo did not restore its position');
     History.Redo;
-    Check(Length(Layer.CharacterPathOffsets) >= 2,
+    Check((Length(Layer.CharacterPathOffsets) >= 2) and
+      (Length(Layer.CharacterPositionManual) >= 2) and
+      Layer.CharacterPositionManual[1],
       'individual character move redo did not restore its position');
     Layer.Text := 'XYZ';
     Check((Length(Layer.CharacterPathOffsets) = 0) and
+      (Length(Layer.CharacterPositionManual) = 0) and
       (Length(Layer.CharacterScales) = 0),
       'changing text did not discard individual character transforms');
   finally
     Interaction.Free;
     History.Free;
     Document.Free;
+  end;
+end;
+
+procedure CheckTextPathCollisionHandling;
+var
+  CornerDistance: Single;
+  Layer: TScreenLayoutTextPathLayer;
+  Placements: TArray<TScreenLayoutTextPathPlacement>;
+  Vertices: TArray<TScreenLayoutVertex>;
+begin
+  SetLength(Vertices, 2);
+  Vertices[0].Position := TPointF.Create(0, 0);
+  Vertices[0].Kind := slvkSharp;
+  Vertices[0].OutgoingSegment := slskLine;
+  Vertices[1].Position := TPointF.Create(400, 0);
+  Vertices[1].Kind := slvkSharp;
+  Vertices[1].OutgoingSegment := slskLine;
+  Layer := TScreenLayoutTextPathLayer.Create('Text Path',
+    TRectF.Create(0, -30, 400, 0), 'ABC', 'Yu Gothic UI', 24, 400,
+    clWhite, Vertices);
+  try
+    Placements := BuildScreenLayoutTextPathPlacements(Layer);
+    Check(Length(Placements) = 3,
+      'collision test could not measure the characters');
+    CornerDistance := Placements[0].AdvanceWidth +
+      Placements[1].AdvanceWidth;
+    SetLength(Vertices, 3);
+    Vertices[0].Position := TPointF.Create(0, 0);
+    Vertices[0].Kind := slvkSharp;
+    Vertices[0].OutgoingSegment := slskLine;
+    Vertices[1].Position := TPointF.Create(CornerDistance, 0);
+    Vertices[1].Kind := slvkSharp;
+    Vertices[1].OutgoingSegment := slskLine;
+    Vertices[2].Position := TPointF.Create(CornerDistance, -200);
+    Vertices[2].Kind := slvkSharp;
+    Vertices[2].OutgoingSegment := slskLine;
+    Layer.AssignEditablePathVertices(Vertices);
+    Placements := BuildScreenLayoutTextPathPlacements(Layer);
+    Check((Length(Placements) = 3) and
+      Placements[2].CollisionAdjusted and
+      not Placements[2].CollidesWithPrevious,
+      'automatic text path collision was not resolved');
+    Layer.CharacterPositionManual := [False, False, True];
+    Placements := BuildScreenLayoutTextPathPlacements(Layer);
+    Check((Length(Placements) = 3) and
+      not Placements[2].CollisionAdjusted and
+      Placements[2].CollidesWithPrevious,
+      'manual character position did not suppress collision correction');
+  finally
+    Layer.Free;
   end;
 end;
 
@@ -363,6 +421,7 @@ begin
       24, 120, clWhite, Vertices);
     Layer.LetterSpacingRatio := 0.1;
     Layer.CharacterPathOffsets := [0.0, 12.0, -4.0];
+    Layer.CharacterPositionManual := [False, True, True];
     Layer.CharacterScales := [1.0, 1.5, 0.75];
     Document.InsertLayer(1, Layer);
 
@@ -373,6 +432,10 @@ begin
           ClonedLayer).CharacterPathOffsets) = 3) and
         SameValue(TScreenLayoutTextPathLayer(
           ClonedLayer).CharacterPathOffsets[1], 12.0, 0.0001) and
+        (Length(TScreenLayoutTextPathLayer(
+          ClonedLayer).CharacterPositionManual) = 3) and
+        TScreenLayoutTextPathLayer(
+          ClonedLayer).CharacterPositionManual[1] and
         (Length(TScreenLayoutTextPathLayer(ClonedLayer).CharacterScales) =
           3) and SameValue(TScreenLayoutTextPathLayer(
             ClonedLayer).CharacterScales[1], 1.5, 0.0001),
@@ -403,6 +466,9 @@ begin
     Check((Length(LoadedLayer.CharacterPathOffsets) = 3) and
       SameValue(LoadedLayer.CharacterPathOffsets[1], 12.0, 0.0001),
       'text path JSON did not restore individual character positions');
+    Check((Length(LoadedLayer.CharacterPositionManual) = 3) and
+      LoadedLayer.CharacterPositionManual[1],
+      'text path JSON did not restore manual character position flags');
 
     TTextRendererSkiaRuntime.Acquire(
       ExtractFilePath(ParamStr(0)) + 'sk4d.dll');
@@ -678,6 +744,7 @@ begin
   CheckSingleLineTextPath;
   CheckCharacterPlacementCells;
   CheckIndividualCharacterResize;
+  CheckTextPathCollisionHandling;
   CheckPersistenceAndRendering;
   Writeln('PASS');
 end.
