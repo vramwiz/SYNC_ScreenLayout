@@ -16,6 +16,9 @@ procedure DrawCanvasCropMarks(Target: TDirect2DCanvas;
 
 implementation
 
+uses
+  ScreenLayoutOverlayPrimitives;
+
 const
   CANVAS_GUIDE_DARK        = clBlack;            // 明るい背景で輪郭を保つ外側の線色。
   CANVAS_GUIDE_LIGHT       = TColor($00D0D0D0); // 暗い背景で見える内側の線色。
@@ -75,29 +78,18 @@ procedure DrawCanvasCropMarks(Target: TCanvas;
 var
   I: Integer;
   Points: TArray<TPoint>;
-
-  procedure DrawLines(Color: TColor; Width: Integer);
-  begin
-    Target.Pen.Color := Color;
-    Target.Pen.Style := psSolid;
-    Target.Pen.Width := Width;
-    I := 0;
-    while I + 1 < Length(Points) do
-    begin
-      Target.MoveTo(Points[I].X, Points[I].Y);
-      Target.LineTo(Points[I + 1].X, Points[I + 1].Y);
-      Inc(I, 2);
-    end;
-  end;
-
 begin
   Points := BuildCanvasCropMarkPoints(CanvasBounds);
   if Length(Points) = 0 then
     Exit;
   // 明暗の二重線にして、単色の範囲外背景上でも識別できるようにする。
-  DrawLines(CANVAS_GUIDE_DARK, 3);
-  DrawLines(CANVAS_GUIDE_LIGHT, 1);
-  Target.Pen.Width := 1;
+  I := 0;
+  while I + 1 < Length(Points) do
+  begin
+    DrawOverlayLine(Target, Points[I], Points[I + 1],
+      CANVAS_GUIDE_LIGHT, psSolid, 3, 1, CANVAS_GUIDE_DARK);
+    Inc(I, 2);
+  end;
 end;
 
 procedure DrawCanvasCropMarks(Target: TDirect2DCanvas;
@@ -105,29 +97,18 @@ procedure DrawCanvasCropMarks(Target: TDirect2DCanvas;
 var
   I: Integer;
   Points: TArray<TPoint>;
-
-  procedure DrawLines(Color: TColor; Width: Integer);
-  begin
-    Target.Pen.Color := Color;
-    Target.Pen.Style := psSolid;
-    Target.Pen.Width := Width;
-    I := 0;
-    while I + 1 < Length(Points) do
-    begin
-      Target.MoveTo(Points[I].X, Points[I].Y);
-      Target.LineTo(Points[I + 1].X, Points[I + 1].Y);
-      Inc(I, 2);
-    end;
-  end;
-
 begin
   Points := BuildCanvasCropMarkPoints(CanvasBounds);
   if Length(Points) = 0 then
     Exit;
   // GDI経路と同じ太さと色順を使い、描画方式による見た目の差を抑える。
-  DrawLines(CANVAS_GUIDE_DARK, 3);
-  DrawLines(CANVAS_GUIDE_LIGHT, 1);
-  Target.Pen.Width := 1;
+  I := 0;
+  while I + 1 < Length(Points) do
+  begin
+    DrawOverlayLine(Target, Points[I], Points[I + 1],
+      CANVAS_GUIDE_LIGHT, psSolid, 3, 1, CANVAS_GUIDE_DARK);
+    Inc(I, 2);
+  end;
 end;
 
 end.

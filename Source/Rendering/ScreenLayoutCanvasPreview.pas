@@ -32,7 +32,8 @@ procedure DrawStyledPreviewLine(Target: TDirect2DCanvas;
 implementation
 
 uses
-  System.Math, System.UITypes, Winapi.D2D1, ScreenLayoutRenderer;
+  System.Math, System.UITypes, Winapi.D2D1, ScreenLayoutOverlayPrimitives,
+  ScreenLayoutRenderer;
 
 type
   TPreviewLineSegment = record
@@ -95,48 +96,21 @@ var
   EndTriangle: array[0..2] of TPoint;
   EndHeadA: TPoint;
   EndHeadB: TPoint;
-  OldBrushColor: TColor;
-  OldBrushStyle: TBrushStyle;
-  OldPenColor: TColor;
-  OldPenStyle: TPenStyle;
-  OldPenWidth: Integer;
   StartTriangle: array[0..2] of TPoint;
   StartHeadA: TPoint;
   StartHeadB: TPoint;
 begin
   BidirectionalArrowHeadPoints(ArrowStart, ArrowEnd, StartHeadA,
     StartHeadB, EndHeadA, EndHeadB);
-  OldPenColor := Target.Pen.Color;
-  OldPenStyle := Target.Pen.Style;
-  OldPenWidth := Target.Pen.Width;
-  OldBrushColor := Target.Brush.Color;
-  OldBrushStyle := Target.Brush.Style;
-  Target.Pen.Style := psSolid;
-  Target.Pen.Color := clWhite;
-  Target.Pen.Width := 5;
-  Target.MoveTo(ArrowStart.X, ArrowStart.Y);
-  Target.LineTo(ArrowEnd.X, ArrowEnd.Y);
-  Target.Pen.Color := clBlack;
-  Target.Pen.Width := 2;
-  Target.MoveTo(ArrowStart.X, ArrowStart.Y);
-  Target.LineTo(ArrowEnd.X, ArrowEnd.Y);
+  DrawOverlayLine(Target, ArrowStart, ArrowEnd, clBlack, psSolid, 5, 2);
   StartTriangle[0] := ArrowStart;
   StartTriangle[1] := StartHeadA;
   StartTriangle[2] := StartHeadB;
   EndTriangle[0] := ArrowEnd;
   EndTriangle[1] := EndHeadA;
   EndTriangle[2] := EndHeadB;
-  Target.Brush.Style := bsSolid;
-  Target.Brush.Color := clBlack;
-  Target.Pen.Color := clWhite;
-  Target.Pen.Width := 2;
-  Target.Polygon(StartTriangle);
-  Target.Polygon(EndTriangle);
-  Target.Pen.Color := OldPenColor;
-  Target.Pen.Style := OldPenStyle;
-  Target.Pen.Width := OldPenWidth;
-  Target.Brush.Color := OldBrushColor;
-  Target.Brush.Style := OldBrushStyle;
+  DrawOverlayHandlePolygon(Target, StartTriangle, clBlack, clBlack);
+  DrawOverlayHandlePolygon(Target, EndTriangle, clBlack, clBlack);
 end;
 
 procedure DrawBidirectionalArrow(Target: TDirect2DCanvas;
@@ -145,48 +119,21 @@ var
   EndTriangle: array[0..2] of TPoint;
   EndHeadA: TPoint;
   EndHeadB: TPoint;
-  OldBrushColor: TColor;
-  OldBrushStyle: TBrushStyle;
-  OldPenColor: TColor;
-  OldPenStyle: TPenStyle;
-  OldPenWidth: Integer;
   StartTriangle: array[0..2] of TPoint;
   StartHeadA: TPoint;
   StartHeadB: TPoint;
 begin
   BidirectionalArrowHeadPoints(ArrowStart, ArrowEnd, StartHeadA,
     StartHeadB, EndHeadA, EndHeadB);
-  OldPenColor := Target.Pen.Color;
-  OldPenStyle := Target.Pen.Style;
-  OldPenWidth := Target.Pen.Width;
-  OldBrushColor := Target.Brush.Color;
-  OldBrushStyle := Target.Brush.Style;
-  Target.Pen.Style := psSolid;
-  Target.Pen.Color := clWhite;
-  Target.Pen.Width := 5;
-  Target.MoveTo(ArrowStart.X, ArrowStart.Y);
-  Target.LineTo(ArrowEnd.X, ArrowEnd.Y);
-  Target.Pen.Color := clBlack;
-  Target.Pen.Width := 2;
-  Target.MoveTo(ArrowStart.X, ArrowStart.Y);
-  Target.LineTo(ArrowEnd.X, ArrowEnd.Y);
+  DrawOverlayLine(Target, ArrowStart, ArrowEnd, clBlack, psSolid, 5, 2);
   StartTriangle[0] := ArrowStart;
   StartTriangle[1] := StartHeadA;
   StartTriangle[2] := StartHeadB;
   EndTriangle[0] := ArrowEnd;
   EndTriangle[1] := EndHeadA;
   EndTriangle[2] := EndHeadB;
-  Target.Brush.Style := bsSolid;
-  Target.Brush.Color := clBlack;
-  Target.Pen.Color := clWhite;
-  Target.Pen.Width := 2;
-  Target.Polygon(StartTriangle);
-  Target.Polygon(EndTriangle);
-  Target.Pen.Color := OldPenColor;
-  Target.Pen.Style := OldPenStyle;
-  Target.Pen.Width := OldPenWidth;
-  Target.Brush.Color := OldBrushColor;
-  Target.Brush.Style := OldBrushStyle;
+  DrawOverlayHandlePolygon(Target, StartTriangle, clBlack, clBlack);
+  DrawOverlayHandlePolygon(Target, EndTriangle, clBlack, clBlack);
 end;
 
 function BuildVertexKindIconPoints(const Bounds: TRect;
@@ -355,18 +302,17 @@ begin
           Round(DY / LengthValue * Width * 0.5));
       end;
     end;
-    Target.MoveTo(P1.X, P1.Y);
-    Target.LineTo(P2.X, P2.Y);
+    DrawOverlayLine(Target, P1, P2, Color, psSolid,
+      Max(Round(Width), 1) + 2, Max(Round(Width), 1));
     if LineCap = vlcRound then
     begin
       Radius := Max(Round(Width * 0.5), 1);
-      Target.Brush.Style := bsSolid;
-      Target.Brush.Color := Color;
-      Target.Ellipse(P1.X - Radius, P1.Y - Radius, P1.X + Radius + 1,
-        P1.Y + Radius + 1);
-      Target.Ellipse(P2.X - Radius, P2.Y - Radius, P2.X + Radius + 1,
-        P2.Y + Radius + 1);
-      Target.Brush.Style := bsClear;
+      DrawOverlayHandleEllipse(Target,
+        Rect(P1.X - Radius, P1.Y - Radius, P1.X + Radius + 1,
+          P1.Y + Radius + 1), Color, Color);
+      DrawOverlayHandleEllipse(Target,
+        Rect(P2.X - Radius, P2.Y - Radius, P2.X + Radius + 1,
+          P2.Y + Radius + 1), Color, Color);
     end
     else if LineCap = vlcTriangle then
     begin
@@ -378,23 +324,20 @@ begin
         Radius := Max(Round(Width * 0.5), 1);
         DX := DX / LengthValue;
         DY := DY / LengthValue;
-        Target.Brush.Style := bsSolid;
-        Target.Brush.Color := Color;
         Points[0] := Point(P1.X - Round(DY * Radius),
           P1.Y + Round(DX * Radius));
         Points[1] := Point(P1.X - Round(DX * Radius),
           P1.Y - Round(DY * Radius));
         Points[2] := Point(P1.X + Round(DY * Radius),
           P1.Y - Round(DX * Radius));
-        Target.Polygon(Points);
+        DrawOverlayHandlePolygon(Target, Points, Color, Color);
         Points[0] := Point(P2.X - Round(DY * Radius),
           P2.Y + Round(DX * Radius));
         Points[1] := Point(P2.X + Round(DX * Radius),
           P2.Y + Round(DY * Radius));
         Points[2] := Point(P2.X + Round(DY * Radius),
           P2.Y - Round(DX * Radius));
-        Target.Polygon(Points);
-        Target.Brush.Style := bsClear;
+        DrawOverlayHandlePolygon(Target, Points, Color, Color);
       end;
     end;
   end;
@@ -437,18 +380,17 @@ begin
           Round(DY / LengthValue * Width * 0.5));
       end;
     end;
-    Target.MoveTo(P1.X, P1.Y);
-    Target.LineTo(P2.X, P2.Y);
+    DrawOverlayLine(Target, P1, P2, Color, psSolid,
+      Max(Round(Width), 1) + 2, Max(Round(Width), 1));
     if LineCap = vlcRound then
     begin
       Radius := Max(Round(Width * 0.5), 1);
-      Target.Brush.Style := bsSolid;
-      Target.Brush.Color := Color;
-      Target.Ellipse(P1.X - Radius, P1.Y - Radius, P1.X + Radius + 1,
-        P1.Y + Radius + 1);
-      Target.Ellipse(P2.X - Radius, P2.Y - Radius, P2.X + Radius + 1,
-        P2.Y + Radius + 1);
-      Target.Brush.Style := bsClear;
+      DrawOverlayHandleEllipse(Target,
+        Rect(P1.X - Radius, P1.Y - Radius, P1.X + Radius + 1,
+          P1.Y + Radius + 1), Color, Color);
+      DrawOverlayHandleEllipse(Target,
+        Rect(P2.X - Radius, P2.Y - Radius, P2.X + Radius + 1,
+          P2.Y + Radius + 1), Color, Color);
     end
     else if LineCap = vlcTriangle then
     begin
@@ -460,23 +402,20 @@ begin
         Radius := Max(Round(Width * 0.5), 1);
         DX := DX / LengthValue;
         DY := DY / LengthValue;
-        Target.Brush.Style := bsSolid;
-        Target.Brush.Color := Color;
         Points[0] := Point(P1.X - Round(DY * Radius),
           P1.Y + Round(DX * Radius));
         Points[1] := Point(P1.X - Round(DX * Radius),
           P1.Y - Round(DY * Radius));
         Points[2] := Point(P1.X + Round(DY * Radius),
           P1.Y - Round(DX * Radius));
-        Target.Polygon(Points);
+        DrawOverlayHandlePolygon(Target, Points, Color, Color);
         Points[0] := Point(P2.X - Round(DY * Radius),
           P2.Y + Round(DX * Radius));
         Points[1] := Point(P2.X + Round(DX * Radius),
           P2.Y + Round(DY * Radius));
         Points[2] := Point(P2.X + Round(DY * Radius),
           P2.Y - Round(DX * Radius));
-        Target.Polygon(Points);
-        Target.Brush.Style := bsClear;
+        DrawOverlayHandlePolygon(Target, Points, Color, Color);
       end;
     end;
   end;

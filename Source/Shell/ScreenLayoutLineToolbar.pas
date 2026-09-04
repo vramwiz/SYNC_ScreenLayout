@@ -25,6 +25,10 @@ type
     FTextAlignmentButtons: array[TScreenLayoutTextAlignment] of
       TScreenLayoutTextAlignmentButton;
     FTextAlignmentPanel: TPanel;
+    FTextPathAttachmentButton: TScreenLayoutTextPathAttachmentButton;
+    FTextPathAttachmentButtons: array[TScreenLayoutTextPathAttachment] of
+      TScreenLayoutTextPathAttachmentButton;
+    FTextPathAttachmentPanel: TPanel;
     FMifStrokeStyleCombo: TVectArtMifStrokeStyleCombo;
     FLineCapButtons: array[TVectArtLineCap] of TVectArtLineCapButton;
     FStrokeWidthTrackBar: THorizontalTrackBarControl;
@@ -46,12 +50,16 @@ type
     procedure FontStyleClick(Sender: TObject);
     procedure TextAlignmentClick(Sender: TObject);
     procedure TextAlignmentPopupClick(Sender: TObject);
+    procedure TextPathAttachmentClick(Sender: TObject);
+    procedure TextPathAttachmentPopupClick(Sender: TObject);
     procedure DetailsClick(Sender: TObject);
     function IsTextAlignmentControl(Control: TControl): Boolean;
+    function IsTextPathAttachmentControl(Control: TControl): Boolean;
     function IsDetailsControl(Control: TControl): Boolean;
     procedure LineCapClick(Sender: TObject);
     function SelectedLineIndices: TArray<Integer>;
     function SelectedTextIndices: TArray<Integer>;
+    function SelectedTextPathIndices: TArray<Integer>;
     function SelectionHasLockedLine: Boolean;
     function SelectionHasLockedText: Boolean;
     procedure StyleChanged(Sender: TObject);
@@ -78,6 +86,9 @@ type
     procedure ApplyFontStyle(Style: TFontStyle; Enabled: Boolean);
     // 選択中の全Textへ枠内配置を適用する。
     procedure ApplyTextAlignment(Value: TScreenLayoutTextAlignment);
+    // 選択中の全文字パスへPathに接触させる文字セル面を適用する。
+    procedure ApplyTextPathAttachment(
+      Value: TScreenLayoutTextPathAttachment);
     // 選択中の全Textへ文字サイズ比率の字間または行間を適用する。
     procedure ApplyTextSpacing(IsLetterSpacing: Boolean; Ratio: Single);
     // EditorStateと現在選択から表示値、混在状態、有効状態を再同期する。
@@ -106,6 +117,11 @@ type
     property TextAlignmentPanel: TPanel read FTextAlignmentPanel;
     function TextAlignmentCell(Value: TScreenLayoutTextAlignment):
       TScreenLayoutTextAlignmentButton;
+    property TextPathAttachmentButton: TScreenLayoutTextPathAttachmentButton
+      read FTextPathAttachmentButton;
+    property TextPathAttachmentPanel: TPanel read FTextPathAttachmentPanel;
+    function TextPathAttachmentCell(Value: TScreenLayoutTextPathAttachment):
+      TScreenLayoutTextPathAttachmentButton;
     // 線幅の常設UI。所有権はToolbarが保持する。
     property StrokeWidthTrackBar: THorizontalTrackBarControl
       read FStrokeWidthTrackBar;
@@ -216,18 +232,32 @@ var
   ParentForm: TCustomForm;
 begin
   UpdateDetailsPanelFocus;
-  if (FTextAlignmentPanel = nil) or not FTextAlignmentPanel.Visible then
-    Exit;
   ParentForm := GetParentForm(Self);
-  if (ParentForm = nil) or (Screen.ActiveForm <> ParentForm) then
+  if (FTextAlignmentPanel <> nil) and FTextAlignmentPanel.Visible then
   begin
-    FTextAlignmentPanel.Visible := False;
-    Exit;
+    if (ParentForm = nil) or (Screen.ActiveForm <> ParentForm) then
+      FTextAlignmentPanel.Visible := False
+    else
+    begin
+      ActiveControl := ParentForm.ActiveControl;
+      if (ActiveControl <> FTextAlignmentButton) and
+        not IsTextAlignmentControl(ActiveControl) then
+        FTextAlignmentPanel.Visible := False;
+    end;
   end;
-  ActiveControl := ParentForm.ActiveControl;
-  if (ActiveControl <> FTextAlignmentButton) and
-    not IsTextAlignmentControl(ActiveControl) then
-    FTextAlignmentPanel.Visible := False;
+  if (FTextPathAttachmentPanel <> nil) and
+    FTextPathAttachmentPanel.Visible then
+  begin
+    if (ParentForm = nil) or (Screen.ActiveForm <> ParentForm) then
+      FTextPathAttachmentPanel.Visible := False
+    else
+    begin
+      ActiveControl := ParentForm.ActiveControl;
+      if (ActiveControl <> FTextPathAttachmentButton) and
+        not IsTextPathAttachmentControl(ActiveControl) then
+        FTextPathAttachmentPanel.Visible := False;
+    end;
+  end;
 end;
 
 procedure TVectArtLineToolbarControl.UpdateDetailsPanelFocus;
@@ -250,6 +280,7 @@ end;
 
 procedure TVectArtLineToolbarControl.BuildControls;
 var
+  Attachment: TScreenLayoutTextPathAttachment;
   Cap: TVectArtLineCap;
   CaptionLabel: TLabel;
   ParentForm: TCustomForm;
@@ -288,6 +319,15 @@ begin
   FTextAlignmentButton.ShowHint := True;
   FTextAlignmentButton.Hint := UnicodeText([$914D, $7F6E]);
   FTextAlignmentButton.Visible := False;
+
+  FTextPathAttachmentButton :=
+    TScreenLayoutTextPathAttachmentButton.Create(Self);
+  FTextPathAttachmentButton.Parent := Self;
+  FTextPathAttachmentButton.OnClick := TextPathAttachmentPopupClick;
+  FTextPathAttachmentButton.ShowHint := True;
+  FTextPathAttachmentButton.Hint := UnicodeText(
+    [$30D1, $30B9, $3078, $63A5, $89E6, $3059, $308B, $9762]);
+  FTextPathAttachmentButton.Visible := False;
 
   FStrokeWidthTrackBar := THorizontalTrackBarControl.Create(Self);
   FStrokeWidthTrackBar.Parent := Self;
@@ -360,6 +400,28 @@ begin
     // 全体枠フィット中は上下方向の余白がないため、中段の左右配置だけを操作可能にする。
     FTextAlignmentButtons[TextAlignment].Enabled :=
       (Ord(TextAlignment) div 3) = 1;
+  end;
+
+  FTextPathAttachmentPanel := TPanel.Create(Self);
+  FTextPathAttachmentPanel.Parent := ParentForm;
+  FTextPathAttachmentPanel.BevelOuter := bvRaised;
+  FTextPathAttachmentPanel.Color := COLOR_BACKGROUND;
+  FTextPathAttachmentPanel.ParentBackground := False;
+  FTextPathAttachmentPanel.SetBounds(0, 0, 77, 69);
+  FTextPathAttachmentPanel.Visible := False;
+  for Attachment := Low(TScreenLayoutTextPathAttachment) to
+    High(TScreenLayoutTextPathAttachment) do
+  begin
+    FTextPathAttachmentButtons[Attachment] :=
+      TScreenLayoutTextPathAttachmentButton.Create(Self);
+    FTextPathAttachmentButtons[Attachment].Parent :=
+      FTextPathAttachmentPanel;
+    FTextPathAttachmentButtons[Attachment].Attachment := Attachment;
+    FTextPathAttachmentButtons[Attachment].SetBounds(
+      5 + (Ord(Attachment) mod 2) * 35,
+      5 + (Ord(Attachment) div 2) * 32, 32, 29);
+    FTextPathAttachmentButtons[Attachment].OnClick :=
+      TextPathAttachmentClick;
   end;
 
   // 線幅は即時操作用にツールバーへ残し、低頻度項目だけを詳細へ収容する。
@@ -477,6 +539,53 @@ begin
           Continue;
         NewData := OldData;
         NewData.Alignment := Value;
+        if Command <> nil then
+          Command.Add(TScreenLayoutTextDataCommand.Create(FDocument,
+            Indices[I], OldData, NewData));
+        FDocument.SetTextData(Indices[I], NewData);
+      end;
+    finally
+      FDocument.EndUpdate;
+    end;
+    if (Command <> nil) and (Command.Count > 0) then
+      FEditHistory.AddApplied(Command)
+    else
+      Command.Free;
+  finally
+    FUpdating := False;
+  end;
+  RefreshState;
+end;
+
+procedure TVectArtLineToolbarControl.ApplyTextPathAttachment(
+  Value: TScreenLayoutTextPathAttachment);
+var
+  Command: TVectArtCompoundCommand;
+  I: Integer;
+  Indices: TArray<Integer>;
+  NewData: TScreenLayoutTextData;
+  OldData: TScreenLayoutTextData;
+begin
+  if FUpdating then
+    Exit;
+  Indices := SelectedTextPathIndices;
+  if (Length(Indices) = 0) or SelectionHasLockedText then
+    Exit;
+  FUpdating := True;
+  try
+    Command := nil;
+    if FEditHistory <> nil then
+      Command := TVectArtCompoundCommand.Create;
+    FDocument.BeginUpdate;
+    try
+      for I := 0 to High(Indices) do
+      begin
+        OldData := CaptureScreenLayoutTextData(
+          TScreenLayoutTextPathLayer(FDocument[Indices[I]]));
+        if OldData.TextPathAttachment = Value then
+          Continue;
+        NewData := OldData;
+        NewData.TextPathAttachment := Value;
         if Command <> nil then
           Command.Add(TScreenLayoutTextDataCommand.Create(FDocument,
             Indices[I], OldData, NewData));
@@ -885,6 +994,7 @@ begin
     FTextAlignmentPanel.Visible := False;
     Exit;
   end;
+  FTextPathAttachmentPanel.Visible := False;
   Position := FTextAlignmentButton.ClientToScreen(Point(
     FTextAlignmentButton.Width - FTextAlignmentPanel.Width,
     FTextAlignmentButton.Height + 2));
@@ -895,6 +1005,41 @@ begin
   FTextAlignmentPanel.Visible := True;
 end;
 
+procedure TVectArtLineToolbarControl.TextPathAttachmentClick(
+  Sender: TObject);
+begin
+  if FUpdating or
+    not (Sender is TScreenLayoutTextPathAttachmentButton) then
+    Exit;
+  ApplyTextPathAttachment(
+    TScreenLayoutTextPathAttachmentButton(Sender).Attachment);
+  FTextPathAttachmentPanel.Visible := False;
+end;
+
+procedure TVectArtLineToolbarControl.TextPathAttachmentPopupClick(
+  Sender: TObject);
+var
+  Position: TPoint;
+begin
+  if (FTextPathAttachmentPanel = nil) or
+    (FTextPathAttachmentPanel.Parent = nil) then
+    Exit;
+  if FTextPathAttachmentPanel.Visible then
+  begin
+    FTextPathAttachmentPanel.Visible := False;
+    Exit;
+  end;
+  FTextAlignmentPanel.Visible := False;
+  Position := FTextPathAttachmentButton.ClientToScreen(Point(
+    FTextPathAttachmentButton.Width - FTextPathAttachmentPanel.Width,
+    FTextPathAttachmentButton.Height + 2));
+  Position := FTextPathAttachmentPanel.Parent.ScreenToClient(Position);
+  FTextPathAttachmentPanel.SetBounds(Position.X, Position.Y,
+    FTextPathAttachmentPanel.Width, FTextPathAttachmentPanel.Height);
+  FTextPathAttachmentPanel.BringToFront;
+  FTextPathAttachmentPanel.Visible := True;
+end;
+
 function TVectArtLineToolbarControl.IsTextAlignmentControl(
   Control: TControl): Boolean;
 begin
@@ -902,6 +1047,18 @@ begin
   while Control <> nil do
   begin
     if Control = FTextAlignmentPanel then
+      Exit(True);
+    Control := Control.Parent;
+  end;
+end;
+
+function TVectArtLineToolbarControl.IsTextPathAttachmentControl(
+  Control: TControl): Boolean;
+begin
+  Result := False;
+  while Control <> nil do
+  begin
+    if Control = FTextPathAttachmentPanel then
       Exit(True);
     Control := Control.Parent;
   end;
@@ -917,6 +1074,13 @@ function TVectArtLineToolbarControl.TextAlignmentCell(
   Value: TScreenLayoutTextAlignment): TScreenLayoutTextAlignmentButton;
 begin
   Result := FTextAlignmentButtons[Value];
+end;
+
+function TVectArtLineToolbarControl.TextPathAttachmentCell(
+  Value: TScreenLayoutTextPathAttachment):
+  TScreenLayoutTextPathAttachmentButton;
+begin
+  Result := FTextPathAttachmentButtons[Value];
 end;
 
 procedure TVectArtLineToolbarControl.DetailsClick(Sender: TObject);
@@ -981,8 +1145,13 @@ procedure TVectArtLineToolbarControl.RefreshState;
 var
   Alignment: TScreenLayoutTextAlignment;
   AlignmentValue: TScreenLayoutTextAlignment;
+  Attachment: TScreenLayoutTextPathAttachment;
+  AttachmentValue: TScreenLayoutTextPathAttachment;
+  AllRegularTexts: Boolean;
+  AllTextPaths: Boolean;
   Color: TColor;
   CommonAlignment: Boolean;
+  CommonAttachment: Boolean;
   CommonFontFamily: Boolean;
   CommonStyle: Boolean;
   CommonLineCap: Boolean;
@@ -1000,6 +1169,7 @@ var
   SupportsLineCap: Boolean;
   Style: TFontStyle;
   TextIndices: TArray<Integer>;
+  TextPathIndices: TArray<Integer>;
   FontFamilyValue: string;
   WidthValue: Single;
 begin
@@ -1010,6 +1180,12 @@ begin
     TextIndices := SelectedTextIndices;
     if Length(TextIndices) > 0 then
     begin
+      TextPathIndices := SelectedTextPathIndices;
+      AllTextPaths := Length(TextPathIndices) = Length(TextIndices);
+      AllRegularTexts := True;
+      for I := 0 to High(TextIndices) do
+        AllRegularTexts := AllRegularTexts and
+          not (FDocument[TextIndices[I]] is TScreenLayoutTextPathLayer);
       Width := TEXT_TOOLBAR_WIDTH;
       Visible := True;
       FDetailsPanel.Visible := False;
@@ -1017,7 +1193,12 @@ begin
       FStrokeWidthEdit.Visible := False;
       FStrokeWidthTrackBar.Visible := False;
       FDetailsButton.Visible := False;
-      FTextAlignmentButton.Visible := True;
+      FTextAlignmentButton.Visible := AllRegularTexts;
+      FTextPathAttachmentButton.Visible := AllTextPaths;
+      if not AllRegularTexts then
+        FTextAlignmentPanel.Visible := False;
+      if not AllTextPaths then
+        FTextPathAttachmentPanel.Visible := False;
       for Style := Low(TFontStyle) to High(TFontStyle) do
         FFontStyleButtons[Style].Visible := True;
       FontFamilyValue := TScreenLayoutTextLayer(
@@ -1034,25 +1215,50 @@ begin
       else
         FFontFamilyCombo.ItemIndex := -1;
       FFontFamilyCombo.Enabled := not SelectionHasLockedText;
-      AlignmentValue := TScreenLayoutTextLayer(
-        FDocument[TextIndices[0]]).Alignment;
-      CommonAlignment := True;
-      for I := 1 to High(TextIndices) do
-        CommonAlignment := CommonAlignment and
-          (AlignmentValue = TScreenLayoutTextLayer(
-            FDocument[TextIndices[I]]).Alignment);
-      FTextAlignmentButton.Enabled := not SelectionHasLockedText;
-      FTextAlignmentButton.Mixed := not CommonAlignment;
-      if CommonAlignment then
-        FTextAlignmentButton.Alignment := AlignmentValue;
-      for Alignment := Low(TScreenLayoutTextAlignment) to
-        High(TScreenLayoutTextAlignment) do
+      if AllRegularTexts then
       begin
-        FTextAlignmentButtons[Alignment].Enabled :=
-          (not SelectionHasLockedText) and
-          ((Ord(Alignment) div 3) = 1);
-        FTextAlignmentButtons[Alignment].Selected := CommonAlignment and
-          (Alignment = AlignmentValue);
+        AlignmentValue := TScreenLayoutTextLayer(
+          FDocument[TextIndices[0]]).Alignment;
+        CommonAlignment := True;
+        for I := 1 to High(TextIndices) do
+          CommonAlignment := CommonAlignment and
+            (AlignmentValue = TScreenLayoutTextLayer(
+              FDocument[TextIndices[I]]).Alignment);
+        FTextAlignmentButton.Enabled := not SelectionHasLockedText;
+        FTextAlignmentButton.Mixed := not CommonAlignment;
+        if CommonAlignment then
+          FTextAlignmentButton.Alignment := AlignmentValue;
+        for Alignment := Low(TScreenLayoutTextAlignment) to
+          High(TScreenLayoutTextAlignment) do
+        begin
+          FTextAlignmentButtons[Alignment].Enabled :=
+            (not SelectionHasLockedText) and
+            ((Ord(Alignment) div 3) = 1);
+          FTextAlignmentButtons[Alignment].Selected := CommonAlignment and
+            (Alignment = AlignmentValue);
+        end;
+      end;
+      if AllTextPaths then
+      begin
+        AttachmentValue := TScreenLayoutTextPathLayer(
+          FDocument[TextPathIndices[0]]).Attachment;
+        CommonAttachment := True;
+        for I := 1 to High(TextPathIndices) do
+          CommonAttachment := CommonAttachment and
+            (AttachmentValue = TScreenLayoutTextPathLayer(
+              FDocument[TextPathIndices[I]]).Attachment);
+        FTextPathAttachmentButton.Enabled := not SelectionHasLockedText;
+        FTextPathAttachmentButton.Mixed := not CommonAttachment;
+        if CommonAttachment then
+          FTextPathAttachmentButton.Attachment := AttachmentValue;
+        for Attachment := Low(TScreenLayoutTextPathAttachment) to
+          High(TScreenLayoutTextPathAttachment) do
+        begin
+          FTextPathAttachmentButtons[Attachment].Enabled :=
+            not SelectionHasLockedText;
+          FTextPathAttachmentButtons[Attachment].Selected :=
+            CommonAttachment and (Attachment = AttachmentValue);
+        end;
       end;
       for Style := Low(TFontStyle) to High(TFontStyle) do
       begin
@@ -1071,6 +1277,8 @@ begin
       FFontFamilyCombo.Visible := False;
       FTextAlignmentButton.Visible := False;
       FTextAlignmentPanel.Visible := False;
+      FTextPathAttachmentButton.Visible := False;
+      FTextPathAttachmentPanel.Visible := False;
       for Style := Low(TFontStyle) to High(TFontStyle) do
         FFontStyleButtons[Style].Visible := False;
       FStrokeWidthEdit.Visible := True;
@@ -1175,6 +1383,8 @@ begin
         6, 28, 29);
   if FTextAlignmentButton <> nil then
     FTextAlignmentButton.SetBounds(374, 6, 34, 29);
+  if FTextPathAttachmentButton <> nil then
+    FTextPathAttachmentButton.SetBounds(374, 6, 34, 29);
   TrackWidth := Max(Width - 176, 60);
   if FStrokeWidthTrackBar <> nil then
     FStrokeWidthTrackBar.SetBounds(40, 4, TrackWidth, 34);
@@ -1195,6 +1405,22 @@ begin
   Selection := FDocument.GetSelectedLayerIndices;
   for I := 0 to High(Selection) do
     if not (FDocument[Selection[I]] is TScreenLayoutTextLayer) then
+      Exit;
+  Result := Selection;
+end;
+
+function TVectArtLineToolbarControl.SelectedTextPathIndices:
+  TArray<Integer>;
+var
+  I: Integer;
+  Selection: TArray<Integer>;
+begin
+  Result := nil;
+  if (FDocument = nil) or (FDocument.SelectionCount = 0) then
+    Exit;
+  Selection := FDocument.GetSelectedLayerIndices;
+  for I := 0 to High(Selection) do
+    if not (FDocument[Selection[I]] is TScreenLayoutTextPathLayer) then
       Exit;
   Result := Selection;
 end;

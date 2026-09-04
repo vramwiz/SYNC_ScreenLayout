@@ -86,6 +86,15 @@ begin
   end;
 end;
 
+function TextPathAttachmentName(
+  Value: TScreenLayoutTextPathAttachment): string;
+const
+  NAMES: array[TScreenLayoutTextPathAttachment] of string =
+    ('bottom', 'top', 'left', 'right');
+begin
+  Result := NAMES[Value];
+end;
+
 procedure AddPathVertices(const Vertices: TArray<TScreenLayoutVertex>;
   LayerJson: TJSONObject);
 var
@@ -274,6 +283,8 @@ begin
         TextJson.AddPair('fontSize', TJSONNumber.Create(TextLayer.FontSize));
         if Layer is TScreenLayoutTextPathLayer then
         begin
+          TextJson.AddPair('pathAttachment', TextPathAttachmentName(
+            TScreenLayoutTextPathLayer(Layer).Attachment));
           CharacterPathOffsetsJson := TJSONArray.Create;
           CharacterPathOffsets :=
             TScreenLayoutTextPathLayer(Layer).CharacterPathOffsets;

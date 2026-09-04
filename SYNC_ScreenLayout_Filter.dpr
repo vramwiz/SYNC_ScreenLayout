@@ -47,6 +47,7 @@ uses
   ScreenLayoutRenderer in 'Source\Rendering\ScreenLayoutRenderer.pas',
   ScreenLayoutCanvasGuides in 'Source\Rendering\ScreenLayoutCanvasGuides.pas',
   ScreenLayoutCanvasPreview in 'Source\Rendering\ScreenLayoutCanvasPreview.pas',
+  ScreenLayoutOverlayPrimitives in 'Source\Rendering\ScreenLayoutOverlayPrimitives.pas',
   ScreenLayoutTextEditOverlay in 'Source\Rendering\ScreenLayoutTextEditOverlay.pas',
   ScreenLayoutShapePath in 'Source\Rendering\ScreenLayoutShapePath.pas',
   ScreenLayoutContext in 'Source\Core\Model\ScreenLayoutContext.pas',

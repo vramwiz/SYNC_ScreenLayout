@@ -13,20 +13,24 @@ type
     CharacterIndex: Integer;                // 文字単位配列内の0基準位置。
     TextIndex: Integer;                     // 元文字列内のUTF-16開始位置。
     TextUnit: string;                       // サロゲートペアを分割しない描画単位。
-    PathDistance: Single;                   // Path始点から文字セル下辺中央までの距離。
-    Anchor: TPointF;                        // Path上に置く文字セル下辺中央。
+    PathDistance: Single;                   // Path始点から接触面中央までの距離。
+    Anchor: TPointF;                        // Path上に置く文字セル接触面の中央。
     Tangent: TPointF;                       // Anchor位置でのPath進行方向の単位ベクトル。
-    AngleDegrees: Single;                   // 文字描画へ適用する接線角度。
+    AngleDegrees: Single;                   // 文字描画へ適用する文書座標上の角度。
     AdvanceWidth: Single;                   // フォントが返した文字セルの送り幅。
+    PathAdvance: Single;                    // Path進行方向でこの文字セルが占める長さ。
     Scale: Single;                          // この文字セルへ適用した個別の均等倍率。
     CellHeight: Single;                     // ascentからdescentまでの文字セル高。
-    BaselineOffset: Single;                 // セル下辺からベースラインまでの上向き距離。
+    LocalBounds: TRectF;                    // Anchor基準かつ個別倍率適用後の文字セル範囲。
+    TextOrigin: TPointF;                    // 個別倍率適用前の文字描画ベースライン原点。
+    TextXAxis: TPointF;                     // 文書座標上の文字セル右方向の単位ベクトル。
+    TextYAxis: TPointF;                     // 文書座標上の文字セル下方向の単位ベクトル。
     CollisionAdjusted: Boolean;             // 直前文字との重なりを自動間隔で解消した場合にTrue。
     CollidesWithPrevious: Boolean;          // 手動位置またはPath端により重なりが残る場合にTrue。
     Corners: TScreenLayoutTextPathQuad;     // 左上から時計回りの文書座標四隅。
   end;
 
-// 文字セルの下辺中央をPath上へ置き、Pathに収まる文字の配置結果を返す。
+// 指定された文字セルの面中央をPath上へ置き、Pathに収まる文字の配置結果を返す。
 function BuildScreenLayoutTextPathPlacements(
   Layer: TScreenLayoutTextPathLayer; const Font: ISkFont = nil):
   TArray<TScreenLayoutTextPathPlacement>;
@@ -111,7 +115,6 @@ var
   CursorDistance: Single;
   FontMetrics: TSkFontMetrics;
   I: Integer;
-  LocalYAxis: TPointF;
   NaturalCursorDistance: Single;
   PathLength: Single;
   PathPoint: TPointF;
@@ -122,6 +125,7 @@ var
   Tangent: TPointF;
   UnitLength: Integer;
   UnitManual: Boolean;
+  UnitPathAdvance: Single;
   UnitPathDistance: Single;
   UnitPathOffset: Single;
   UnitScale: Single;
@@ -130,9 +134,10 @@ var
 
   function TransformCellPoint(LocalX, LocalY: Single): TPointF;
   begin
-    Result := TPointF.Create(PathPoint.X + Tangent.X * LocalX +
-      LocalYAxis.X * LocalY, PathPoint.Y + Tangent.Y * LocalX +
-      LocalYAxis.Y * LocalY);
+    Result := TPointF.Create(PathPoint.X + Placement.TextXAxis.X * LocalX +
+      Placement.TextYAxis.X * LocalY,
+      PathPoint.Y + Placement.TextXAxis.Y * LocalX +
+      Placement.TextYAxis.Y * LocalY);
   end;
 
   procedure UpdatePlacementAtDistance(Distance: Single);
@@ -140,17 +145,54 @@ var
     ScreenLayoutPolylinePointAtDistance(PathPoints, Distance,
       PathPoint, Tangent);
     AngleDegrees := RadToDeg(ArcTan2(Tangent.Y, Tangent.X));
-    LocalYAxis := TPointF.Create(-Tangent.Y, Tangent.X);
+    case Layer.Attachment of
+      sltpaTop:
+        begin
+          Placement.LocalBounds := TRectF.Create(-UnitWidth * 0.5, 0,
+            UnitWidth * 0.5, Placement.CellHeight);
+          Placement.TextOrigin := TPointF.Create(
+            -UnitWidth / UnitScale * 0.5, -FontMetrics.Ascent);
+        end;
+      sltpaLeft:
+        begin
+          AngleDegrees := AngleDegrees + 90;
+          Placement.LocalBounds := TRectF.Create(0,
+            -Placement.CellHeight * 0.5, UnitWidth,
+            Placement.CellHeight * 0.5);
+          Placement.TextOrigin := TPointF.Create(0,
+            -(FontMetrics.Ascent + FontMetrics.Descent) * 0.5);
+        end;
+      sltpaRight:
+        begin
+          AngleDegrees := AngleDegrees - 90;
+          Placement.LocalBounds := TRectF.Create(-UnitWidth,
+            -Placement.CellHeight * 0.5, 0,
+            Placement.CellHeight * 0.5);
+          Placement.TextOrigin := TPointF.Create(-UnitWidth / UnitScale,
+            -(FontMetrics.Ascent + FontMetrics.Descent) * 0.5);
+        end;
+    else
+      Placement.LocalBounds := TRectF.Create(-UnitWidth * 0.5,
+        -Placement.CellHeight, UnitWidth * 0.5, 0);
+      Placement.TextOrigin := TPointF.Create(
+        -UnitWidth / UnitScale * 0.5, -FontMetrics.Descent);
+    end;
+    Placement.TextXAxis := TPointF.Create(Cos(DegToRad(AngleDegrees)),
+      Sin(DegToRad(AngleDegrees)));
+    Placement.TextYAxis := TPointF.Create(-Placement.TextXAxis.Y,
+      Placement.TextXAxis.X);
     Placement.PathDistance := Distance;
     Placement.Anchor := PathPoint;
     Placement.Tangent := Tangent;
     Placement.AngleDegrees := AngleDegrees;
-    Placement.Corners[0] := TransformCellPoint(-UnitWidth * 0.5,
-      -Placement.CellHeight);
-    Placement.Corners[1] := TransformCellPoint(UnitWidth * 0.5,
-      -Placement.CellHeight);
-    Placement.Corners[2] := TransformCellPoint(UnitWidth * 0.5, 0);
-    Placement.Corners[3] := TransformCellPoint(-UnitWidth * 0.5, 0);
+    Placement.Corners[0] := TransformCellPoint(Placement.LocalBounds.Left,
+      Placement.LocalBounds.Top);
+    Placement.Corners[1] := TransformCellPoint(Placement.LocalBounds.Right,
+      Placement.LocalBounds.Top);
+    Placement.Corners[2] := TransformCellPoint(Placement.LocalBounds.Right,
+      Placement.LocalBounds.Bottom);
+    Placement.Corners[3] := TransformCellPoint(Placement.LocalBounds.Left,
+      Placement.LocalBounds.Bottom);
   end;
 
 begin
@@ -199,23 +241,27 @@ begin
       Inc(CharacterIndex);
       Continue;
     end;
+    if Layer.Attachment in [sltpaLeft, sltpaRight] then
+      UnitPathAdvance := CellHeight * UnitScale
+    else
+      UnitPathAdvance := UnitWidth;
     if UnitManual then
       PlacementCursorDistance := NaturalCursorDistance
     else
       PlacementCursorDistance := CursorDistance;
-    if PlacementCursorDistance + UnitWidth > PathLength then
+    if PlacementCursorDistance + UnitPathAdvance > PathLength then
       Break;
     UnitPathDistance := EnsureRange(
-      PlacementCursorDistance + UnitWidth * 0.5 + UnitPathOffset,
-      UnitWidth * 0.5, PathLength - UnitWidth * 0.5);
+      PlacementCursorDistance + UnitPathAdvance * 0.5 + UnitPathOffset,
+      UnitPathAdvance * 0.5, PathLength - UnitPathAdvance * 0.5);
     Placement := Default(TScreenLayoutTextPathPlacement);
     Placement.CharacterIndex := CharacterIndex;
     Placement.TextIndex := I;
     Placement.TextUnit := UnitText;
     Placement.AdvanceWidth := UnitWidth;
+    Placement.PathAdvance := UnitPathAdvance;
     Placement.Scale := UnitScale;
     Placement.CellHeight := CellHeight * UnitScale;
-    Placement.BaselineOffset := FontMetrics.Descent * UnitScale;
     UpdatePlacementAtDistance(UnitPathDistance);
     if Length(Result) > 0 then
     begin
@@ -226,12 +272,12 @@ begin
       begin
         CollisionLow := UnitPathDistance;
         CollisionHigh := UnitPathDistance;
-        CollisionStep := Max(UnitWidth * 0.1, 0.5);
+        CollisionStep := Max(UnitPathAdvance * 0.1, 0.5);
         while Placement.CollidesWithPrevious and
-          (CollisionHigh < PathLength - UnitWidth * 0.5) do
+          (CollisionHigh < PathLength - UnitPathAdvance * 0.5) do
         begin
           CollisionHigh := Min(CollisionHigh + CollisionStep,
-            PathLength - UnitWidth * 0.5);
+            PathLength - UnitPathAdvance * 0.5);
           UpdatePlacementAtDistance(CollisionHigh);
           Placement.CollidesWithPrevious := TextPathQuadsOverlap(
             Result[High(Result)].Corners, Placement.Corners);
@@ -254,14 +300,14 @@ begin
       end;
     end;
     Result := Result + [Placement];
-    NaturalCursorDistance := NaturalCursorDistance + UnitWidth;
+    NaturalCursorDistance := NaturalCursorDistance + UnitPathAdvance;
     if UnitManual then
       CursorDistance := NaturalCursorDistance
     else if Placement.CollisionAdjusted then
-      CursorDistance := Max(CursorDistance + UnitWidth,
-        Placement.PathDistance + UnitWidth * 0.5)
+      CursorDistance := Max(CursorDistance + UnitPathAdvance,
+        Placement.PathDistance + UnitPathAdvance * 0.5)
     else
-      CursorDistance := CursorDistance + UnitWidth;
+      CursorDistance := CursorDistance + UnitPathAdvance;
     PreviousManual := UnitManual;
     Inc(I, UnitLength);
     Inc(CharacterIndex);

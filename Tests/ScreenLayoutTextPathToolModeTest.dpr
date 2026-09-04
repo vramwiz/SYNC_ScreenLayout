@@ -208,6 +208,72 @@ begin
   end;
 end;
 
+procedure CheckTextPathAttachmentSides;
+var
+  Attachment: TScreenLayoutTextPathAttachment;
+  EdgeCenter: TPointF;
+  Layer: TScreenLayoutTextPathLayer;
+  Placement: TScreenLayoutTextPathPlacement;
+  Placements: TArray<TScreenLayoutTextPathPlacement>;
+  Vertices: TArray<TScreenLayoutVertex>;
+begin
+  SetLength(Vertices, 2);
+  Vertices[0].Position := TPointF.Create(0, 0);
+  Vertices[0].Kind := slvkSharp;
+  Vertices[0].OutgoingSegment := slskLine;
+  Vertices[1].Position := TPointF.Create(200, 0);
+  Vertices[1].Kind := slvkSharp;
+  Vertices[1].OutgoingSegment := slskLine;
+  Layer := TScreenLayoutTextPathLayer.Create('Text Path',
+    TRectF.Create(0, -20, 200, 20), 'A', 'Yu Gothic UI', 20, 200,
+    clWhite, Vertices);
+  try
+    for Attachment := Low(TScreenLayoutTextPathAttachment) to
+      High(TScreenLayoutTextPathAttachment) do
+    begin
+      Layer.Attachment := Attachment;
+      Placements := BuildScreenLayoutTextPathPlacements(Layer);
+      Check(Length(Placements) = 1,
+        'attachment side did not produce a character placement');
+      Placement := Placements[0];
+      case Attachment of
+        sltpaTop:
+          EdgeCenter := TPointF.Create(
+            (Placement.Corners[0].X + Placement.Corners[1].X) * 0.5,
+            (Placement.Corners[0].Y + Placement.Corners[1].Y) * 0.5);
+        sltpaLeft:
+          EdgeCenter := TPointF.Create(
+            (Placement.Corners[0].X + Placement.Corners[3].X) * 0.5,
+            (Placement.Corners[0].Y + Placement.Corners[3].Y) * 0.5);
+        sltpaRight:
+          EdgeCenter := TPointF.Create(
+            (Placement.Corners[1].X + Placement.Corners[2].X) * 0.5,
+            (Placement.Corners[1].Y + Placement.Corners[2].Y) * 0.5);
+      else
+        EdgeCenter := TPointF.Create(
+          (Placement.Corners[2].X + Placement.Corners[3].X) * 0.5,
+          (Placement.Corners[2].Y + Placement.Corners[3].Y) * 0.5);
+      end;
+      Check(SameValue(EdgeCenter.X, Placement.Anchor.X, 0.001) and
+        SameValue(EdgeCenter.Y, Placement.Anchor.Y, 0.001),
+        Format('attachment side %d was not centered on the path',
+          [Ord(Attachment)]));
+      Check(SameValue(Placement.Anchor.Y, 0.0, 0.001),
+        'attachment anchor left the path');
+    end;
+    Layer.Attachment := sltpaLeft;
+    Placement := BuildScreenLayoutTextPathPlacements(Layer)[0];
+    Check(SameValue(Placement.AngleDegrees, 90.0, 0.001),
+      'left attachment did not rotate clockwise from the path');
+    Layer.Attachment := sltpaRight;
+    Placement := BuildScreenLayoutTextPathPlacements(Layer)[0];
+    Check(SameValue(Placement.AngleDegrees, -90.0, 0.001),
+      'right attachment did not rotate counterclockwise from the path');
+  finally
+    Layer.Free;
+  end;
+end;
+
 procedure CheckIndividualCharacterResize;
 var
   CharacterGeometry: TVectArtSelectionGeometry;
@@ -423,11 +489,14 @@ begin
     Layer.CharacterPathOffsets := [0.0, 12.0, -4.0];
     Layer.CharacterPositionManual := [False, True, True];
     Layer.CharacterScales := [1.0, 1.5, 0.75];
+    Layer.Attachment := sltpaRight;
     Document.InsertLayer(1, Layer);
 
     ClonedLayer := CloneScreenLayoutLayer(Layer, 'Text Path Copy');
     try
       Check((ClonedLayer is TScreenLayoutTextPathLayer) and
+        (TScreenLayoutTextPathLayer(ClonedLayer).Attachment =
+          sltpaRight) and
         (Length(TScreenLayoutTextPathLayer(
           ClonedLayer).CharacterPathOffsets) = 3) and
         SameValue(TScreenLayoutTextPathLayer(
@@ -447,12 +516,16 @@ begin
     Serialized := SerializeVectArtDocument(Document);
     Check(Pos('"type":"textPath"', Serialized) > 0,
       'text path JSON type was not serialized');
+    Check(Pos('"pathAttachment":"right"', Serialized) > 0,
+      'text path attachment was not serialized');
     Check(TryDeserializeVectArtDocument(Serialized, Loaded, ErrorMessage),
       'text path JSON was not loaded: ' + ErrorMessage);
     Check((Loaded.LayerCount = 2) and
       (Loaded[1] is TScreenLayoutTextPathLayer),
       'text path JSON was restored as another layer type');
     LoadedLayer := TScreenLayoutTextPathLayer(Loaded[1]);
+    Check(LoadedLayer.Attachment = sltpaRight,
+      'text path attachment was not restored');
     Vertices := LoadedLayer.EditablePathVertices;
     Check((Length(Vertices) = 3) and
       SameValue(Vertices[0].Position.X, -60.0) and
@@ -469,6 +542,7 @@ begin
     Check((Length(LoadedLayer.CharacterPositionManual) = 3) and
       LoadedLayer.CharacterPositionManual[1],
       'text path JSON did not restore manual character position flags');
+    LoadedLayer.Attachment := sltpaBottom;
 
     TTextRendererSkiaRuntime.Acquire(
       ExtractFilePath(ParamStr(0)) + 'sk4d.dll');
@@ -743,6 +817,7 @@ begin
   CheckTextPathFrameTransform;
   CheckSingleLineTextPath;
   CheckCharacterPlacementCells;
+  CheckTextPathAttachmentSides;
   CheckIndividualCharacterResize;
   CheckTextPathCollisionHandling;
   CheckPersistenceAndRendering;

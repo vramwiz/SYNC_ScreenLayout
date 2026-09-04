@@ -72,6 +72,23 @@ type
     property Selected: Boolean read FSelected write SetSelected;
   end;
 
+  TScreenLayoutTextPathAttachmentButton = class(TVectArtDarkButton)
+  private
+    FAttachment: TScreenLayoutTextPathAttachment;
+    FMixed: Boolean;
+    FSelected: Boolean;
+    procedure SetAttachment(Value: TScreenLayoutTextPathAttachment);
+    procedure SetMixed(Value: Boolean);
+    procedure SetSelected(Value: Boolean);
+  protected
+    procedure Paint; override;
+  public
+    property Attachment: TScreenLayoutTextPathAttachment read FAttachment
+      write SetAttachment;
+    property Mixed: Boolean read FMixed write SetMixed;
+    property Selected: Boolean read FSelected write SetSelected;
+  end;
+
 implementation
 
 uses
@@ -395,6 +412,122 @@ begin
 end;
 
 procedure TScreenLayoutTextAlignmentButton.SetSelected(Value: Boolean);
+begin
+  if FSelected = Value then
+    Exit;
+  FSelected := Value;
+  Invalidate;
+end;
+
+{ TScreenLayoutTextPathAttachmentButton }
+
+procedure TScreenLayoutTextPathAttachmentButton.Paint;
+var
+  BackgroundColor: TColor;
+  Bounds: TRect;
+  I: Integer;
+  LinePosition: Integer;
+  TextHeight: Integer;
+  TextWidth: Integer;
+  TextX: Integer;
+  TextY: Integer;
+begin
+  inherited Paint;
+  Bounds := ClientRect;
+  Dec(Bounds.Right);
+  Dec(Bounds.Bottom);
+  if FSelected then
+  begin
+    if Enabled then
+      BackgroundColor := COLOR_BUTTON_SELECTED
+    else
+      BackgroundColor := COLOR_BUTTON_DISABLED;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := BackgroundColor;
+    Canvas.Pen.Color := COLOR_BUTTON_SELECTED_BORDER;
+    Canvas.Rectangle(Bounds);
+  end;
+  if Enabled then
+    Canvas.Pen.Color := COLOR_TEXT
+  else
+    Canvas.Pen.Color := COLOR_BUTTON_BORDER;
+  if FMixed then
+  begin
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := Canvas.Pen.Color;
+    for I := 0 to 2 do
+      Canvas.Ellipse(Width div 2 - 1, Height div 2 - 5 + I * 4,
+        Width div 2 + 2, Height div 2 - 2 + I * 4);
+    Exit;
+  end;
+  Canvas.Brush.Style := bsClear;
+  Canvas.Font.Name := 'Segoe UI';
+  Canvas.Font.Height := -16;
+  Canvas.Font.Style := [fsBold];
+  if Enabled then
+    Canvas.Font.Color := COLOR_TEXT
+  else
+    Canvas.Font.Color := COLOR_BUTTON_BORDER;
+  TextWidth := Canvas.TextWidth('A');
+  TextHeight := Canvas.TextHeight('A');
+  TextX := (Width - TextWidth) div 2;
+  TextY := (Height - TextHeight) div 2;
+  Canvas.Pen.Style := psSolid;
+  if Enabled then
+    Canvas.Pen.Color := COLOR_BUTTON_SELECTED_BORDER
+  else
+    Canvas.Pen.Color := COLOR_BUTTON_BORDER;
+  Canvas.Pen.Width := 3;
+  case FAttachment of
+    sltpaTop:
+      begin
+        LinePosition := 5;
+        TextY := LinePosition + 3;
+        Canvas.MoveTo((Width - 18) div 2, LinePosition);
+        Canvas.LineTo((Width + 18) div 2, LinePosition);
+      end;
+    sltpaLeft:
+      begin
+        LinePosition := 6;
+        TextX := LinePosition + 3;
+        Canvas.MoveTo(LinePosition, 5);
+        Canvas.LineTo(LinePosition, Height - 5);
+      end;
+    sltpaRight:
+      begin
+        LinePosition := Width - 7;
+        TextX := LinePosition - 3 - TextWidth;
+        Canvas.MoveTo(LinePosition, 5);
+        Canvas.LineTo(LinePosition, Height - 5);
+      end;
+  else
+    LinePosition := Height - 6;
+    TextY := LinePosition - 3 - TextHeight;
+    Canvas.MoveTo((Width - 18) div 2, LinePosition);
+    Canvas.LineTo((Width + 18) div 2, LinePosition);
+  end;
+  Canvas.Pen.Width := 1;
+  Canvas.TextOut(TextX, TextY, 'A');
+end;
+
+procedure TScreenLayoutTextPathAttachmentButton.SetAttachment(
+  Value: TScreenLayoutTextPathAttachment);
+begin
+  if FAttachment = Value then
+    Exit;
+  FAttachment := Value;
+  Invalidate;
+end;
+
+procedure TScreenLayoutTextPathAttachmentButton.SetMixed(Value: Boolean);
+begin
+  if FMixed = Value then
+    Exit;
+  FMixed := Value;
+  Invalidate;
+end;
+
+procedure TScreenLayoutTextPathAttachmentButton.SetSelected(Value: Boolean);
 begin
   if FSelected = Value then
     Exit;

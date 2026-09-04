@@ -152,6 +152,7 @@ uses
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
   ScreenLayoutGroupCommands,
   ScreenLayoutLayerGeometry,
+  ScreenLayoutOverlayPrimitives,
   ScreenLayoutPathOperations,
   ScreenLayoutShapeOperations, ScreenLayoutTextCommands,
   ScreenLayoutTextGeometry, ScreenLayoutTextPathGeometry,
@@ -2013,14 +2014,13 @@ begin
           ToScreenY(RotatedBounds.Top), ToScreenX(RotatedBounds.Right),
           ToScreenY(RotatedBounds.Bottom));
         InflateRect(LayerRect, 5, 5);
-        Direct2DCanvas.Brush.Style := bsClear;
-        Direct2DCanvas.Pen.Color := COLOR_OPEN_GROUP;
-        Direct2DCanvas.Pen.Style := psDash;
-        Direct2DCanvas.Rectangle(LayerRect);
-        Direct2DCanvas.Pen.Style := psSolid;
+        DrawOverlayFrameRect(Direct2DCanvas, LayerRect,
+          COLOR_OPEN_GROUP, psDash);
       end;
       if (FEditorState <> nil) and
         (FEditorState.OpenGroupChild <> nil) and
+        not (FTextEditing and (FEditorState.OpenGroupChild is
+          TScreenLayoutTextPathLayer)) and
         TryGetOpenGroupSelectionBounds(FEditorState, RotatedBounds) then
       begin
         LayerRect := Rect(ToScreenX(RotatedBounds.Left),
@@ -2028,29 +2028,21 @@ begin
           ToScreenY(RotatedBounds.Bottom));
         SelectionGeometry := BuildSelectionGeometry(LayerRect,
           SelectionFrameOffset(0, FZoom));
-        Direct2DCanvas.Brush.Style := bsSolid;
-        Direct2DCanvas.Pen.Color := COLOR_SELECTION;
-        Direct2DCanvas.Polyline(SelectionGeometry.FramePoints);
+        DrawOverlayPolyline(Direct2DCanvas,
+          SelectionGeometry.FramePoints);
         if OpenGroupSelectionEditable(FEditorState) then
         begin
           for Handle := vshTopLeft to vshLeft do
           begin
-            Direct2DCanvas.Brush.Color := clWhite;
-            Direct2DCanvas.FillRect(SelectionGeometry.Handles[Handle]);
-            Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-            Direct2DCanvas.FrameRect(SelectionGeometry.Handles[Handle]);
+            DrawOverlayHandleRect(Direct2DCanvas,
+              SelectionGeometry.Handles[Handle]);
           end;
-          Direct2DCanvas.MoveTo(SelectionGeometry.RotationStem[0].X,
-            SelectionGeometry.RotationStem[0].Y);
-          Direct2DCanvas.LineTo(SelectionGeometry.RotationStem[1].X,
-            SelectionGeometry.RotationStem[1].Y);
-          Direct2DCanvas.Brush.Color := clWhite;
-          Direct2DCanvas.Pen.Color := COLOR_ROTATION_MARK;
-          Direct2DCanvas.Ellipse(
-            SelectionGeometry.PrimaryRotationHandle.Left,
-            SelectionGeometry.PrimaryRotationHandle.Top,
-            SelectionGeometry.PrimaryRotationHandle.Right,
-            SelectionGeometry.PrimaryRotationHandle.Bottom);
+          DrawOverlayLine(Direct2DCanvas,
+            SelectionGeometry.RotationStem[0],
+            SelectionGeometry.RotationStem[1]);
+          DrawOverlayHandleEllipse(Direct2DCanvas,
+            SelectionGeometry.PrimaryRotationHandle, clWhite,
+            COLOR_ROTATION_MARK);
         end;
       end;
 
@@ -2155,7 +2147,11 @@ begin
           end;
         end;
       if (SelectionLayerRect.Width > 0) and
-        (SelectionLayerRect.Height > 0) then
+        (SelectionLayerRect.Height > 0) and
+        not (FTextEditing and (FDocument.SelectionCount = 1) and
+          (FDocument.SelectedIndex > 0) and
+          (FDocument[FDocument.SelectedIndex] is
+            TScreenLayoutTextPathLayer)) then
       begin
         if (FDocument.SelectionCount = 1) and
           (FDocument.SelectedIndex > 0) and
@@ -2254,21 +2250,15 @@ begin
         else
           SelectionGeometry := BuildSelectionGeometry(SelectionLayerRect,
             SelectionFrameOffsetPixels);
-        Direct2DCanvas.Brush.Style := bsSolid;
-        Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-        Direct2DCanvas.Pen.Color := COLOR_SELECTION;
         if SelectionGeometry.DrawFrame then
-          Direct2DCanvas.Polyline(SelectionGeometry.FramePoints);
+          DrawOverlayPolyline(Direct2DCanvas,
+            SelectionGeometry.FramePoints);
         if not SelectionLocked then
         begin
           for Handle := vshTopLeft to vshLeft do
             if not SelectionGeometry.Handles[Handle].IsEmpty then
-            begin
-              Direct2DCanvas.Brush.Color := clWhite;
-              Direct2DCanvas.FillRect(SelectionGeometry.Handles[Handle]);
-              Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-              Direct2DCanvas.FrameRect(SelectionGeometry.Handles[Handle]);
-            end;
+              DrawOverlayHandleRect(Direct2DCanvas,
+                SelectionGeometry.Handles[Handle]);
           if (FDocument.SelectionCount = 1) and
             ((FDocument[FDocument.SelectedIndex] is TScreenLayoutGroupLayer) or
              (FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
@@ -2280,69 +2270,56 @@ begin
                TScreenLayoutShapeLayer)) and
             not FInteraction.AxisAlignedSelection then
           begin
-            Direct2DCanvas.Pen.Color := COLOR_SELECTION;
-            Direct2DCanvas.MoveTo(SelectionGeometry.RotationStem[0].X,
-              SelectionGeometry.RotationStem[0].Y);
-            Direct2DCanvas.LineTo(SelectionGeometry.RotationStem[1].X,
-              SelectionGeometry.RotationStem[1].Y);
-            Direct2DCanvas.Brush.Color := clWhite;
-            Direct2DCanvas.Pen.Color := COLOR_ROTATION_MARK;
-            Direct2DCanvas.Ellipse(
-              SelectionGeometry.PrimaryRotationHandle.Left,
-              SelectionGeometry.PrimaryRotationHandle.Top,
-              SelectionGeometry.PrimaryRotationHandle.Right,
-              SelectionGeometry.PrimaryRotationHandle.Bottom);
+            DrawOverlayLine(Direct2DCanvas,
+              SelectionGeometry.RotationStem[0],
+              SelectionGeometry.RotationStem[1]);
+            DrawOverlayHandleEllipse(Direct2DCanvas,
+              SelectionGeometry.PrimaryRotationHandle, clWhite,
+              COLOR_ROTATION_MARK);
             BuildRotationMarkPoints(
               SelectionGeometry.PrimaryRotationHandle,
               RotationArcPoints, RotationArrowPoints);
-            Direct2DCanvas.Polyline(RotationArcPoints);
-            Direct2DCanvas.Brush.Color := COLOR_ROTATION_MARK;
-            Direct2DCanvas.Polygon(RotationArrowPoints);
+            DrawOverlayPolyline(Direct2DCanvas, RotationArcPoints,
+              COLOR_ROTATION_MARK, psSolid, 1, 1);
+            DrawOverlayHandlePolygon(Direct2DCanvas,
+              RotationArrowPoints, COLOR_ROTATION_MARK,
+              COLOR_ROTATION_MARK, 1, 1);
           end;
           if FInteraction.SelectedTextPathCharacterGeometry(
             CharacterGeometry) then
           begin
-            Direct2DCanvas.Pen.Color := TColor($0048A8F8);
-            Direct2DCanvas.Polyline(CharacterGeometry.FramePoints);
+            DrawOverlayPolyline(Direct2DCanvas,
+              CharacterGeometry.FramePoints, TColor($0048A8F8));
             for Handle := vshTopLeft to vshLeft do
               if not CharacterGeometry.Handles[Handle].IsEmpty then
-              begin
-                Direct2DCanvas.Brush.Color := clWhite;
-                Direct2DCanvas.FillRect(CharacterGeometry.Handles[Handle]);
-                Direct2DCanvas.Brush.Color := TColor($0048A8F8);
-                Direct2DCanvas.FrameRect(CharacterGeometry.Handles[Handle]);
-              end;
+                DrawOverlayHandleRect(Direct2DCanvas,
+                  CharacterGeometry.Handles[Handle], clWhite,
+                  TColor($0048A8F8));
           end;
           CornerHandles := FInteraction.RoundedRectangleCornerHandles;
           for CornerHandle in CornerHandles do
           begin
             if CornerHandle.Selected then
-              Direct2DCanvas.Brush.Color := TColor($0048A8F8)
+              DrawOverlayHandleEllipse(Direct2DCanvas,
+                CornerHandle.Bounds, TColor($0048A8F8), COLOR_SELECTION)
             else
-              Direct2DCanvas.Brush.Color := clWhite;
-            Direct2DCanvas.Pen.Color := COLOR_SELECTION;
-            Direct2DCanvas.Ellipse(CornerHandle.Bounds.Left,
-              CornerHandle.Bounds.Top, CornerHandle.Bounds.Right,
-              CornerHandle.Bounds.Bottom);
+              DrawOverlayHandleEllipse(Direct2DCanvas,
+                CornerHandle.Bounds, clWhite, COLOR_SELECTION);
           end;
           if FInteraction.RoundedRectangleRadiusHandle(RadiusHandleRect) then
           begin
             RadiusHandlePoints := BuildDiamondPoints(RadiusHandleRect);
-            Direct2DCanvas.Brush.Color := TColor($0048A8F8);
-            Direct2DCanvas.Pen.Color := COLOR_SELECTION;
-            Direct2DCanvas.Polygon(RadiusHandlePoints);
+            DrawOverlayHandlePolygon(Direct2DCanvas,
+              RadiusHandlePoints, TColor($0048A8F8), COLOR_SELECTION);
           end;
           if FInteraction.SelectedArcAngleHandles(ArcHandles) then
           begin
-            Direct2DCanvas.Pen.Color := COLOR_SELECTION;
-            Direct2DCanvas.Brush.Color := TColor($0060C060);
-            Direct2DCanvas.Ellipse(ArcHandles.StartHandle.Left,
-              ArcHandles.StartHandle.Top, ArcHandles.StartHandle.Right,
-              ArcHandles.StartHandle.Bottom);
-            Direct2DCanvas.Brush.Color := TColor($0048A8F8);
-            Direct2DCanvas.Ellipse(ArcHandles.EndHandle.Left,
-              ArcHandles.EndHandle.Top, ArcHandles.EndHandle.Right,
-              ArcHandles.EndHandle.Bottom);
+            DrawOverlayHandleEllipse(Direct2DCanvas,
+              ArcHandles.StartHandle, TColor($0060C060),
+              COLOR_SELECTION);
+            DrawOverlayHandleEllipse(Direct2DCanvas,
+              ArcHandles.EndHandle, TColor($0048A8F8),
+              COLOR_SELECTION);
           end;
           if not FTextEditing and
             FInteraction.SelectedTextSpacingHandles(TextSpacingHandles) then
@@ -2400,71 +2377,57 @@ begin
         PathGuidePoints := FInteraction.SelectedPathPoints;
         if Length(PathGuidePoints) > 1 then
         begin
-          Direct2DCanvas.Pen.Color := COLOR_SELECTION;
-          Direct2DCanvas.Pen.Style := psDot;
-          Direct2DCanvas.Polyline(PathGuidePoints);
-          Direct2DCanvas.Pen.Style := psSolid;
+          DrawOverlayPolyline(Direct2DCanvas, PathGuidePoints,
+            COLOR_SELECTION, psDot);
         end;
       end;
       PathVertexRects := FInteraction.SelectedPathVertexRects;
       for I := 0 to High(PathVertexRects) do
       begin
-        Direct2DCanvas.Brush.Color := TColor($00F0C060);
-        Direct2DCanvas.FillRect(PathVertexRects[I]);
-        Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-        Direct2DCanvas.FrameRect(PathVertexRects[I]);
+        DrawOverlayHandleRect(Direct2DCanvas, PathVertexRects[I],
+          TColor($00F0C060), COLOR_SELECTION);
       end;
       ShapeVertexRects := FInteraction.SelectedShapeVertexRects;
       for I := 0 to High(ShapeVertexRects) do
       begin
-        Direct2DCanvas.Brush.Color := TColor($00F0C060);
-        Direct2DCanvas.FillRect(ShapeVertexRects[I]);
-        Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-        Direct2DCanvas.FrameRect(ShapeVertexRects[I]);
+        DrawOverlayHandleRect(Direct2DCanvas, ShapeVertexRects[I],
+          TColor($00F0C060), COLOR_SELECTION);
       end;
       if FInteraction.SelectedShapeVertexRect(SelectedShapeVertexRect) then
       begin
-        Direct2DCanvas.Brush.Color := clWhite;
-        Direct2DCanvas.FillRect(SelectedShapeVertexRect);
-        Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-        Direct2DCanvas.FrameRect(SelectedShapeVertexRect);
+        DrawOverlayHandleRect(Direct2DCanvas,
+          SelectedShapeVertexRect);
       end;
       if FInteraction.SelectedShapeBezierHandles(BezierHandles) then
       begin
         SetLength(ShapeKindIconPoints, 2);
         ShapeKindIconPoints[0] := BezierHandles.IncomingPoint;
         ShapeKindIconPoints[1] := BezierHandles.OutgoingPoint;
-        Direct2DCanvas.Pen.Color := COLOR_SELECTION;
-        Direct2DCanvas.Pen.Style := psDot;
-        Direct2DCanvas.Polyline(ShapeKindIconPoints);
-        Direct2DCanvas.Pen.Style := psSolid;
-        Direct2DCanvas.Brush.Color := clWhite;
-        Direct2DCanvas.FillRect(BezierHandles.IncomingRect);
-        Direct2DCanvas.FillRect(BezierHandles.OutgoingRect);
-        Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-        Direct2DCanvas.FrameRect(BezierHandles.IncomingRect);
-        Direct2DCanvas.FrameRect(BezierHandles.OutgoingRect);
+        DrawOverlayPolyline(Direct2DCanvas, ShapeKindIconPoints,
+          COLOR_SELECTION, psDot);
+        DrawOverlayHandleRect(Direct2DCanvas,
+          BezierHandles.IncomingRect);
+        DrawOverlayHandleRect(Direct2DCanvas,
+          BezierHandles.OutgoingRect);
       end;
       ShapeKindButtons := FInteraction.SelectedShapeVertexKindButtons;
       for I := 0 to High(ShapeKindButtons) do
       begin
         if ShapeKindButtons[I].Selected then
-          Direct2DCanvas.Brush.Color := TColor($00F0C060)
+          DrawOverlayHandleRect(Direct2DCanvas,
+            ShapeKindButtons[I].Bounds, TColor($00F0C060),
+            COLOR_SELECTION)
         else
-          Direct2DCanvas.Brush.Color := clWhite;
-        Direct2DCanvas.FillRect(ShapeKindButtons[I].Bounds);
-        Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-        Direct2DCanvas.FrameRect(ShapeKindButtons[I].Bounds);
+          DrawOverlayHandleRect(Direct2DCanvas,
+            ShapeKindButtons[I].Bounds);
         ShapeKindIconPoints := BuildVertexKindIconPoints(
           ShapeKindButtons[I].Bounds, ShapeKindButtons[I].Kind);
-        Direct2DCanvas.Polyline(ShapeKindIconPoints);
+        DrawOverlayPolyline(Direct2DCanvas, ShapeKindIconPoints);
       end;
       if FInteraction.RangeSelecting then
       begin
         RangeRect := FInteraction.RangeSelectionRect;
-        Direct2DCanvas.Brush.Style := bsSolid;
-        Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-        Direct2DCanvas.FrameRect(RangeRect);
+        DrawOverlayFrameRect(Direct2DCanvas, RangeRect);
       end;
       CreationRect := FShapeCreation.PreviewRect;
       if not CreationRect.IsEmpty then
@@ -2472,13 +2435,12 @@ begin
         if (FEditorState <> nil) and
           (FEditorState.CurrentTool = vetArcShape) then
         begin
-          Direct2DCanvas.Brush.Style := bsSolid;
-          Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-          Direct2DCanvas.Pie(CreationRect.Left, CreationRect.Top,
-            CreationRect.Right, CreationRect.Bottom, CreationRect.Right,
-            (CreationRect.Top + CreationRect.Bottom) div 2,
-            CreationRect.Left,
-            (CreationRect.Top + CreationRect.Bottom) div 2);
+          DrawOverlayPie(Direct2DCanvas, CreationRect,
+            Point(CreationRect.Right,
+              (CreationRect.Top + CreationRect.Bottom) div 2),
+            Point(CreationRect.Left,
+              (CreationRect.Top + CreationRect.Bottom) div 2),
+            COLOR_SELECTION);
         end
         else if (FEditorState <> nil) and
           (FEditorState.CurrentTool = vetArc) then
@@ -2486,27 +2448,21 @@ begin
         else if (FEditorState <> nil) and
           (FEditorState.CurrentTool = vetRectangleLine) then
         begin
-          Direct2DCanvas.Brush.Style := bsClear;
-          Direct2DCanvas.Pen.Color := FEditorState.LineStrokeColor;
-          Direct2DCanvas.Pen.Width := Max(
-            Round(FEditorState.LineStrokeWidth * FZoom), 1);
-          Direct2DCanvas.Rectangle(CreationRect);
-          Direct2DCanvas.Pen.Width := 1;
+          DrawOverlayFrameRect(Direct2DCanvas, CreationRect,
+            FEditorState.LineStrokeColor, psSolid,
+            Max(Round(FEditorState.LineStrokeWidth * FZoom), 1) + 2,
+            Max(Round(FEditorState.LineStrokeWidth * FZoom), 1));
         end
         else if (FEditorState <> nil) and
           (FEditorState.CurrentTool in [vetEllipseLine, vetEllipse]) then
         begin
-          Direct2DCanvas.Brush.Style := bsClear;
           if FEditorState.CurrentTool = vetEllipseLine then
-          begin
-            Direct2DCanvas.Pen.Color := FEditorState.LineStrokeColor;
-            Direct2DCanvas.Pen.Width := Max(
-              Round(FEditorState.LineStrokeWidth * FZoom), 1);
-          end
+            DrawOverlayEllipse(Direct2DCanvas, CreationRect,
+              FEditorState.LineStrokeColor,
+              Max(Round(FEditorState.LineStrokeWidth * FZoom), 1) + 2,
+              Max(Round(FEditorState.LineStrokeWidth * FZoom), 1))
           else
-            Direct2DCanvas.Pen.Color := COLOR_SELECTION;
-          Direct2DCanvas.Ellipse(CreationRect);
-          Direct2DCanvas.Pen.Width := 1;
+            DrawOverlayEllipse(Direct2DCanvas, CreationRect);
         end
         else if (FEditorState <> nil) and
           (FEditorState.CurrentTool in [vetRoundedRectangleLine,
@@ -2514,35 +2470,26 @@ begin
         begin
           PreviewRadius := Round(Min(CreationRect.Width,
             CreationRect.Height) * 0.2);
-          Direct2DCanvas.Brush.Style := bsClear;
           if FEditorState.CurrentTool = vetRoundedRectangleLine then
-          begin
-            Direct2DCanvas.Pen.Color := FEditorState.LineStrokeColor;
-            Direct2DCanvas.Pen.Width := Max(
-              Round(FEditorState.LineStrokeWidth * FZoom), 1);
-          end
+            DrawOverlayRoundRect(Direct2DCanvas, CreationRect,
+              PreviewRadius, FEditorState.LineStrokeColor,
+              Max(Round(FEditorState.LineStrokeWidth * FZoom), 1) + 2,
+              Max(Round(FEditorState.LineStrokeWidth * FZoom), 1))
           else
-            Direct2DCanvas.Pen.Color := COLOR_SELECTION;
-          Direct2DCanvas.RoundRect(CreationRect.Left, CreationRect.Top,
-            CreationRect.Right, CreationRect.Bottom, PreviewRadius * 2,
-            PreviewRadius * 2);
-          Direct2DCanvas.Pen.Width := 1;
+            DrawOverlayRoundRect(Direct2DCanvas, CreationRect,
+              PreviewRadius);
         end
         else
         begin
-          Direct2DCanvas.Brush.Style := bsSolid;
-          Direct2DCanvas.Brush.Color := COLOR_SELECTION;
-          Direct2DCanvas.FrameRect(CreationRect);
+          DrawOverlayFrameRect(Direct2DCanvas, CreationRect);
         end;
       end;
       if FShapeCreation.PreviewArc(ArcPreview) then
       begin
-        Direct2DCanvas.Brush.Style := bsClear;
-        Direct2DCanvas.Pen.Color := FEditorState.LineStrokeColor;
-        Direct2DCanvas.Pen.Width := Max(
-          Round(FEditorState.LineStrokeWidth * FZoom), 1);
-        Direct2DCanvas.Polyline(ArcPreview);
-        Direct2DCanvas.Pen.Width := 1;
+        DrawOverlayPolyline(Direct2DCanvas, ArcPreview,
+          FEditorState.LineStrokeColor, psSolid,
+          Max(Round(FEditorState.LineStrokeWidth * FZoom), 1) + 2,
+          Max(Round(FEditorState.LineStrokeWidth * FZoom), 1));
       end;
       if FShapeCreation.PreviewLine(LineStart, LineEnd) then
         DrawStyledPreviewLine(Direct2DCanvas, LineStart, LineEnd,
@@ -2551,8 +2498,7 @@ begin
           FEditorState.LineMifStrokeStyle, FEditorState.LineCap);
       if FShapeCreation.PreviewPath(PathPreview) then
       begin
-        Direct2DCanvas.Pen.Color := COLOR_SELECTION;
-        Direct2DCanvas.Polyline(PathPreview);
+        DrawOverlayPolyline(Direct2DCanvas, PathPreview);
       end;
       FFilterInteraction.Configure(FDocument, EditHistory, FEditorState,
         FCanvasBounds, FZoom);
@@ -2691,13 +2637,11 @@ begin
       ToScreenY(RotatedBounds.Top), ToScreenX(RotatedBounds.Right),
       ToScreenY(RotatedBounds.Bottom));
     InflateRect(LayerRect, 5, 5);
-    Canvas.Brush.Style := bsClear;
-    Canvas.Pen.Color := COLOR_OPEN_GROUP;
-    Canvas.Pen.Style := psDash;
-    Canvas.Rectangle(LayerRect);
-    Canvas.Pen.Style := psSolid;
+    DrawOverlayFrameRect(Canvas, LayerRect, COLOR_OPEN_GROUP, psDash);
   end;
   if (FEditorState <> nil) and (FEditorState.OpenGroupChild <> nil) and
+    not (FTextEditing and (FEditorState.OpenGroupChild is
+      TScreenLayoutTextPathLayer)) and
     TryGetOpenGroupSelectionBounds(FEditorState, RotatedBounds) then
   begin
     LayerRect := Rect(ToScreenX(RotatedBounds.Left),
@@ -2705,25 +2649,19 @@ begin
       ToScreenY(RotatedBounds.Bottom));
     SelectionGeometry := BuildSelectionGeometry(LayerRect,
       SelectionFrameOffset(0, FZoom));
-    Canvas.Brush.Style := bsSolid;
-    Canvas.Pen.Color := COLOR_SELECTION;
-    Canvas.Polyline(SelectionGeometry.FramePoints);
+    DrawOverlayPolyline(Canvas, SelectionGeometry.FramePoints);
     if OpenGroupSelectionEditable(FEditorState) then
     begin
       for Handle := vshTopLeft to vshLeft do
       begin
-        Canvas.Brush.Color := clWhite;
-        Canvas.FillRect(SelectionGeometry.Handles[Handle]);
-        Canvas.Brush.Color := COLOR_SELECTION;
-        Canvas.FrameRect(SelectionGeometry.Handles[Handle]);
+        DrawOverlayHandleRect(Canvas,
+          SelectionGeometry.Handles[Handle]);
       end;
-      Canvas.MoveTo(SelectionGeometry.RotationStem[0].X,
-        SelectionGeometry.RotationStem[0].Y);
-      Canvas.LineTo(SelectionGeometry.RotationStem[1].X,
-        SelectionGeometry.RotationStem[1].Y);
-      Canvas.Brush.Color := clWhite;
-      Canvas.Pen.Color := COLOR_ROTATION_MARK;
-      Canvas.Ellipse(SelectionGeometry.PrimaryRotationHandle);
+      DrawOverlayLine(Canvas, SelectionGeometry.RotationStem[0],
+        SelectionGeometry.RotationStem[1]);
+      DrawOverlayHandleEllipse(Canvas,
+        SelectionGeometry.PrimaryRotationHandle, clWhite,
+        COLOR_ROTATION_MARK);
     end;
   end;
 
@@ -2826,7 +2764,11 @@ begin
             Max(SelectionLayerRect.Bottom, LayerRect.Bottom));
       end;
     end;
-  if (SelectionLayerRect.Width > 0) and (SelectionLayerRect.Height > 0) then
+  if (SelectionLayerRect.Width > 0) and (SelectionLayerRect.Height > 0) and
+    not (FTextEditing and (FDocument.SelectionCount = 1) and
+      (FDocument.SelectedIndex > 0) and
+      (FDocument[FDocument.SelectedIndex] is
+        TScreenLayoutTextPathLayer)) then
   begin
     if (FDocument.SelectionCount = 1) and
       (FDocument.SelectedIndex > 0) and
@@ -2921,21 +2863,14 @@ begin
     else
       SelectionGeometry := BuildSelectionGeometry(SelectionLayerRect,
         SelectionFrameOffsetPixels);
-    Canvas.Brush.Style := bsSolid;
-    Canvas.Brush.Color := COLOR_SELECTION;
-    Canvas.Pen.Color := COLOR_SELECTION;
     if SelectionGeometry.DrawFrame then
-      Canvas.Polyline(SelectionGeometry.FramePoints);
+      DrawOverlayPolyline(Canvas, SelectionGeometry.FramePoints);
     if not SelectionLocked then
     begin
       for Handle := vshTopLeft to vshLeft do
         if not SelectionGeometry.Handles[Handle].IsEmpty then
-        begin
-          Canvas.Brush.Color := clWhite;
-          Canvas.FillRect(SelectionGeometry.Handles[Handle]);
-          Canvas.Brush.Color := COLOR_SELECTION;
-          Canvas.FrameRect(SelectionGeometry.Handles[Handle]);
-        end;
+          DrawOverlayHandleRect(Canvas,
+            SelectionGeometry.Handles[Handle]);
       if (FDocument.SelectionCount = 1) and
         ((FDocument[FDocument.SelectedIndex] is TScreenLayoutGroupLayer) or
          (FDocument[FDocument.SelectedIndex] is TScreenLayoutRectangleLineLayer) or
@@ -2947,58 +2882,51 @@ begin
            TScreenLayoutShapeLayer)) and
         not FInteraction.AxisAlignedSelection then
       begin
-        Canvas.Pen.Color := COLOR_SELECTION;
-        Canvas.MoveTo(SelectionGeometry.RotationStem[0].X,
-          SelectionGeometry.RotationStem[0].Y);
-        Canvas.LineTo(SelectionGeometry.RotationStem[1].X,
-          SelectionGeometry.RotationStem[1].Y);
-        Canvas.Brush.Color := clWhite;
-        Canvas.Pen.Color := COLOR_ROTATION_MARK;
-        Canvas.Ellipse(SelectionGeometry.PrimaryRotationHandle);
+        DrawOverlayLine(Canvas, SelectionGeometry.RotationStem[0],
+          SelectionGeometry.RotationStem[1]);
+        DrawOverlayHandleEllipse(Canvas,
+          SelectionGeometry.PrimaryRotationHandle, clWhite,
+          COLOR_ROTATION_MARK);
         BuildRotationMarkPoints(SelectionGeometry.PrimaryRotationHandle,
           RotationArcPoints, RotationArrowPoints);
-        Canvas.Polyline(RotationArcPoints);
-        Canvas.Brush.Color := COLOR_ROTATION_MARK;
-        Canvas.Polygon(RotationArrowPoints);
+        DrawOverlayPolyline(Canvas, RotationArcPoints,
+          COLOR_ROTATION_MARK, psSolid, 1, 1);
+        DrawOverlayHandlePolygon(Canvas, RotationArrowPoints,
+          COLOR_ROTATION_MARK, COLOR_ROTATION_MARK, 1, 1);
       end;
       if FInteraction.SelectedTextPathCharacterGeometry(
         CharacterGeometry) then
       begin
-        Canvas.Pen.Color := TColor($0048A8F8);
-        Canvas.Polyline(CharacterGeometry.FramePoints);
+        DrawOverlayPolyline(Canvas, CharacterGeometry.FramePoints,
+          TColor($0048A8F8));
         for Handle := vshTopLeft to vshLeft do
           if not CharacterGeometry.Handles[Handle].IsEmpty then
-          begin
-            Canvas.Brush.Color := clWhite;
-            Canvas.FillRect(CharacterGeometry.Handles[Handle]);
-            Canvas.Brush.Color := TColor($0048A8F8);
-            Canvas.FrameRect(CharacterGeometry.Handles[Handle]);
-          end;
+            DrawOverlayHandleRect(Canvas,
+              CharacterGeometry.Handles[Handle], clWhite,
+              TColor($0048A8F8));
       end;
       CornerHandles := FInteraction.RoundedRectangleCornerHandles;
       for CornerHandle in CornerHandles do
       begin
         if CornerHandle.Selected then
-          Canvas.Brush.Color := TColor($0048A8F8)
+          DrawOverlayHandleEllipse(Canvas, CornerHandle.Bounds,
+            TColor($0048A8F8), COLOR_SELECTION)
         else
-          Canvas.Brush.Color := clWhite;
-        Canvas.Pen.Color := COLOR_SELECTION;
-        Canvas.Ellipse(CornerHandle.Bounds);
+          DrawOverlayHandleEllipse(Canvas, CornerHandle.Bounds,
+            clWhite, COLOR_SELECTION);
       end;
       if FInteraction.RoundedRectangleRadiusHandle(RadiusHandleRect) then
       begin
         RadiusHandlePoints := BuildDiamondPoints(RadiusHandleRect);
-        Canvas.Brush.Color := TColor($0048A8F8);
-        Canvas.Pen.Color := COLOR_SELECTION;
-        Canvas.Polygon(RadiusHandlePoints);
+        DrawOverlayHandlePolygon(Canvas, RadiusHandlePoints,
+          TColor($0048A8F8), COLOR_SELECTION);
       end;
       if FInteraction.SelectedArcAngleHandles(ArcHandles) then
       begin
-        Canvas.Pen.Color := COLOR_SELECTION;
-        Canvas.Brush.Color := TColor($0060C060);
-        Canvas.Ellipse(ArcHandles.StartHandle);
-        Canvas.Brush.Color := TColor($0048A8F8);
-        Canvas.Ellipse(ArcHandles.EndHandle);
+        DrawOverlayHandleEllipse(Canvas, ArcHandles.StartHandle,
+          TColor($0060C060), COLOR_SELECTION);
+        DrawOverlayHandleEllipse(Canvas, ArcHandles.EndHandle,
+          TColor($0048A8F8), COLOR_SELECTION);
       end;
       if not FTextEditing and
         FInteraction.SelectedTextSpacingHandles(TextSpacingHandles) then
@@ -3052,71 +2980,52 @@ begin
     PathGuidePoints := FInteraction.SelectedPathPoints;
     if Length(PathGuidePoints) > 1 then
     begin
-      Canvas.Pen.Color := COLOR_SELECTION;
-      Canvas.Pen.Style := psDot;
-      Canvas.Polyline(PathGuidePoints);
-      Canvas.Pen.Style := psSolid;
+      DrawOverlayPolyline(Canvas, PathGuidePoints,
+        COLOR_SELECTION, psDot);
     end;
   end;
   PathVertexRects := FInteraction.SelectedPathVertexRects;
   for I := 0 to High(PathVertexRects) do
   begin
-    Canvas.Brush.Color := TColor($00F0C060);
-    Canvas.FillRect(PathVertexRects[I]);
-    Canvas.Brush.Color := COLOR_SELECTION;
-    Canvas.FrameRect(PathVertexRects[I]);
+    DrawOverlayHandleRect(Canvas, PathVertexRects[I],
+      TColor($00F0C060), COLOR_SELECTION);
   end;
   ShapeVertexRects := FInteraction.SelectedShapeVertexRects;
   for I := 0 to High(ShapeVertexRects) do
   begin
-    Canvas.Brush.Color := TColor($00F0C060);
-    Canvas.FillRect(ShapeVertexRects[I]);
-    Canvas.Brush.Color := COLOR_SELECTION;
-    Canvas.FrameRect(ShapeVertexRects[I]);
+    DrawOverlayHandleRect(Canvas, ShapeVertexRects[I],
+      TColor($00F0C060), COLOR_SELECTION);
   end;
   if FInteraction.SelectedShapeVertexRect(SelectedShapeVertexRect) then
   begin
-    Canvas.Brush.Color := clWhite;
-    Canvas.FillRect(SelectedShapeVertexRect);
-    Canvas.Brush.Color := COLOR_SELECTION;
-    Canvas.FrameRect(SelectedShapeVertexRect);
+    DrawOverlayHandleRect(Canvas, SelectedShapeVertexRect);
   end;
   if FInteraction.SelectedShapeBezierHandles(BezierHandles) then
   begin
     SetLength(ShapeKindIconPoints, 2);
     ShapeKindIconPoints[0] := BezierHandles.IncomingPoint;
     ShapeKindIconPoints[1] := BezierHandles.OutgoingPoint;
-    Canvas.Pen.Color := COLOR_SELECTION;
-    Canvas.Pen.Style := psDot;
-    Canvas.Polyline(ShapeKindIconPoints);
-    Canvas.Pen.Style := psSolid;
-    Canvas.Brush.Color := clWhite;
-    Canvas.FillRect(BezierHandles.IncomingRect);
-    Canvas.FillRect(BezierHandles.OutgoingRect);
-    Canvas.Brush.Color := COLOR_SELECTION;
-    Canvas.FrameRect(BezierHandles.IncomingRect);
-    Canvas.FrameRect(BezierHandles.OutgoingRect);
+    DrawOverlayPolyline(Canvas, ShapeKindIconPoints,
+      COLOR_SELECTION, psDot);
+    DrawOverlayHandleRect(Canvas, BezierHandles.IncomingRect);
+    DrawOverlayHandleRect(Canvas, BezierHandles.OutgoingRect);
   end;
   ShapeKindButtons := FInteraction.SelectedShapeVertexKindButtons;
   for I := 0 to High(ShapeKindButtons) do
   begin
     if ShapeKindButtons[I].Selected then
-      Canvas.Brush.Color := TColor($00F0C060)
+      DrawOverlayHandleRect(Canvas, ShapeKindButtons[I].Bounds,
+        TColor($00F0C060), COLOR_SELECTION)
     else
-      Canvas.Brush.Color := clWhite;
-    Canvas.FillRect(ShapeKindButtons[I].Bounds);
-    Canvas.Brush.Color := COLOR_SELECTION;
-    Canvas.FrameRect(ShapeKindButtons[I].Bounds);
+      DrawOverlayHandleRect(Canvas, ShapeKindButtons[I].Bounds);
     ShapeKindIconPoints := BuildVertexKindIconPoints(
       ShapeKindButtons[I].Bounds, ShapeKindButtons[I].Kind);
-    Canvas.Polyline(ShapeKindIconPoints);
+    DrawOverlayPolyline(Canvas, ShapeKindIconPoints);
   end;
   if FInteraction.RangeSelecting then
   begin
     RangeRect := FInteraction.RangeSelectionRect;
-    Canvas.Brush.Style := bsSolid;
-    Canvas.Brush.Color := COLOR_SELECTION;
-    Canvas.FrameRect(RangeRect);
+    DrawOverlayFrameRect(Canvas, RangeRect);
   end;
   CreationRect := FShapeCreation.PreviewRect;
   if not CreationRect.IsEmpty then
@@ -3124,12 +3033,12 @@ begin
     if (FEditorState <> nil) and
       (FEditorState.CurrentTool = vetArcShape) then
     begin
-      Canvas.Brush.Style := bsSolid;
-      Canvas.Brush.Color := COLOR_SELECTION;
-      Canvas.Pie(CreationRect.Left, CreationRect.Top,
-        CreationRect.Right, CreationRect.Bottom, CreationRect.Right,
-        (CreationRect.Top + CreationRect.Bottom) div 2,
-        CreationRect.Left, (CreationRect.Top + CreationRect.Bottom) div 2);
+      DrawOverlayPie(Canvas, CreationRect,
+        Point(CreationRect.Right,
+          (CreationRect.Top + CreationRect.Bottom) div 2),
+        Point(CreationRect.Left,
+          (CreationRect.Top + CreationRect.Bottom) div 2),
+        COLOR_SELECTION);
     end
     else if (FEditorState <> nil) and
       (FEditorState.CurrentTool = vetArc) then
@@ -3137,26 +3046,21 @@ begin
     else if (FEditorState <> nil) and
       (FEditorState.CurrentTool = vetRectangleLine) then
     begin
-      Canvas.Brush.Style := bsClear;
-      Canvas.Pen.Color := FEditorState.LineStrokeColor;
-      Canvas.Pen.Width := Max(Round(FEditorState.LineStrokeWidth * FZoom), 1);
-      Canvas.Rectangle(CreationRect);
-      Canvas.Pen.Width := 1;
+      DrawOverlayFrameRect(Canvas, CreationRect,
+        FEditorState.LineStrokeColor, psSolid,
+        Max(Round(FEditorState.LineStrokeWidth * FZoom), 1) + 2,
+        Max(Round(FEditorState.LineStrokeWidth * FZoom), 1));
     end
     else if (FEditorState <> nil) and
       (FEditorState.CurrentTool in [vetEllipseLine, vetEllipse]) then
     begin
-      Canvas.Brush.Style := bsClear;
       if FEditorState.CurrentTool = vetEllipseLine then
-      begin
-        Canvas.Pen.Color := FEditorState.LineStrokeColor;
-        Canvas.Pen.Width := Max(
-          Round(FEditorState.LineStrokeWidth * FZoom), 1);
-      end
+        DrawOverlayEllipse(Canvas, CreationRect,
+          FEditorState.LineStrokeColor,
+          Max(Round(FEditorState.LineStrokeWidth * FZoom), 1) + 2,
+          Max(Round(FEditorState.LineStrokeWidth * FZoom), 1))
       else
-        Canvas.Pen.Color := COLOR_SELECTION;
-      Canvas.Ellipse(CreationRect);
-      Canvas.Pen.Width := 1;
+        DrawOverlayEllipse(Canvas, CreationRect);
     end
     else if (FEditorState <> nil) and
       (FEditorState.CurrentTool in [vetRoundedRectangleLine,
@@ -3164,34 +3068,25 @@ begin
     begin
       PreviewRadius := Round(Min(CreationRect.Width,
         CreationRect.Height) * 0.2);
-      Canvas.Brush.Style := bsClear;
       if FEditorState.CurrentTool = vetRoundedRectangleLine then
-      begin
-        Canvas.Pen.Color := FEditorState.LineStrokeColor;
-        Canvas.Pen.Width := Max(
-          Round(FEditorState.LineStrokeWidth * FZoom), 1);
-      end
+        DrawOverlayRoundRect(Canvas, CreationRect, PreviewRadius,
+          FEditorState.LineStrokeColor,
+          Max(Round(FEditorState.LineStrokeWidth * FZoom), 1) + 2,
+          Max(Round(FEditorState.LineStrokeWidth * FZoom), 1))
       else
-        Canvas.Pen.Color := COLOR_SELECTION;
-      Canvas.RoundRect(CreationRect.Left, CreationRect.Top,
-        CreationRect.Right, CreationRect.Bottom, PreviewRadius * 2,
-        PreviewRadius * 2);
-      Canvas.Pen.Width := 1;
+        DrawOverlayRoundRect(Canvas, CreationRect, PreviewRadius);
     end
     else
     begin
-      Canvas.Brush.Style := bsSolid;
-      Canvas.Brush.Color := COLOR_SELECTION;
-      Canvas.FrameRect(CreationRect);
+      DrawOverlayFrameRect(Canvas, CreationRect);
     end;
   end;
   if FShapeCreation.PreviewArc(ArcPreview) then
   begin
-    Canvas.Brush.Style := bsClear;
-    Canvas.Pen.Color := FEditorState.LineStrokeColor;
-    Canvas.Pen.Width := Max(Round(FEditorState.LineStrokeWidth * FZoom), 1);
-    Canvas.Polyline(ArcPreview);
-    Canvas.Pen.Width := 1;
+    DrawOverlayPolyline(Canvas, ArcPreview,
+      FEditorState.LineStrokeColor, psSolid,
+      Max(Round(FEditorState.LineStrokeWidth * FZoom), 1) + 2,
+      Max(Round(FEditorState.LineStrokeWidth * FZoom), 1));
   end;
   if FShapeCreation.PreviewLine(LineStart, LineEnd) then
     DrawStyledPreviewLine(Canvas, LineStart, LineEnd,
@@ -3199,8 +3094,7 @@ begin
       FEditorState.LineMifStrokeStyle, FEditorState.LineCap);
   if FShapeCreation.PreviewPath(PathPreview) then
   begin
-    Canvas.Pen.Color := COLOR_SELECTION;
-    Canvas.Polyline(PathPreview);
+    DrawOverlayPolyline(Canvas, PathPreview);
   end;
   FFilterInteraction.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);

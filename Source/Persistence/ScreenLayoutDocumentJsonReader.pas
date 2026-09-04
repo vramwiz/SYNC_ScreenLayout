@@ -222,6 +222,22 @@ begin
   end;
 end;
 
+function ParseTextPathAttachment(
+  const Value: string): TScreenLayoutTextPathAttachment;
+const
+  NAMES: array[TScreenLayoutTextPathAttachment] of string =
+    ('bottom', 'top', 'left', 'right');
+var
+  Attachment: TScreenLayoutTextPathAttachment;
+begin
+  for Attachment := Low(TScreenLayoutTextPathAttachment) to
+    High(TScreenLayoutTextPathAttachment) do
+    if SameText(Value, NAMES[Attachment]) then
+      Exit(Attachment);
+  raise EConvertError.CreateFmt('Invalid text path attachment: %s',
+    [Value]);
+end;
+
 function ReadPathVertices(LayerJson: TJSONObject; LayerIndex: Integer;
   const LayerDescription: string): TArray<TScreenLayoutVertex>;
 var
@@ -282,6 +298,7 @@ begin
     Data.Text, Data.FontFamily, Data.FontSize, Data.WrapWidth, Data.TextColor,
     Vertices);
   Result.Alignment := Data.Alignment;
+  Result.Attachment := Data.TextPathAttachment;
   Result.CharacterPathOffsets := Data.CharacterPathOffsets;
   Result.CharacterPositionManual := Data.CharacterPositionManual;
   Result.CharacterScales := Data.CharacterScales;
@@ -510,6 +527,9 @@ begin
           TextValue.Text := ReadString(LayerJson, 'text');
           TextValue.FontFamily := ReadString(LayerJson, 'fontFamily');
           TextValue.FontSize := Max(ReadSingle(LayerJson, 'fontSize'), 1.0);
+          if LayerTypes[I] = 'textPath' then
+            TextValue.TextPathAttachment := ParseTextPathAttachment(
+              ReadString(LayerJson, 'pathAttachment'));
           SetLength(TextValue.CharacterPathOffsets, 0);
           if (LayerTypes[I] = 'textPath') and
             (LayerJson.GetValue('characterPathOffsets') <> nil) then

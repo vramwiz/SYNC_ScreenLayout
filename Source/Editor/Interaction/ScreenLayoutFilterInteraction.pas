@@ -67,7 +67,7 @@ implementation
 uses
   System.Math,
   ScreenLayoutFilterCommands, ScreenLayoutGeometry,
-  ScreenLayoutLayerGeometry;
+  ScreenLayoutLayerGeometry, ScreenLayoutOverlayPrimitives;
 
 const
   BLUR_EFFECT_RADIUS_MULTIPLIER = 3.0; // Skiaの効果範囲計算と同じ広がり。
@@ -137,20 +137,14 @@ begin
   if not GetBlurEditRect(EditRect) or
     not LayerScreenRect(FEditorState.SelectedFilterLayer, SourceRect) then
     Exit;
-  ACanvas.Brush.Style := bsClear;
-  ACanvas.Pen.Color := COLOR_FILTER_EDIT;
-  ACanvas.Pen.Width := 1;
-  ACanvas.Pen.Style := psDot;
-  ACanvas.Rectangle(EditRect);
-  ACanvas.Pen.Style := psSolid;
-  ACanvas.Rectangle(SourceRect);
-  ACanvas.Brush.Style := bsSolid;
-  ACanvas.Brush.Color := clWhite;
+  DrawOverlayFrameRect(ACanvas, EditRect, COLOR_FILTER_EDIT, psDot);
+  DrawOverlayFrameRect(ACanvas, SourceRect, COLOR_FILTER_EDIT);
   for Side := Low(THandleSide) to High(THandleSide) do
     with GetHandleCenter(EditRect, Side) do
-      ACanvas.Ellipse(Rect(X - FILTER_HANDLE_RADIUS,
-        Y - FILTER_HANDLE_RADIUS, X + FILTER_HANDLE_RADIUS + 1,
-        Y + FILTER_HANDLE_RADIUS + 1));
+      DrawOverlayHandleEllipse(ACanvas,
+        Rect(X - FILTER_HANDLE_RADIUS, Y - FILTER_HANDLE_RADIUS,
+          X + FILTER_HANDLE_RADIUS + 1, Y + FILTER_HANDLE_RADIUS + 1),
+        clWhite, COLOR_FILTER_EDIT);
 end;
 
 procedure TScreenLayoutFilterInteraction.DrawBlur(
@@ -163,20 +157,14 @@ begin
   if not GetBlurEditRect(EditRect) or
     not LayerScreenRect(FEditorState.SelectedFilterLayer, SourceRect) then
     Exit;
-  ACanvas.Brush.Style := bsClear;
-  ACanvas.Pen.Color := COLOR_FILTER_EDIT;
-  ACanvas.Pen.Width := 1;
-  ACanvas.Pen.Style := psDot;
-  ACanvas.Rectangle(EditRect);
-  ACanvas.Pen.Style := psSolid;
-  ACanvas.Rectangle(SourceRect);
-  ACanvas.Brush.Style := bsSolid;
-  ACanvas.Brush.Color := clWhite;
+  DrawOverlayFrameRect(ACanvas, EditRect, COLOR_FILTER_EDIT, psDot);
+  DrawOverlayFrameRect(ACanvas, SourceRect, COLOR_FILTER_EDIT);
   for Side := Low(THandleSide) to High(THandleSide) do
     with GetHandleCenter(EditRect, Side) do
-      ACanvas.Ellipse(Rect(X - FILTER_HANDLE_RADIUS,
-        Y - FILTER_HANDLE_RADIUS, X + FILTER_HANDLE_RADIUS + 1,
-        Y + FILTER_HANDLE_RADIUS + 1));
+      DrawOverlayHandleEllipse(ACanvas,
+        Rect(X - FILTER_HANDLE_RADIUS, Y - FILTER_HANDLE_RADIUS,
+          X + FILTER_HANDLE_RADIUS + 1, Y + FILTER_HANDLE_RADIUS + 1),
+        clWhite, COLOR_FILTER_EDIT);
 end;
 
 procedure TScreenLayoutFilterInteraction.DrawOutline(ACanvas: TCanvas);
@@ -187,18 +175,14 @@ var
 begin
   if not GetOutlineEditRect(EditRect) then
     Exit;
-  ACanvas.Brush.Style := bsClear;
-  ACanvas.Pen.Color := COLOR_FILTER_EDIT;
-  ACanvas.Pen.Width := 1;
-  ACanvas.Rectangle(EditRect);
-  ACanvas.Brush.Style := bsSolid;
-  ACanvas.Brush.Color := clWhite;
+  DrawOverlayFrameRect(ACanvas, EditRect, COLOR_FILTER_EDIT);
   for Side := Low(THandleSide) to High(THandleSide) do
   begin
     Center := GetHandleCenter(EditRect, Side);
-    ACanvas.Rectangle(Rect(Center.X - FILTER_HANDLE_RADIUS,
-      Center.Y - FILTER_HANDLE_RADIUS, Center.X + FILTER_HANDLE_RADIUS + 1,
-      Center.Y + FILTER_HANDLE_RADIUS + 1));
+    DrawOverlayHandleRect(ACanvas,
+      Rect(Center.X - FILTER_HANDLE_RADIUS,
+        Center.Y - FILTER_HANDLE_RADIUS, Center.X + FILTER_HANDLE_RADIUS + 1,
+        Center.Y + FILTER_HANDLE_RADIUS + 1), clWhite, COLOR_FILTER_EDIT);
   end;
 end;
 
@@ -211,18 +195,14 @@ var
 begin
   if not GetOutlineEditRect(EditRect) then
     Exit;
-  ACanvas.Brush.Style := bsClear;
-  ACanvas.Pen.Color := COLOR_FILTER_EDIT;
-  ACanvas.Pen.Width := 1;
-  ACanvas.Rectangle(EditRect);
-  ACanvas.Brush.Style := bsSolid;
-  ACanvas.Brush.Color := clWhite;
+  DrawOverlayFrameRect(ACanvas, EditRect, COLOR_FILTER_EDIT);
   for Side := Low(THandleSide) to High(THandleSide) do
   begin
     Center := GetHandleCenter(EditRect, Side);
-    ACanvas.Rectangle(Rect(Center.X - FILTER_HANDLE_RADIUS,
-      Center.Y - FILTER_HANDLE_RADIUS, Center.X + FILTER_HANDLE_RADIUS + 1,
-      Center.Y + FILTER_HANDLE_RADIUS + 1));
+    DrawOverlayHandleRect(ACanvas,
+      Rect(Center.X - FILTER_HANDLE_RADIUS,
+        Center.Y - FILTER_HANDLE_RADIUS, Center.X + FILTER_HANDLE_RADIUS + 1,
+        Center.Y + FILTER_HANDLE_RADIUS + 1), clWhite, COLOR_FILTER_EDIT);
   end;
 end;
 
@@ -236,16 +216,13 @@ begin
     not LayerScreenRect(FEditorState.SelectedFilterLayer, LayerRect) then
     Exit;
   ShadowCenter := EditRect.CenterPoint;
-  ACanvas.Brush.Style := bsClear;
-  ACanvas.Pen.Color := COLOR_FILTER_EDIT;
-  ACanvas.Pen.Width := 1;
-  ACanvas.MoveTo(LayerRect.CenterPoint.X, LayerRect.CenterPoint.Y);
-  ACanvas.LineTo(ShadowCenter.X, ShadowCenter.Y);
-  ACanvas.Rectangle(EditRect);
-  ACanvas.Brush.Style := bsSolid;
-  ACanvas.Brush.Color := COLOR_FILTER_EDIT;
-  ACanvas.FillRect(Rect(ShadowCenter.X - 3, ShadowCenter.Y - 3,
-    ShadowCenter.X + 4, ShadowCenter.Y + 4));
+  DrawOverlayLine(ACanvas, LayerRect.CenterPoint, ShadowCenter,
+    COLOR_FILTER_EDIT);
+  DrawOverlayFrameRect(ACanvas, EditRect, COLOR_FILTER_EDIT);
+  DrawOverlayHandleRect(ACanvas,
+    Rect(ShadowCenter.X - 3, ShadowCenter.Y - 3,
+      ShadowCenter.X + 4, ShadowCenter.Y + 4), COLOR_FILTER_EDIT,
+    COLOR_FILTER_EDIT);
 end;
 
 procedure TScreenLayoutFilterInteraction.DrawShadow(
@@ -259,16 +236,13 @@ begin
     not LayerScreenRect(FEditorState.SelectedFilterLayer, LayerRect) then
     Exit;
   ShadowCenter := EditRect.CenterPoint;
-  ACanvas.Brush.Style := bsClear;
-  ACanvas.Pen.Color := COLOR_FILTER_EDIT;
-  ACanvas.Pen.Width := 1;
-  ACanvas.MoveTo(LayerRect.CenterPoint.X, LayerRect.CenterPoint.Y);
-  ACanvas.LineTo(ShadowCenter.X, ShadowCenter.Y);
-  ACanvas.Rectangle(EditRect);
-  ACanvas.Brush.Style := bsSolid;
-  ACanvas.Brush.Color := COLOR_FILTER_EDIT;
-  ACanvas.FillRect(Rect(ShadowCenter.X - 3, ShadowCenter.Y - 3,
-    ShadowCenter.X + 4, ShadowCenter.Y + 4));
+  DrawOverlayLine(ACanvas, LayerRect.CenterPoint, ShadowCenter,
+    COLOR_FILTER_EDIT);
+  DrawOverlayFrameRect(ACanvas, EditRect, COLOR_FILTER_EDIT);
+  DrawOverlayHandleRect(ACanvas,
+    Rect(ShadowCenter.X - 3, ShadowCenter.Y - 3,
+      ShadowCenter.X + 4, ShadowCenter.Y + 4), COLOR_FILTER_EDIT,
+    COLOR_FILTER_EDIT);
 end;
 
 function TScreenLayoutFilterInteraction.GetBlurEditRect(

@@ -99,6 +99,7 @@ end;
 
 procedure AddCurrentLayerTypes(Document: TVectArtDocument);
 var
+  Attachment: TScreenLayoutTextPathAttachment;
   Arc: TScreenLayoutArcLayer;
   ArcShape: TScreenLayoutEllipseArcShapeLayer;
   Contours: TArray<TScreenLayoutContour>;
@@ -109,6 +110,7 @@ var
   RectangleLine: TScreenLayoutRectangleLineLayer;
   RoundedLine: TScreenLayoutRoundedRectangleLineLayer;
   Shape: TScreenLayoutShapeLayer;
+  TextPath: TScreenLayoutTextPathLayer;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
   Document.InsertLayer(Document.LayerCount,
@@ -170,6 +172,26 @@ begin
   Path.LineCap := vlcRound;
   Document.InsertLayer(Document.LayerCount, Path);
 
+  for Attachment := Low(TScreenLayoutTextPathAttachment) to
+    High(TScreenLayoutTextPathAttachment) do
+  begin
+    SetLength(Vertices, 2);
+    Vertices[0].Position := TPointF.Create(-150,
+      30 + Ord(Attachment) * 14);
+    Vertices[0].Kind := slvkSharp;
+    Vertices[0].OutgoingSegment := slskLine;
+    Vertices[1].Position := TPointF.Create(-75,
+      30 + Ord(Attachment) * 14);
+    Vertices[1].Kind := slvkSharp;
+    Vertices[1].OutgoingSegment := slskLine;
+    TextPath := TScreenLayoutTextPathLayer.Create('Text path',
+      TRectF.Create(-150, 10 + Ord(Attachment) * 14, -75,
+        30 + Ord(Attachment) * 14), 'Path', 'Segoe UI', 14, 0,
+      clWhite, Vertices);
+    TextPath.Attachment := Attachment;
+    Document.InsertLayer(Document.LayerCount, TextPath);
+  end;
+
   SetLength(Contours, 1);
   SetLength(Contours[0].Vertices, 3);
   Contours[0].Vertices[0].Position := TPointF.Create(90, -25);
@@ -210,11 +232,14 @@ begin
 end;
 
 var
+  Attachment: TScreenLayoutTextPathAttachment;
+  AttachmentSeen: array[TScreenLayoutTextPathAttachment] of Boolean;
   DirectBuffer: TVectArtRenderBuffer;
   Document: TVectArtDocument;
   ExpectedBuffer: TVectArtRenderBuffer;
   ExpectedDocument: TVectArtDocument;
   FilterContext: TScreenLayoutFilterContext;
+  I: Integer;
   ObjectInfo: TOBJECT_INFO;
   ReadError: string;
   Serialized: string;
@@ -232,6 +257,16 @@ begin
     Serialized := SerializeVectArtDocument(Document);
     Check(TryDeserializeVectArtDocument(Serialized, ExpectedDocument,
       ReadError), 'Expected document load failed: ' + ReadError);
+    FillChar(AttachmentSeen, SizeOf(AttachmentSeen), 0);
+    for I := 1 to ExpectedDocument.LayerCount - 1 do
+      if ExpectedDocument[I] is TScreenLayoutTextPathLayer then
+        AttachmentSeen[TScreenLayoutTextPathLayer(
+          ExpectedDocument[I]).Attachment] := True;
+    for Attachment := Low(TScreenLayoutTextPathAttachment) to
+      High(TScreenLayoutTextPathAttachment) do
+      Check(AttachmentSeen[Attachment],
+        Format('Text path attachment %d was not restored for plugin input',
+          [Ord(Attachment)]));
 
     TTextRendererSkiaRuntime.Acquire(
       ExtractFilePath(ParamStr(0)) + 'sk4d.dll');

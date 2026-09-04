@@ -222,10 +222,81 @@ begin
   end;
 end;
 
+procedure CheckTextPathAttachmentToolbar;
+var
+  Document: TVectArtDocument;
+  Form: TForm;
+  History: TVectArtEditHistory;
+  Layer: TScreenLayoutTextPathLayer;
+  State: TVectArtEditorState;
+  Toolbar: TVectArtLineToolbarControl;
+  Vertices: TArray<TScreenLayoutVertex>;
+begin
+  Form := TForm.Create(nil);
+  Document := TVectArtDocument.Create;
+  History := TVectArtEditHistory.Create;
+  State := TVectArtEditorState.Create;
+  try
+    Toolbar := TVectArtLineToolbarControl.CreateForHost(Form, Form);
+    Toolbar.Document := Document;
+    Toolbar.EditHistory := History;
+    Toolbar.EditorState := State;
+    SetLength(Vertices, 2);
+    Vertices[0].Position := TPointF.Create(-50, 0);
+    Vertices[0].Kind := slvkSharp;
+    Vertices[0].OutgoingSegment := slskLine;
+    Vertices[1].Position := TPointF.Create(50, 0);
+    Vertices[1].Kind := slvkSharp;
+    Vertices[1].OutgoingSegment := slskLine;
+    Layer := TScreenLayoutTextPathLayer.Create('Text Path',
+      TRectF.Create(-50, -20, 50, 0), 'Text', 'Yu Gothic UI', 20, 0,
+      clWhite, Vertices);
+    Document.InsertLayer(1, Layer);
+    Document.SetSelectedLayers([1]);
+    Toolbar.RefreshState;
+
+    Check(not Toolbar.TextAlignmentButton.Visible,
+      'normal text alignment remained visible for text path selection');
+    Check(Toolbar.TextPathAttachmentButton.Visible,
+      'text path attachment button was hidden');
+    Check(Toolbar.TextPathAttachmentCell(sltpaBottom).Selected,
+      'bottom attachment was not reflected in the popup');
+    Toolbar.TextPathAttachmentButton.Click;
+    Check(Toolbar.TextPathAttachmentPanel.Visible,
+      'text path attachment popup did not open');
+    Toolbar.TextPathAttachmentButton.Click;
+    Check(not Toolbar.TextPathAttachmentPanel.Visible,
+      'text path attachment popup did not close');
+
+    Toolbar.ApplyTextPathAttachment(sltpaLeft);
+    Check(Layer.Attachment = sltpaLeft,
+      'text path attachment was not applied');
+    Check(Toolbar.TextPathAttachmentCell(sltpaLeft).Selected,
+      'text path attachment popup did not reflect the selected side');
+    History.Undo;
+    Check(Layer.Attachment = sltpaBottom,
+      'text path attachment undo failed');
+    History.Redo;
+    Check(Layer.Attachment = sltpaLeft,
+      'text path attachment redo failed');
+
+    Document.SetLayerLocked(1, True);
+    Toolbar.RefreshState;
+    Check(not Toolbar.TextPathAttachmentButton.Enabled,
+      'text path attachment remained enabled for a locked layer');
+  finally
+    State.Free;
+    History.Free;
+    Document.Free;
+    Form.Free;
+  end;
+end;
+
 begin
   Application.Initialize;
   try
     Run;
+    CheckTextPathAttachmentToolbar;
     Writeln('PASS');
   except
     on E: Exception do

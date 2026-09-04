@@ -363,6 +363,7 @@ begin
       TextPath.Text, TextPath.FontFamily, TextPath.FontSize,
       TextPath.WrapWidth, TextPath.FillColor,
       TextPath.EditablePathVertices);
+    TScreenLayoutTextPathLayer(Result).Attachment := TextPath.Attachment;
     TScreenLayoutTextPathLayer(Result).Alignment := TextPath.Alignment;
     TScreenLayoutTextPathLayer(Result).FontStyle := TextPath.FontStyle;
     TScreenLayoutTextPathLayer(Result).LetterSpacingRatio :=

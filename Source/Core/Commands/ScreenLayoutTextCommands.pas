@@ -126,6 +126,8 @@ begin
   Result.Bounds := Layer.Bounds;
   if Layer is TScreenLayoutTextPathLayer then
   begin
+    Result.TextPathAttachment :=
+      TScreenLayoutTextPathLayer(Layer).Attachment;
     Result.CharacterPathOffsets :=
       TScreenLayoutTextPathLayer(Layer).CharacterPathOffsets;
     Result.CharacterPositionManual :=

@@ -399,8 +399,7 @@ begin
       Canvas.Rotate(Placements[I].AngleDegrees);
       Canvas.Scale(Placements[I].Scale, Placements[I].Scale);
       Canvas.DrawSimpleText(Placements[I].TextUnit,
-        -Placements[I].AdvanceWidth / Placements[I].Scale * 0.5,
-        -Placements[I].BaselineOffset / Placements[I].Scale, Font, Paint);
+        Placements[I].TextOrigin.X, Placements[I].TextOrigin.Y, Font, Paint);
     finally
       Canvas.Restore;
     end;

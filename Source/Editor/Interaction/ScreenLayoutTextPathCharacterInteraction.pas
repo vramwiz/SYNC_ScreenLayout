@@ -220,17 +220,20 @@ begin
   begin
     Delta := TPointF.Create(PointValue.X - Placements[I].Anchor.X,
       PointValue.Y - Placements[I].Anchor.Y);
-    LocalX := Delta.X * Placements[I].Tangent.X +
-      Delta.Y * Placements[I].Tangent.Y;
-    LocalY := Delta.X * -Placements[I].Tangent.Y +
-      Delta.Y * Placements[I].Tangent.X;
-    if (LocalX >= -Placements[I].AdvanceWidth * 0.5 - HitPadding) and
-      (LocalX <= Placements[I].AdvanceWidth * 0.5 + HitPadding) and
-      (LocalY >= -Placements[I].CellHeight - HitPadding) and
-      (LocalY <= HitPadding) then
+    LocalX := Delta.X * Placements[I].TextXAxis.X +
+      Delta.Y * Placements[I].TextXAxis.Y;
+    LocalY := Delta.X * Placements[I].TextYAxis.X +
+      Delta.Y * Placements[I].TextYAxis.Y;
+    if (LocalX >= Placements[I].LocalBounds.Left - HitPadding) and
+      (LocalX <= Placements[I].LocalBounds.Right + HitPadding) and
+      (LocalY >= Placements[I].LocalBounds.Top - HitPadding) and
+      (LocalY <= Placements[I].LocalBounds.Bottom + HitPadding) then
     begin
-      CandidateDistance := Sqr(LocalX) +
-        Sqr(LocalY + Placements[I].CellHeight * 0.5);
+      CandidateDistance := Sqr(LocalX -
+        (Placements[I].LocalBounds.Left +
+         Placements[I].LocalBounds.Right) * 0.5) +
+        Sqr(LocalY - (Placements[I].LocalBounds.Top +
+         Placements[I].LocalBounds.Bottom) * 0.5);
       if CandidateDistance < NearestDistance then
       begin
         Result := Placements[I].CharacterIndex;
@@ -338,7 +341,7 @@ begin
         FOffsetStart := CharacterPathOffsets[FSelectedCharacter]
       else
         FOffsetStart := 0;
-      FAdvanceWidthStart := Placements[I].AdvanceWidth;
+      FAdvanceWidthStart := Placements[I].PathAdvance;
       FPathDistanceStart := Placements[I].PathDistance;
       FMousePathDistanceStart := PathDistance;
       FDragStartMouse := Point(X, Y);

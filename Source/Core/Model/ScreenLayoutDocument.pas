@@ -20,6 +20,8 @@ type
   TScreenLayoutTextAlignment = (sltaTopLeft, sltaTopCenter,
     sltaTopRight, sltaMiddleLeft, sltaMiddleCenter, sltaMiddleRight,
     sltaBottomLeft, sltaBottomCenter, sltaBottomRight);
+  TScreenLayoutTextPathAttachment = (sltpaBottom, sltpaTop, sltpaLeft,
+    sltpaRight);
   TScreenLayoutTextTransformMode = (slttmUniformScale, slttmFrameFit);
 
   TVectArtLayerKind = (vlkCanvas, vlkRectangle, vlkRoundedRectangle,
@@ -237,9 +239,10 @@ type
     property WrapWidth: Single read FWrapWidth write FWrapWidth;
   end;
 
-  // 文字書式と、その文字の下辺を沿わせる開いた連続線を1レイヤーに保持する。
+  // 文字書式と、指定した文字セル面を沿わせる開いた連続線を1レイヤーに保持する。
   TScreenLayoutTextPathLayer = class(TScreenLayoutTextLayer)
   private
+    FAttachment: TScreenLayoutTextPathAttachment;
     FCharacterPathOffsets: TArray<Single>;
     FCharacterPositionManual: TArray<Boolean>;
     FCharacterScales: TArray<Single>;
@@ -264,6 +267,8 @@ type
       const Value: TArray<TScreenLayoutVertex>); override;
     // このレイヤーが共通Path編集処理を利用できることを返す。
     function SupportsPathEditing: Boolean; override;
+    property Attachment: TScreenLayoutTextPathAttachment read FAttachment
+      write FAttachment;
     property CharacterPathOffsets: TArray<Single>
       read GetCharacterPathOffsets write SetCharacterPathOffsets;
     property CharacterPositionManual: TArray<Boolean>
@@ -274,6 +279,7 @@ type
 
   TScreenLayoutTextData = record
     Alignment: TScreenLayoutTextAlignment; // 枠内の上中下と左中央右を組み合わせた配置。
+    TextPathAttachment: TScreenLayoutTextPathAttachment; // Pathへ接触させる文字セルの面。
     Bounds: TRectF;          // 文字の組版実寸または変形後の表示範囲。
     CharacterPathOffsets: TArray<Single>; // 文字パスの標準位置からPath方向へずらす距離。
     CharacterPositionManual: TArray<Boolean>; // 手動位置を自動衝突補正から除外する文字単位フラグ。
@@ -1093,6 +1099,7 @@ constructor TScreenLayoutTextPathLayer.Create(const AName: string;
 begin
   inherited CreateWithKind(vlkTextPath, AName, ABounds, AText, AFontFamily,
     AFontSize, AWrapWidth, ATextColor);
+  FAttachment := sltpaBottom;
   LetterSpacingRatio := 0;
   IndividualLetterSpacingRatios := nil;
   CharacterPathOffsets := nil;
@@ -2704,6 +2711,8 @@ begin
   TextLayer.Text := Data.Text;
   if TextLayer is TScreenLayoutTextPathLayer then
   begin
+    TScreenLayoutTextPathLayer(TextLayer).Attachment :=
+      Data.TextPathAttachment;
     TScreenLayoutTextPathLayer(TextLayer).CharacterPathOffsets :=
       Data.CharacterPathOffsets;
     TScreenLayoutTextPathLayer(TextLayer).CharacterPositionManual :=

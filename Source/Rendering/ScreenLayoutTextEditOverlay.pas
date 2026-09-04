@@ -32,7 +32,7 @@ implementation
 
 uses
   System.Math, System.Skia, ScreenLayoutGeometry, ScreenLayoutTextEditing,
-  ScreenLayoutTextGeometry;
+  ScreenLayoutOverlayPrimitives, ScreenLayoutTextGeometry;
 
 type
   TScreenLayoutTextSelectionRun = record
@@ -185,11 +185,7 @@ begin
   if State.DragActive then
   begin
     GuideRect := InputGuideRect(State);
-    Target.Pen.Color := clBlack;
-    Target.Pen.Style := psDot;
-    Target.Brush.Style := bsClear;
-    Target.FrameRect(GuideRect);
-    Target.Pen.Style := psSolid;
+    DrawOverlayFrameRect(Target, GuideRect, clBlack, psDot);
   end;
 end;
 
@@ -220,11 +216,7 @@ begin
   if State.DragActive then
   begin
     GuideRect := InputGuideRect(State);
-    Target.Pen.Color := clBlack;
-    Target.Pen.Style := psDot;
-    Target.Brush.Style := bsClear;
-    Target.FrameRect(GuideRect);
-    Target.Pen.Style := psSolid;
+    DrawOverlayFrameRect(Target, GuideRect, clBlack, psDot);
   end;
 end;
 

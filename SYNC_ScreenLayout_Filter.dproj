@@ -78,7 +78,6 @@
         <DCCReference Include="Lib\ShortcutAction\ShortcutAction.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas"/>
-        <DCCReference Include="Lib\InputMethod\WindowsImeController.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutMainForm.pas">
             <Form>MainForm</Form>
         </DCCReference>
@@ -105,6 +104,7 @@
         <DCCReference Include="Source\Rendering\ScreenLayoutRenderer.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutCanvasGuides.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutCanvasPreview.pas"/>
+        <DCCReference Include="Source\Rendering\ScreenLayoutOverlayPrimitives.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutTextEditOverlay.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutShapePath.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutContext.pas"/>
@@ -172,6 +172,7 @@
             <DesignClass>TFrame</DesignClass>
         </DCCReference>
         <DCCReference Include="Source\ToolPalette\ScreenLayoutToolPalette.pas"/>
+        <DCCReference Include="Lib\InputMethod\WindowsImeController.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
