@@ -23,7 +23,7 @@ type
   TVectArtLayerKind = (vlkCanvas, vlkRectangle, vlkRoundedRectangle,
     vlkPath, vlkImage, vlkShape, vlkEllipse, vlkArc, vlkRectangleLine,
     vlkRoundedRectangleLine, vlkEllipseLine, vlkEllipseArcShape, vlkText,
-    vlkGroup);
+    vlkTextPath, vlkGroup);
   TVectArtImageSourceKind = (visImage, visLogo);
   TVectArtImagePoints = array[0..3] of TPointF;
   // WebArt Designerの線種コンボとMIF vector stroke style 0..8を同順で保持する。
@@ -72,6 +72,13 @@ type
     function ExtractFilter(Index: Integer): TScreenLayoutFilter;
     procedure InsertFilter(Index: Integer; Filter: TScreenLayoutFilter);
     procedure MoveFilter(FromIndex, ToIndex: Integer);
+    // Pathと文字パスが共有する頂点編集対象を返す。非対応レイヤーではnilを返す。
+    function EditablePathVertices: TArray<TScreenLayoutVertex>; virtual;
+    // Path編集で更新された頂点列を受け取る。非対応レイヤーでは何もしない。
+    procedure AssignEditablePathVertices(
+      const Value: TArray<TScreenLayoutVertex>); virtual;
+    // 既存Path編集処理を利用できるレイヤーならTrueを返す。
+    function SupportsPathEditing: Boolean; virtual;
     property FilterCount: Integer read GetFilterCount;
     property Filters[Index: Integer]: TScreenLayoutFilter read GetFilter;
     property Kind: TVectArtLayerKind read FKind;
@@ -200,7 +207,12 @@ type
       const Value: TArray<Single>);
     procedure SetLetterSpacingRatio(Value: Single);
     procedure SetLineSpacingRatio(Value: Single);
-    procedure SetText(const Value: string);
+  protected
+    procedure SetText(const Value: string); virtual;
+    constructor CreateWithKind(AKind: TVectArtLayerKind;
+      const AName: string; const ABounds: TRectF;
+      const AText, AFontFamily: string; AFontSize, AWrapWidth: Single;
+      ATextColor: TColor);
   public
     constructor Create(const AName: string; const ABounds: TRectF;
       const AText, AFontFamily: string; AFontSize, AWrapWidth: Single;
@@ -221,6 +233,26 @@ type
     property TransformMode: TScreenLayoutTextTransformMode
       read FTransformMode write FTransformMode;
     property WrapWidth: Single read FWrapWidth write FWrapWidth;
+  end;
+
+  // 文字書式と、その文字の下辺を沿わせる開いた連続線を1レイヤーに保持する。
+  TScreenLayoutTextPathLayer = class(TScreenLayoutTextLayer)
+  private
+    FVertices: TArray<TScreenLayoutVertex>;
+  protected
+    procedure SetText(const Value: string); override;
+  public
+    // 文字書式と表示枠に加え、文字の基準線となる開いたPathを複製して保持する。
+    constructor Create(const AName: string; const ABounds: TRectF;
+      const AText, AFontFamily: string; AFontSize, AWrapWidth: Single;
+      ATextColor: TColor; const AVertices: TArray<TScreenLayoutVertex>);
+    // 内包Pathの独立した頂点配列を共通Path編集処理へ返す。
+    function EditablePathVertices: TArray<TScreenLayoutVertex>; override;
+    // 共通Path編集処理から受け取った頂点列を内包Pathへ複製する。
+    procedure AssignEditablePathVertices(
+      const Value: TArray<TScreenLayoutVertex>); override;
+    // このレイヤーが共通Path編集処理を利用できることを返す。
+    function SupportsPathEditing: Boolean; override;
   end;
 
   TScreenLayoutTextData = record
@@ -390,6 +422,10 @@ type
   public
     constructor Create(const AName: string;
       const AVertices: TArray<TScreenLayoutVertex>; AClosed: Boolean);
+    function EditablePathVertices: TArray<TScreenLayoutVertex>; override;
+    procedure AssignEditablePathVertices(
+      const Value: TArray<TScreenLayoutVertex>); override;
+    function SupportsPathEditing: Boolean; override;
     property Closed: Boolean read FClosed write FClosed;
     property LineCap: TVectArtLineCap read FLineCap write FLineCap;
     property StrokeColor: TColor read FStrokeColor write FStrokeColor;
@@ -626,6 +662,8 @@ const
 function VectArtStrokeDashIntervals(Style: TVectArtMifStrokeStyle;
   Width: Single): TArray<Single>;
 function VectArtStrokeUsesRoundCaps(Style: TVectArtMifStrokeStyle): Boolean;
+// 文字パスへ渡す文字列を改行を含まない単一行へ正規化する。
+function NormalizeScreenLayoutTextPathText(const Value: string): string;
 // 4隅へ同じ半径を設定した角丸値を返す。
 function UniformScreenLayoutCornerRadii(Radius: Single): TScreenLayoutCornerRadii;
 // 各辺で隣接半径が重ならない比率へ角丸値を縮小する。
@@ -892,6 +930,21 @@ begin
   FFilters.Move(FromIndex, EnsureRange(ToIndex, 0, FFilters.Count - 1));
 end;
 
+function TVectArtLayer.EditablePathVertices: TArray<TScreenLayoutVertex>;
+begin
+  Result := nil;
+end;
+
+procedure TVectArtLayer.AssignEditablePathVertices(
+  const Value: TArray<TScreenLayoutVertex>);
+begin
+end;
+
+function TVectArtLayer.SupportsPathEditing: Boolean;
+begin
+  Result := False;
+end;
+
 { TVectArtCanvasLayer }
 
 constructor TVectArtCanvasLayer.Create(AWidth, AHeight: Integer;
@@ -948,7 +1001,16 @@ constructor TScreenLayoutTextLayer.Create(const AName: string;
   const ABounds: TRectF; const AText, AFontFamily: string;
   AFontSize, AWrapWidth: Single; ATextColor: TColor);
 begin
-  inherited CreateWithKind(vlkText, AName, ABounds, ATextColor);
+  CreateWithKind(vlkText, AName, ABounds, AText, AFontFamily, AFontSize,
+    AWrapWidth, ATextColor);
+end;
+
+constructor TScreenLayoutTextLayer.CreateWithKind(AKind: TVectArtLayerKind;
+  const AName: string; const ABounds: TRectF;
+  const AText, AFontFamily: string; AFontSize, AWrapWidth: Single;
+  ATextColor: TColor);
+begin
+  inherited CreateWithKind(AKind, AName, ABounds, ATextColor);
   FText := AText;
   FFontFamily := AFontFamily;
   FFontSize := Max(AFontSize, 1.0);
@@ -993,6 +1055,51 @@ begin
   if FText <> Value then
     SetLength(FIndividualLetterSpacingRatios, 0);
   FText := Value;
+end;
+
+function NormalizeScreenLayoutTextPathText(const Value: string): string;
+begin
+  Result := StringReplace(Value, #13#10, ' ', [rfReplaceAll]);
+  Result := StringReplace(Result, #13, ' ', [rfReplaceAll]);
+  Result := StringReplace(Result, #10, ' ', [rfReplaceAll]);
+end;
+
+{ TScreenLayoutTextPathLayer }
+
+constructor TScreenLayoutTextPathLayer.Create(const AName: string;
+  const ABounds: TRectF; const AText, AFontFamily: string;
+  AFontSize, AWrapWidth: Single; ATextColor: TColor;
+  const AVertices: TArray<TScreenLayoutVertex>);
+begin
+  inherited CreateWithKind(vlkTextPath, AName, ABounds, AText, AFontFamily,
+    AFontSize, AWrapWidth, ATextColor);
+  LetterSpacingRatio := 0;
+  IndividualLetterSpacingRatios := nil;
+  WrapWidth := 0;
+  SetText(AText);
+  AssignEditablePathVertices(AVertices);
+end;
+
+procedure TScreenLayoutTextPathLayer.SetText(const Value: string);
+begin
+  inherited SetText(NormalizeScreenLayoutTextPathText(Value));
+end;
+
+function TScreenLayoutTextPathLayer.EditablePathVertices:
+  TArray<TScreenLayoutVertex>;
+begin
+  Result := Copy(FVertices);
+end;
+
+procedure TScreenLayoutTextPathLayer.AssignEditablePathVertices(
+  const Value: TArray<TScreenLayoutVertex>);
+begin
+  FVertices := Copy(Value);
+end;
+
+function TScreenLayoutTextPathLayer.SupportsPathEditing: Boolean;
+begin
+  Result := True;
 end;
 
 { TScreenLayoutRectangleLineLayer }
@@ -1081,6 +1188,23 @@ procedure TVectArtPathLayer.SetVertices(
   const Value: TArray<TScreenLayoutVertex>);
 begin
   FVertices := Copy(Value);
+end;
+
+function TVectArtPathLayer.EditablePathVertices:
+  TArray<TScreenLayoutVertex>;
+begin
+  Result := Vertices;
+end;
+
+procedure TVectArtPathLayer.AssignEditablePathVertices(
+  const Value: TArray<TScreenLayoutVertex>);
+begin
+  Vertices := Value;
+end;
+
+function TVectArtPathLayer.SupportsPathEditing: Boolean;
+begin
+  Result := True;
 end;
 
 { TScreenLayoutShapeLayer }
@@ -2505,9 +2629,12 @@ begin
   TextLayer.FontSize := Max(Data.FontSize, 1.0);
   TextLayer.FontStyle := Data.FontStyle;
   TextLayer.Text := Data.Text;
-  TextLayer.LetterSpacingRatio := EnsureRange(Data.LetterSpacingRatio,
-    SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
-    SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX);
+  if TextLayer is TScreenLayoutTextPathLayer then
+    TextLayer.LetterSpacingRatio := 0
+  else
+    TextLayer.LetterSpacingRatio := EnsureRange(Data.LetterSpacingRatio,
+      SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
+      SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX);
   TextLayer.LineSpacingRatio := EnsureRange(Data.LineSpacingRatio,
     SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN,
     SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX);
@@ -2515,11 +2642,17 @@ begin
   TextLayer.Name := Data.Name;
   TextLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
   TextLayer.RotationDegrees := Data.RotationDegrees;
-  TextLayer.IndividualLetterSpacingRatios :=
-    Data.IndividualLetterSpacingRatios;
+  if TextLayer is TScreenLayoutTextPathLayer then
+    TextLayer.IndividualLetterSpacingRatios := nil
+  else
+    TextLayer.IndividualLetterSpacingRatios :=
+      Data.IndividualLetterSpacingRatios;
   TextLayer.TransformMode := Data.TransformMode;
   TextLayer.Visible := Data.Visible;
-  TextLayer.WrapWidth := Max(Data.WrapWidth, 1.0);
+  if TextLayer is TScreenLayoutTextPathLayer then
+    TextLayer.WrapWidth := 0
+  else
+    TextLayer.WrapWidth := Max(Data.WrapWidth, 1.0);
   Changed;
 end;
 
@@ -2527,14 +2660,14 @@ procedure TVectArtDocument.SetPathVertices(Index: Integer;
   const Vertices: TArray<TScreenLayoutVertex>);
 var
   I: Integer;
+  Layer: TVectArtLayer;
   OldVertices: TArray<TScreenLayoutVertex>;
-  PathLayer: TVectArtPathLayer;
 begin
   if (Index <= 0) or (Index >= FLayers.Count) or
-    not (FLayers[Index] is TVectArtPathLayer) then
+    not FLayers[Index].SupportsPathEditing then
     Exit;
-  PathLayer := TVectArtPathLayer(FLayers[Index]);
-  OldVertices := PathLayer.Vertices;
+  Layer := FLayers[Index];
+  OldVertices := Layer.EditablePathVertices;
   if Length(OldVertices) = Length(Vertices) then
   begin
     if Length(Vertices) = 0 then
@@ -2556,7 +2689,7 @@ begin
     if I > High(Vertices) then
       Exit;
   end;
-  PathLayer.Vertices := Vertices;
+  Layer.AssignEditablePathVertices(Vertices);
   Changed;
 end;
 

@@ -133,6 +133,8 @@ begin
     Result := FEditorState.CurrentTool in [vetEllipseLine, vetEllipse]
   else if Tool = vetArcShape then
     Result := FEditorState.CurrentTool in [vetArc, vetArcShape]
+  else if Tool = vetText then
+    Result := FEditorState.CurrentTool in [vetText, vetTextPath]
   else
     Result := FEditorState.CurrentTool = Tool;
 end;
@@ -253,6 +255,20 @@ begin
   else if Tool = vetPath then
     DrawPathKindIcon(Canvas, CenterX, CenterY, False,
       VertexKind)
+  else if Tool = vetTextPath then
+  begin
+    Canvas.Font.Name := 'Segoe UI';
+    Canvas.Font.Height := -18;
+    Canvas.Font.Style := [fsBold];
+    Canvas.Brush.Style := bsClear;
+    Canvas.TextOut(CenterX - Canvas.TextWidth('T') div 2,
+      CenterY - 11, 'T');
+    Canvas.Font.Style := [];
+    Canvas.MoveTo(CenterX - 12, CenterY + 8);
+    Canvas.LineTo(CenterX - 4, CenterY + 5);
+    Canvas.LineTo(CenterX + 4, CenterY + 7);
+    Canvas.LineTo(CenterX + 12, CenterY + 3);
+  end
   else if Tool = vetText then
   begin
     Canvas.Font.Name := 'Segoe UI';

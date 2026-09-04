@@ -35,6 +35,7 @@ uses
   ScreenLayoutRenderer in 'Source\Rendering\ScreenLayoutRenderer.pas',
   ScreenLayoutCanvasGuides in 'Source\Rendering\ScreenLayoutCanvasGuides.pas',
   ScreenLayoutCanvasPreview in 'Source\Rendering\ScreenLayoutCanvasPreview.pas',
+  ScreenLayoutTextEditOverlay in 'Source\Rendering\ScreenLayoutTextEditOverlay.pas',
   ScreenLayoutShapePath in 'Source\Rendering\ScreenLayoutShapePath.pas',
   ScreenLayoutContext in 'Source\Core\Model\ScreenLayoutContext.pas',
   ScreenLayoutEditorState in 'Source\Core\Model\ScreenLayoutEditorState.pas',
@@ -81,7 +82,8 @@ uses
   ScreenLayoutFilterFrame in 'Source\ObjectProperties\ScreenLayoutFilterFrame.pas',
   ScreenLayoutObjectPropertiesFrame in 'Source\ObjectProperties\ScreenLayoutObjectPropertiesFrame.pas',
   ScreenLayoutToolPaletteFrame in 'Source\ToolPalette\ScreenLayoutToolPaletteFrame.pas',
-  ScreenLayoutToolPalette in 'Source\ToolPalette\ScreenLayoutToolPalette.pas';
+  ScreenLayoutToolPalette in 'Source\ToolPalette\ScreenLayoutToolPalette.pas',
+  WindowsImeController in 'Lib\InputMethod\WindowsImeController.pas';
 
 begin
   Application.Initialize;

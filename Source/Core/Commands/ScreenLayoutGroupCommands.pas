@@ -267,6 +267,7 @@ var
   RoundedLine: TScreenLayoutRoundedRectangleLineLayer;
   Shape: TScreenLayoutShapeLayer;
   TextLayer: TScreenLayoutTextLayer;
+  TextPath: TScreenLayoutTextPathLayer;
 begin
   if Source is TScreenLayoutGroupLayer then
   begin
@@ -354,6 +355,26 @@ begin
       Rounded.Bounds, Rounded.FillColor, Rounded.CornerRadii);
     TScreenLayoutRoundedRectangleLayer(Result).RotationDegrees :=
       Rounded.RotationDegrees;
+  end
+  else if Source is TScreenLayoutTextPathLayer then
+  begin
+    TextPath := TScreenLayoutTextPathLayer(Source);
+    Result := TScreenLayoutTextPathLayer.Create(NewName, TextPath.Bounds,
+      TextPath.Text, TextPath.FontFamily, TextPath.FontSize,
+      TextPath.WrapWidth, TextPath.FillColor,
+      TextPath.EditablePathVertices);
+    TScreenLayoutTextPathLayer(Result).Alignment := TextPath.Alignment;
+    TScreenLayoutTextPathLayer(Result).FontStyle := TextPath.FontStyle;
+    TScreenLayoutTextPathLayer(Result).LetterSpacingRatio :=
+      TextPath.LetterSpacingRatio;
+    TScreenLayoutTextPathLayer(Result).IndividualLetterSpacingRatios :=
+      TextPath.IndividualLetterSpacingRatios;
+    TScreenLayoutTextPathLayer(Result).LineSpacingRatio :=
+      TextPath.LineSpacingRatio;
+    TScreenLayoutTextPathLayer(Result).RotationDegrees :=
+      TextPath.RotationDegrees;
+    TScreenLayoutTextPathLayer(Result).TransformMode :=
+      TextPath.TransformMode;
   end
   else if Source is TScreenLayoutTextLayer then
   begin

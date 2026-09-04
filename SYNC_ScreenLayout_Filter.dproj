@@ -37,7 +37,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
-        <DCC_UnitSearchPath>Lib\VerticalScrollBar;Lib\ColorPicker;Source\ObjectProperties;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>Lib\VerticalScrollBar;Lib\ColorPicker;Lib\InputMethod;Source\ObjectProperties;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <DCC_DcuOutput>$(MSBuildProjectDirectory)\$(Platform)\$(ProjectName)\$(Config)\DCU</DCC_DcuOutput>
         <GenDll>true</GenDll>
         <SanitizedProjectName>SYNC_ScreenLayout_Filter</SanitizedProjectName>
@@ -78,6 +78,7 @@
         <DCCReference Include="Lib\ShortcutAction\ShortcutAction.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas"/>
+        <DCCReference Include="Lib\InputMethod\WindowsImeController.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutMainForm.pas">
             <Form>MainForm</Form>
         </DCCReference>
@@ -103,6 +104,7 @@
         <DCCReference Include="Source\Rendering\ScreenLayoutRenderer.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutCanvasGuides.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutCanvasPreview.pas"/>
+        <DCCReference Include="Source\Rendering\ScreenLayoutTextEditOverlay.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutShapePath.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutContext.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutEditorState.pas"/>

@@ -86,6 +86,43 @@ begin
   end;
 end;
 
+procedure AddPathVertices(const Vertices: TArray<TScreenLayoutVertex>;
+  LayerJson: TJSONObject);
+var
+  I: Integer;
+  VertexJson: TJSONObject;
+  VerticesJson: TJSONArray;
+begin
+  VerticesJson := TJSONArray.Create;
+  for I := 0 to High(Vertices) do
+  begin
+    VertexJson := TJSONObject.Create;
+    with Vertices[I] do
+    begin
+      VertexJson.AddPair('x', TJSONNumber.Create(Position.X));
+      VertexJson.AddPair('y', TJSONNumber.Create(Position.Y));
+      VertexJson.AddPair('incomingX',
+        TJSONNumber.Create(IncomingControl.X));
+      VertexJson.AddPair('incomingY',
+        TJSONNumber.Create(IncomingControl.Y));
+      VertexJson.AddPair('outgoingX',
+        TJSONNumber.Create(OutgoingControl.X));
+      VertexJson.AddPair('outgoingY',
+        TJSONNumber.Create(OutgoingControl.Y));
+      if Kind = slvkBezier then
+        VertexJson.AddPair('kind', 'bezier')
+      else
+        VertexJson.AddPair('kind', 'sharp');
+      if OutgoingSegment = slskCubicBezier then
+        VertexJson.AddPair('outgoingSegment', 'cubicBezier')
+      else
+        VertexJson.AddPair('outgoingSegment', 'line');
+    end;
+    VerticesJson.AddElement(VertexJson);
+  end;
+  LayerJson.AddPair('vertices', VerticesJson);
+end;
+
 function SerializeVectArtDocument(Document: TVectArtDocument): string;
 var
   Arc: TScreenLayoutArcLayer;
@@ -117,7 +154,6 @@ var
   LayersJson: TJSONArray;
   Path: TVectArtPathLayer;
   PathJson: TJSONObject;
-  PathVertices: TArray<TScreenLayoutVertex>;
   PointIndex: Integer;
   PointJson: TJSONObject;
   PointsJson: TJSONArray;
@@ -219,7 +255,10 @@ begin
       begin
         TextLayer := TScreenLayoutTextLayer(Layer);
         TextJson := TJSONObject.Create;
-        TextJson.AddPair('type', 'text');
+        if Layer is TScreenLayoutTextPathLayer then
+          TextJson.AddPair('type', 'textPath')
+        else
+          TextJson.AddPair('type', 'text');
         TextJson.AddPair('name', TextLayer.Name);
         TextJson.AddPair('text', TextLayer.Text);
         TextJson.AddPair('fontFamily', TextLayer.FontFamily);
@@ -262,6 +301,10 @@ begin
         TextJson.AddPair('visible', TJSONBool.Create(TextLayer.Visible));
         TextJson.AddPair('locked', TJSONBool.Create(TextLayer.Locked));
         AddLayerFilters(TextLayer, TextJson);
+        if Layer is TScreenLayoutTextPathLayer then
+          AddPathVertices(
+            TScreenLayoutTextPathLayer(Layer).EditablePathVertices,
+            TextJson);
         LayersJson.AddElement(TextJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;
@@ -317,35 +360,7 @@ begin
         PathJson.AddPair('visible', TJSONBool.Create(Path.Visible));
         PathJson.AddPair('locked', TJSONBool.Create(Path.Locked));
         AddLayerFilters(Path, PathJson);
-        VerticesJson := TJSONArray.Create;
-        PathVertices := Path.Vertices;
-        for VertexIndex := 0 to High(PathVertices) do
-        begin
-          VertexJson := TJSONObject.Create;
-          with PathVertices[VertexIndex] do
-          begin
-            VertexJson.AddPair('x', TJSONNumber.Create(Position.X));
-            VertexJson.AddPair('y', TJSONNumber.Create(Position.Y));
-            VertexJson.AddPair('incomingX',
-              TJSONNumber.Create(IncomingControl.X));
-            VertexJson.AddPair('incomingY',
-              TJSONNumber.Create(IncomingControl.Y));
-            VertexJson.AddPair('outgoingX',
-              TJSONNumber.Create(OutgoingControl.X));
-            VertexJson.AddPair('outgoingY',
-              TJSONNumber.Create(OutgoingControl.Y));
-            if Kind = slvkBezier then
-              VertexJson.AddPair('kind', 'bezier')
-            else
-              VertexJson.AddPair('kind', 'sharp');
-            if OutgoingSegment = slskCubicBezier then
-              VertexJson.AddPair('outgoingSegment', 'cubicBezier')
-            else
-              VertexJson.AddPair('outgoingSegment', 'line');
-          end;
-          VerticesJson.AddElement(VertexJson);
-        end;
-        PathJson.AddPair('vertices', VerticesJson);
+        AddPathVertices(Path.Vertices, PathJson);
         LayersJson.AddElement(PathJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;

@@ -5,7 +5,8 @@ unit ScreenLayoutRenderer;
 interface
 
 uses
-  System.SysUtils, System.Types, ScreenLayoutDocument;
+  System.SysUtils, System.Types, System.UITypes, Vcl.Graphics,
+  ScreenLayoutDocument;
 
 type
   TVectArtRgbaPixel = packed record
@@ -39,7 +40,9 @@ type
 // MinimumStrokeWidthは編集補助用の論理座標幅で、0ならDocumentの線幅を変更しない。
 procedure RenderVectArtDocument(Document: TVectArtDocument;
   Target: TVectArtRenderBuffer; Width, Height: Integer;
-  MinimumStrokeWidth: Single = 0.0);
+  MinimumStrokeWidth: Single = 0.0;
+  InputTextLayer: TScreenLayoutTextLayer = nil;
+  InputTextOutlineColor: TColor = clNone);
 // 単体レイヤーまたはグループ子孫を、通常描画と同じ処理でサムネイルへ収める。
 procedure RenderVectArtLayerThumbnail(Layer: TVectArtLayer;
   Target: TVectArtRenderBuffer; Width, Height: Integer);
@@ -50,11 +53,11 @@ procedure CompositeVectArtRgba(const Source: TVectArtRenderBuffer;
 implementation
 
 uses
-  System.Generics.Collections, System.Math, System.Skia, System.UITypes,
-  TextRendererSkiaRuntime, Vcl.Graphics, Winapi.Windows,
+  System.Generics.Collections, System.Math, System.Skia,
+  TextRendererSkiaRuntime, Winapi.Windows,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
-  ScreenLayoutFilters, ScreenLayoutLayerGeometry, ScreenLayoutShapePath,
-  ScreenLayoutTextGeometry;
+  ScreenLayoutFilters, ScreenLayoutLayerGeometry, ScreenLayoutPathOperations,
+  ScreenLayoutShapePath, ScreenLayoutTextGeometry;
 
 const
   MAX_RENDER_DIMENSION = 16384;
@@ -379,15 +382,71 @@ begin
   end;
 end;
 
+procedure DrawScreenLayoutTextOnPath(const Canvas: ISkCanvas;
+  Layer: TScreenLayoutTextPathLayer; const Font: ISkFont;
+  const Paint: ISkPaint);
+var
+  AngleDegrees: Single;
+  CursorDistance: Single;
+  FontMetrics: TSkFontMetrics;
+  I: Integer;
+  PathLength: Single;
+  PathPoint: TPointF;
+  PathPoints: TArray<TPointF>;
+  Tangent: TPointF;
+  UnitLength: Integer;
+  UnitText: string;
+  UnitWidth: Single;
+begin
+  PathPoints := FlattenScreenLayoutPathVertices(
+    Layer.EditablePathVertices, 32);
+  PathLength := ScreenLayoutPolylineLength(PathPoints);
+  if PathLength <= 0 then
+    Exit;
+  Font.GetMetrics(FontMetrics);
+  CursorDistance := 0;
+  I := 1;
+  while I <= Length(Layer.Text) do
+  begin
+    if CharInSet(Layer.Text[I], [#10, #13]) then
+      Break;
+    UnitLength := ScreenLayoutTextUnitLengthAt(Layer.Text, I);
+    UnitText := Copy(Layer.Text, I, UnitLength);
+    UnitWidth := Font.MeasureText(UnitText);
+    if (UnitWidth <= 0) or
+      (CursorDistance + UnitWidth > PathLength) then
+      Break;
+    if not ScreenLayoutPolylinePointAtDistance(PathPoints,
+      CursorDistance + UnitWidth * 0.5, PathPoint, Tangent) then
+      Break;
+    AngleDegrees := RadToDeg(ArcTan2(Tangent.Y, Tangent.X));
+    Canvas.Save;
+    try
+      Canvas.Translate(PathPoint.X, PathPoint.Y);
+      Canvas.Rotate(AngleDegrees);
+      Canvas.DrawSimpleText(UnitText, -UnitWidth * 0.5,
+        -FontMetrics.Descent, Font, Paint);
+    finally
+      Canvas.Restore;
+    end;
+    CursorDistance := CursorDistance + UnitWidth;
+    Inc(I, UnitLength);
+  end;
+end;
+
 procedure RenderVectArtLayers(const RenderLayers: TArray<TVectArtLayer>;
   Target: TVectArtRenderBuffer; Width, Height: Integer;
   const LogicalBounds: TRectF; MinimumStrokeWidth,
-  OpacityMultiplier: Single); forward;
+  OpacityMultiplier: Single;
+  InputTextLayer: TScreenLayoutTextLayer;
+  InputTextOutlineColor: TColor); forward;
 
 procedure RenderVectArtLayerTree(Layer: TVectArtLayer;
   Target: TVectArtRenderBuffer; Width, Height: Integer;
   const LogicalBounds: TRectF; MinimumStrokeWidth,
-  OpacityMultiplier: Single); forward;
+  OpacityMultiplier: Single;
+  InputTextLayer: TScreenLayoutTextLayer;
+  InputTextOutlineColor: TColor); forward;
 
 procedure ApplyScreenLayoutLayerFilters(Layer: TVectArtLayer;
   Target: TVectArtRenderBuffer; ScaleX, ScaleY: Single);
@@ -461,7 +520,9 @@ end;
 
 procedure RenderVectArtDocument(Document: TVectArtDocument;
   Target: TVectArtRenderBuffer; Width, Height: Integer;
-  MinimumStrokeWidth: Single);
+  MinimumStrokeWidth: Single;
+  InputTextLayer: TScreenLayoutTextLayer;
+  InputTextOutlineColor: TColor);
 var
   CanvasLayer: TVectArtCanvasLayer;
   FlatLayers: TList<TVectArtLayer>;
@@ -496,7 +557,8 @@ begin
     if not HasVisibleGroup then
     begin
       RenderVectArtLayers(FlatLayers.ToArray, Target, Width, Height,
-        LogicalBounds, MinimumStrokeWidth, 1.0);
+        LogicalBounds, MinimumStrokeWidth, 1.0, InputTextLayer,
+        InputTextOutlineColor);
       Exit;
     end;
   finally
@@ -510,7 +572,8 @@ begin
       if Document[I].Visible then
       begin
         RenderVectArtLayerTree(Document[I], LayerBuffer, Width, Height,
-          LogicalBounds, MinimumStrokeWidth, 1.0);
+          LogicalBounds, MinimumStrokeWidth, 1.0, InputTextLayer,
+          InputTextOutlineColor);
         CompositeVectArtRgba(LayerBuffer, Target.Data, Width, Height);
       end;
   finally
@@ -576,13 +639,15 @@ begin
   else
     OpacityMultiplier := 0.35;
   RenderVectArtLayerTree(Layer, Target, Width, Height, LogicalBounds,
-    THUMBNAIL_MINIMUM_STROKE_WIDTH / Scale, OpacityMultiplier);
+    THUMBNAIL_MINIMUM_STROKE_WIDTH / Scale, OpacityMultiplier, nil, clNone);
 end;
 
 procedure RenderVectArtLayers(const RenderLayers: TArray<TVectArtLayer>;
   Target: TVectArtRenderBuffer; Width, Height: Integer;
   const LogicalBounds: TRectF; MinimumStrokeWidth,
-  OpacityMultiplier: Single);
+  OpacityMultiplier: Single;
+  InputTextLayer: TScreenLayoutTextLayer;
+  InputTextOutlineColor: TColor);
 var
   ArcEndPoint: TPointF;
   ArcEndTangent: TPointF;
@@ -628,7 +693,10 @@ var
   ShapeLayer: TScreenLayoutShapeLayer;
   TextLayer: TScreenLayoutTextLayer;
   TextDecorationPaint: ISkPaint;
+  TextOutlinePaint: ISkPaint;
   TextLayout: TScreenLayoutTextLayout;
+  TextRenderScaleX: Single;
+  TextRenderScaleY: Single;
   TextWidth: Single;
   TextX: Single;
   LetterSpacing: Single;
@@ -664,6 +732,8 @@ begin
   StrokePaint.AntiAlias := True;
   TextDecorationPaint := TSkPaint.Create(TSkPaintStyle.Stroke);
   TextDecorationPaint.AntiAlias := True;
+  TextOutlinePaint := TSkPaint.Create(TSkPaintStyle.Stroke);
+  TextOutlinePaint.AntiAlias := True;
   ImagePaint := TSkPaint.Create;
   ImagePaint.AntiAlias := True;
   Canvas.Scale(ScaleX, ScaleY);
@@ -724,16 +794,36 @@ begin
       end;
       Continue;
     end;
+    if (Layer is TScreenLayoutTextPathLayer) and
+      (Layer <> InputTextLayer) then
+    begin
+      TextLayer := TScreenLayoutTextLayer(Layer);
+      if TextLayer.Text = '' then
+        Continue;
+      Font := CreateScreenLayoutTextFont(TextLayer.FontFamily,
+        TextLayer.FontSize, TextLayer.FontStyle);
+      Paint.Color := VclColorToAlphaColor(TextLayer.FillColor,
+        TextLayer.Opacity * OpacityMultiplier);
+      Paint.Style := TSkPaintStyle.Fill;
+      DrawScreenLayoutTextOnPath(Canvas,
+        TScreenLayoutTextPathLayer(Layer), Font, Paint);
+      Continue;
+    end;
     if Layer is TScreenLayoutTextLayer then
     begin
       TextLayer := TScreenLayoutTextLayer(Layer);
       if TextLayer.Text = '' then
         Continue;
-      IndividualLetterSpacingRatios :=
-        TextLayer.IndividualLetterSpacingRatios;
+      if TextLayer is TScreenLayoutTextPathLayer then
+        IndividualLetterSpacingRatios := nil
+      else
+        IndividualLetterSpacingRatios :=
+          TextLayer.IndividualLetterSpacingRatios;
       TextLayout := BuildScreenLayoutTextLayout(TextLayer.Text,
         TextLayer.FontFamily, TextLayer.FontSize, TextLayer.WrapWidth,
-        TextLayer.FontStyle, TextLayer.LetterSpacingRatio,
+        TextLayer.FontStyle,
+        IfThen(TextLayer is TScreenLayoutTextPathLayer, 0.0,
+          TextLayer.LetterSpacingRatio),
         TextLayer.LineSpacingRatio, IndividualLetterSpacingRatios);
       if (TextLayout.Width <= 0) or (TextLayout.Height <= 0) then
         Continue;
@@ -744,15 +834,33 @@ begin
       Paint.Style := TSkPaintStyle.Fill;
       TextDecorationPaint.Color := Paint.Color;
       TextDecorationPaint.StrokeWidth := Max(TextLayer.FontSize / 16, 1.0);
-      LetterSpacing := TextLayer.FontSize * TextLayer.LetterSpacingRatio;
+      if TextLayer is TScreenLayoutTextPathLayer then
+      begin
+        LetterSpacing := 0;
+        TextRenderScaleX := 1.0;
+        TextRenderScaleY := 1.0;
+      end
+      else
+      begin
+        LetterSpacing := TextLayer.FontSize * TextLayer.LetterSpacingRatio;
+        TextRenderScaleX := TextLayer.Bounds.Width / TextLayout.Width;
+        TextRenderScaleY := TextLayer.Bounds.Height / TextLayout.Height;
+      end;
+      if (Layer = InputTextLayer) and (InputTextOutlineColor <> clNone) then
+      begin
+        TextOutlinePaint.Color := VclColorToAlphaColor(
+          InputTextOutlineColor, TextLayer.Opacity * OpacityMultiplier);
+        TextOutlinePaint.StrokeWidth := 1.5 / Max(Min(
+          Abs(ScaleX * TextRenderScaleX),
+          Abs(ScaleY * TextRenderScaleY)), 0.01);
+      end;
       Canvas.Save;
       try
         Canvas.Rotate(TextLayer.RotationDegrees,
           (TextLayer.Bounds.Left + TextLayer.Bounds.Right) * 0.5,
           (TextLayer.Bounds.Top + TextLayer.Bounds.Bottom) * 0.5);
         Canvas.Translate(TextLayer.Bounds.Left, TextLayer.Bounds.Top);
-        Canvas.Scale(TextLayer.Bounds.Width / TextLayout.Width,
-          TextLayer.Bounds.Height / TextLayout.Height);
+        Canvas.Scale(TextRenderScaleX, TextRenderScaleY);
         for J := 0 to High(TextLayout.Lines) do
         begin
           TextWidth := MeasureScreenLayoutText(TextLayout.Lines[J], Font,
@@ -765,6 +873,14 @@ begin
           else
             TextX := 0;
           end;
+          if (Layer = InputTextLayer) and
+            (InputTextOutlineColor <> clNone) then
+            DrawScreenLayoutTextLine(Canvas, TextLayout.Lines[J], Font,
+              TextOutlinePaint, TextX,
+              TextLayout.Ascent + J * TextLayout.LineHeight,
+              LetterSpacing, TextLayer.FontSize,
+              IndividualLetterSpacingRatios,
+              TextLayout.LineGapOffsets[J]);
           DrawScreenLayoutTextLine(Canvas, TextLayout.Lines[J], Font, Paint,
             TextX, TextLayout.Ascent + J * TextLayout.LineHeight,
             LetterSpacing, TextLayer.FontSize,
@@ -1036,7 +1152,9 @@ end;
 procedure RenderVectArtLayerTree(Layer: TVectArtLayer;
   Target: TVectArtRenderBuffer; Width, Height: Integer;
   const LogicalBounds: TRectF; MinimumStrokeWidth,
-  OpacityMultiplier: Single);
+  OpacityMultiplier: Single;
+  InputTextLayer: TScreenLayoutTextLayer;
+  InputTextOutlineColor: TColor);
 var
   ChildBuffer: TVectArtRenderBuffer;
   GroupLayer: TScreenLayoutGroupLayer;
@@ -1047,7 +1165,8 @@ begin
   if not (Layer is TScreenLayoutGroupLayer) then
   begin
     RenderVectArtLayers([Layer], Target, Width, Height, LogicalBounds,
-      MinimumStrokeWidth, OpacityMultiplier);
+      MinimumStrokeWidth, OpacityMultiplier, InputTextLayer,
+      InputTextOutlineColor);
     Exit;
   end;
 
@@ -1060,7 +1179,8 @@ begin
       if GroupLayer[I].Visible then
       begin
         RenderVectArtLayerTree(GroupLayer[I], ChildBuffer, Width, Height,
-          LogicalBounds, MinimumStrokeWidth, 1.0);
+          LogicalBounds, MinimumStrokeWidth, 1.0, InputTextLayer,
+          InputTextOutlineColor);
         CompositeVectArtRgba(ChildBuffer, Target.Data, Width, Height);
       end;
   finally

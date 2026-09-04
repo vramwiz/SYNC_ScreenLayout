@@ -191,6 +191,8 @@ begin
       Interaction.SelectedTextIndividualSpacingHandles;
     Check(Length(IndividualHandles) = 2,
       'single-line text did not expose one arrow per character gap');
+    Check(IndividualHandles[0].HitRect.Top >= 242,
+      'individual letter spacing arrow overlaps the resize frame');
     StartPoint := RectCenter(IndividualHandles[0].HitRect);
     Drag(Interaction, StartPoint, Point(StartPoint.X + 10, StartPoint.Y));
     IndividualRatios := TextLayer.IndividualLetterSpacingRatios;

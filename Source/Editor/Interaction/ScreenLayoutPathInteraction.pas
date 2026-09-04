@@ -28,7 +28,7 @@ type
     function HitTestVertex(X, Y: Integer; out VertexIndex: Integer): Boolean;
     function HitTestVertexKindButton(X, Y: Integer;
       out Kind: TScreenLayoutVertexKind): Boolean;
-    function SelectedPathLayer(out PathLayer: TVectArtPathLayer): Boolean;
+    function SelectedPathLayer(out PathLayer: TVectArtLayer): Boolean;
     function ToLogicalX(Value: Single): Single;
     function ToLogicalY(Value: Single): Single;
     function ToScreenX(Value: Single): Integer;
@@ -62,9 +62,16 @@ type
     function DragTo(Shift: TShiftState; X, Y: Integer): Boolean;
     // 選択中Pathの全アンカーを画面座標の矩形列として返す。
     function SelectedVertexRects: TArray<TRect>;
+    // 選択中Pathを直線・ベジェ共通の画面座標点列へ展開して返す。
+    function SelectedPathPoints: TArray<TPoint>;
     // 選択アンカーの外側へ表示する鋭角／ベジェ種別ボタンを返す。
     function SelectedVertexKindButtons:
       TArray<TScreenLayoutVertexKindButton>;
+    // 選択アンカーの現在の鋭角／ベジェ種別を返す。
+    function SelectedVertexKind(out Kind: TScreenLayoutVertexKind): Boolean;
+    // 選択アンカーへ鋭角／ベジェ種別を適用し、対象があればTrueを返す。
+    function SetSelectedVertexKind(
+      Kind: TScreenLayoutVertexKind): Boolean;
     // 現在選択しているアンカーの画面範囲を返す。
     function SelectedVertexRect(out VertexRect: TRect): Boolean;
     // 選択中のベジェ頂点について、接線と両側の制御ハンドルを返す。
@@ -158,15 +165,15 @@ begin
 end;
 
 function TScreenLayoutPathInteraction.SelectedPathLayer(
-  out PathLayer: TVectArtPathLayer): Boolean;
+  out PathLayer: TVectArtLayer): Boolean;
 begin
   PathLayer := nil;
   Result := (FDocument <> nil) and (FDocument.SelectionCount = 1) and
     (FDocument.SelectedIndex > 0) and
-    (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer);
+    FDocument[FDocument.SelectedIndex].SupportsPathEditing;
   if Result then
   begin
-    PathLayer := TVectArtPathLayer(FDocument[FDocument.SelectedIndex]);
+    PathLayer := FDocument[FDocument.SelectedIndex];
     Result := not PathLayer.Locked;
   end;
 end;
@@ -201,14 +208,14 @@ var
   HalfSize: Integer;
   HandleRect: TRect;
   I: Integer;
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
   Result := False;
   VertexIndex := -1;
   if not SelectedPathLayer(PathLayer) then
     Exit;
-  Vertices := PathLayer.Vertices;
+  Vertices := PathLayer.EditablePathVertices;
   HalfSize := VERTEX_HANDLE_SIZE div 2;
   for I := 0 to High(Vertices) do
   begin
@@ -273,7 +280,7 @@ var
   I: Integer;
   LocalParameter: Single;
   MousePoint: TPointF;
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
   StartParameter: Single;
   StartPoint: TPointF;
   SubdivisionEnd: TPointF;
@@ -286,7 +293,7 @@ begin
   Parameter := 0;
   if not SelectedPathLayer(PathLayer) then
     Exit;
-  Vertices := PathLayer.Vertices;
+  Vertices := PathLayer.EditablePathVertices;
   MousePoint := TPointF.Create(X, Y);
   BestDistance := 1.0E30;
   for I := 0 to High(Vertices) - 1 do
@@ -346,20 +353,21 @@ procedure TScreenLayoutPathInteraction.ApplySelectedVertexKind(
 var
   NewVertices: TArray<TScreenLayoutVertex>;
   OldVertices: TArray<TScreenLayoutVertex>;
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
 begin
   if not SelectedPathLayer(PathLayer) or (FSelectedVertexIndex < 0) then
     Exit;
-  OldVertices := PathLayer.Vertices;
+  OldVertices := PathLayer.EditablePathVertices;
   if (FSelectedVertexIndex > High(OldVertices)) or
     (OldVertices[FSelectedVertexIndex].Kind = Kind) then
     Exit;
   NewVertices := CloneScreenLayoutPathVertices(OldVertices);
   SetScreenLayoutPathVertexKind(NewVertices, FSelectedVertexIndex, Kind);
-  FDocument.SetPathVertices(FDocument.SelectedIndex, NewVertices);
+  ApplyScreenLayoutPathVertices(FDocument, FDocument.SelectedIndex,
+    NewVertices, True);
   if FEditHistory <> nil then
     FEditHistory.AddApplied(TScreenLayoutPathVerticesCommand.Create(
-      FDocument, FDocument.SelectedIndex, OldVertices, NewVertices));
+      FDocument, FDocument.SelectedIndex, OldVertices, NewVertices, True));
 end;
 
 function TScreenLayoutPathInteraction.ApplyVertexKindAt(X,
@@ -379,23 +387,24 @@ var
   NewVertices: TArray<TScreenLayoutVertex>;
   OldVertices: TArray<TScreenLayoutVertex>;
   Parameter: Single;
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
   SegmentIndex: Integer;
 begin
   Result := HitTestSegment(X, Y, SegmentIndex, Parameter);
   if not Result or not SelectedPathLayer(PathLayer) then
     Exit;
-  OldVertices := PathLayer.Vertices;
+  OldVertices := PathLayer.EditablePathVertices;
   NewVertices := CloneScreenLayoutPathVertices(OldVertices);
   NewVertexIndex := InsertScreenLayoutPathVertex(NewVertices, SegmentIndex,
     Parameter);
   if NewVertexIndex < 0 then
     Exit(False);
-  FDocument.SetPathVertices(FDocument.SelectedIndex, NewVertices);
+  ApplyScreenLayoutPathVertices(FDocument, FDocument.SelectedIndex,
+    NewVertices, True);
   FSelectedVertexIndex := NewVertexIndex;
   if FEditHistory <> nil then
     FEditHistory.AddApplied(TScreenLayoutPathVerticesCommand.Create(
-      FDocument, FDocument.SelectedIndex, OldVertices, NewVertices));
+      FDocument, FDocument.SelectedIndex, OldVertices, NewVertices, True));
 end;
 
 function TScreenLayoutPathInteraction.DeleteVertexAt(X,
@@ -403,28 +412,29 @@ function TScreenLayoutPathInteraction.DeleteVertexAt(X,
 var
   NewVertices: TArray<TScreenLayoutVertex>;
   OldVertices: TArray<TScreenLayoutVertex>;
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
   VertexIndex: Integer;
 begin
   Result := HitTestVertex(X, Y, VertexIndex);
   if not Result or not SelectedPathLayer(PathLayer) then
     Exit;
-  OldVertices := PathLayer.Vertices;
+  OldVertices := PathLayer.EditablePathVertices;
   NewVertices := CloneScreenLayoutPathVertices(OldVertices);
   if not DeleteScreenLayoutPathVertex(NewVertices, VertexIndex) then
     Exit;
-  FDocument.SetPathVertices(FDocument.SelectedIndex, NewVertices);
+  ApplyScreenLayoutPathVertices(FDocument, FDocument.SelectedIndex,
+    NewVertices, True);
   ClearSelection;
   if FEditHistory <> nil then
     FEditHistory.AddApplied(TScreenLayoutPathVerticesCommand.Create(
-      FDocument, FDocument.SelectedIndex, OldVertices, NewVertices));
+      FDocument, FDocument.SelectedIndex, OldVertices, NewVertices, True));
 end;
 
 function TScreenLayoutPathInteraction.BeginBezierHandleDragAt(X,
   Y: Integer): Boolean;
 var
   HandleKind: TScreenLayoutBezierHandleKind;
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
 begin
   Result := HitTestBezierHandle(X, Y, HandleKind) and
     SelectedPathLayer(PathLayer);
@@ -433,13 +443,13 @@ begin
   FDragBezierHandle := HandleKind;
   FDragVertexIndex := FSelectedVertexIndex;
   FDragLayerIndex := FDocument.SelectedIndex;
-  FDragStartVertices := PathLayer.Vertices;
+  FDragStartVertices := PathLayer.EditablePathVertices;
 end;
 
 function TScreenLayoutPathInteraction.BeginVertexDragAt(X,
   Y: Integer): Boolean;
 var
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
 begin
   Result := HitTestVertex(X, Y, FDragVertexIndex) and
     SelectedPathLayer(PathLayer);
@@ -447,7 +457,7 @@ begin
     Exit;
   FSelectedVertexIndex := FDragVertexIndex;
   FDragLayerIndex := FDocument.SelectedIndex;
-  FDragStartVertices := PathLayer.Vertices;
+  FDragStartVertices := PathLayer.EditablePathVertices;
   FDragBezierHandle := slbhNone;
 end;
 
@@ -461,7 +471,7 @@ var
   OppositeLength: Single;
 begin
   Result := (FDragLayerIndex > 0) and
-    (FDocument[FDragLayerIndex] is TVectArtPathLayer);
+    FDocument[FDragLayerIndex].SupportsPathEditing;
   if not Result then
     Exit;
   NewVertices := CloneScreenLayoutPathVertices(FDragStartVertices);
@@ -475,7 +485,8 @@ begin
         FDocument.CanvasLayer.Width * 0.5),
       EnsureRange(ToLogicalY(Y), FDocument.CanvasLayer.Height * -0.5,
         FDocument.CanvasLayer.Height * 0.5));
-    FDocument.SetPathVertices(FDragLayerIndex, NewVertices);
+    ApplyScreenLayoutPathVertices(FDocument, FDragLayerIndex,
+      NewVertices, True);
     Exit;
   end;
   with NewVertices[FDragVertexIndex] do
@@ -511,22 +522,23 @@ begin
         -ControlVector.X / ControlLength * OppositeLength,
         -ControlVector.Y / ControlLength * OppositeLength);
   end;
-  FDocument.SetPathVertices(FDragLayerIndex, NewVertices);
+  ApplyScreenLayoutPathVertices(FDocument, FDragLayerIndex,
+    NewVertices, True);
 end;
 
 procedure TScreenLayoutPathInteraction.CommitDrag;
 var
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
 begin
   if (FEditHistory <> nil) and (FDragLayerIndex > 0) and
-    (FDocument[FDragLayerIndex] is TVectArtPathLayer) then
+    FDocument[FDragLayerIndex].SupportsPathEditing then
   begin
-    PathLayer := TVectArtPathLayer(FDocument[FDragLayerIndex]);
+    PathLayer := FDocument[FDragLayerIndex];
     if not ScreenLayoutPathVerticesEqual(FDragStartVertices,
-      PathLayer.Vertices) then
+      PathLayer.EditablePathVertices) then
       FEditHistory.AddApplied(TScreenLayoutPathVerticesCommand.Create(
         FDocument, FDragLayerIndex, FDragStartVertices,
-        PathLayer.Vertices));
+        PathLayer.EditablePathVertices, True));
   end;
   EndDrag;
 end;
@@ -543,15 +555,12 @@ function TScreenLayoutPathInteraction.CursorAt(X, Y: Integer;
   out Cursor: TCursor): Boolean;
 var
   HandleKind: TScreenLayoutBezierHandleKind;
-  Kind: TScreenLayoutVertexKind;
   Parameter: Single;
   SegmentIndex: Integer;
   VertexIndex: Integer;
 begin
   Cursor := crDefault;
-  if HitTestVertexKindButton(X, Y, Kind) then
-    Cursor := crHandPoint
-  else if HitTestBezierHandle(X, Y, HandleKind) or
+  if HitTestBezierHandle(X, Y, HandleKind) or
     HitTestVertex(X, Y, VertexIndex) then
     Cursor := crSizeAll
   else if HitTestSegment(X, Y, SegmentIndex, Parameter) then
@@ -559,11 +568,38 @@ begin
   Result := Cursor <> crDefault;
 end;
 
+function TScreenLayoutPathInteraction.SelectedVertexKind(
+  out Kind: TScreenLayoutVertexKind): Boolean;
+var
+  PathLayer: TVectArtLayer;
+  Vertices: TArray<TScreenLayoutVertex>;
+begin
+  Kind := slvkSharp;
+  Result := SelectedPathLayer(PathLayer) and
+    (FSelectedVertexIndex >= 0);
+  if not Result then
+    Exit;
+  Vertices := PathLayer.EditablePathVertices;
+  Result := FSelectedVertexIndex <= High(Vertices);
+  if Result then
+    Kind := Vertices[FSelectedVertexIndex].Kind;
+end;
+
+function TScreenLayoutPathInteraction.SetSelectedVertexKind(
+  Kind: TScreenLayoutVertexKind): Boolean;
+var
+  CurrentKind: TScreenLayoutVertexKind;
+begin
+  Result := SelectedVertexKind(CurrentKind);
+  if Result and (CurrentKind <> Kind) then
+    ApplySelectedVertexKind(Kind);
+end;
+
 function TScreenLayoutPathInteraction.SelectedVertexRects: TArray<TRect>;
 var
   HalfSize: Integer;
   I: Integer;
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
   Vertices: TArray<TScreenLayoutVertex>;
   X: Integer;
   Y: Integer;
@@ -571,7 +607,7 @@ begin
   Result := nil;
   if not SelectedPathLayer(PathLayer) then
     Exit;
-  Vertices := PathLayer.Vertices;
+  Vertices := PathLayer.EditablePathVertices;
   SetLength(Result, Length(Vertices));
   HalfSize := VERTEX_HANDLE_SIZE div 2;
   for I := 0 to High(Vertices) do
@@ -582,6 +618,23 @@ begin
       X - HalfSize + VERTEX_HANDLE_SIZE,
       Y - HalfSize + VERTEX_HANDLE_SIZE);
   end;
+end;
+
+function TScreenLayoutPathInteraction.SelectedPathPoints: TArray<TPoint>;
+var
+  I: Integer;
+  Layer: TVectArtLayer;
+  LogicalPoints: TArray<TPointF>;
+begin
+  Result := nil;
+  if not SelectedPathLayer(Layer) then
+    Exit;
+  LogicalPoints := FlattenScreenLayoutPathVertices(
+    Layer.EditablePathVertices);
+  SetLength(Result, Length(LogicalPoints));
+  for I := 0 to High(LogicalPoints) do
+    Result[I] := Point(ToScreenX(LogicalPoints[I].X),
+      ToScreenY(LogicalPoints[I].Y));
 end;
 
 function TScreenLayoutPathInteraction.SelectedVertexKindButtons:
@@ -598,7 +651,7 @@ var
   DirectionY: Single;
   HalfDistance: Single;
   HalfSize: Integer;
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
   TangentX: Single;
   TangentY: Single;
   TargetX: Single;
@@ -611,7 +664,7 @@ begin
   Result := nil;
   if not SelectedPathLayer(PathLayer) or (FSelectedVertexIndex < 0) then
     Exit;
-  Vertices := PathLayer.Vertices;
+  Vertices := PathLayer.EditablePathVertices;
   if FSelectedVertexIndex > High(Vertices) then
     Exit;
   Vertex := Vertices[FSelectedVertexIndex];
@@ -665,7 +718,7 @@ function TScreenLayoutPathInteraction.SelectedVertexRect(
   out VertexRect: TRect): Boolean;
 var
   HalfSize: Integer;
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
   Vertex: TScreenLayoutVertex;
   Vertices: TArray<TScreenLayoutVertex>;
   X: Integer;
@@ -675,7 +728,7 @@ begin
   VertexRect := TRect.Empty;
   if not SelectedPathLayer(PathLayer) or (FSelectedVertexIndex < 0) then
     Exit;
-  Vertices := PathLayer.Vertices;
+  Vertices := PathLayer.EditablePathVertices;
   if FSelectedVertexIndex > High(Vertices) then
     Exit;
   Vertex := Vertices[FSelectedVertexIndex];
@@ -692,7 +745,7 @@ function TScreenLayoutPathInteraction.SelectedBezierHandles(
   out Handles: TScreenLayoutBezierHandles): Boolean;
 var
   HalfSize: Integer;
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
   Vertex: TScreenLayoutVertex;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
@@ -700,7 +753,7 @@ begin
   Handles := Default(TScreenLayoutBezierHandles);
   if not SelectedPathLayer(PathLayer) or (FSelectedVertexIndex < 0) then
     Exit;
-  Vertices := PathLayer.Vertices;
+  Vertices := PathLayer.EditablePathVertices;
   if FSelectedVertexIndex > High(Vertices) then
     Exit;
   Vertex := Vertices[FSelectedVertexIndex];

@@ -23,6 +23,11 @@ function ScreenLayoutPathDistanceToPoint(const Vertices: TArray<TScreenLayoutVer
 // 直線とベジェを描画順の点列へ展開する。
 function FlattenScreenLayoutPathVertices(const Vertices: TArray<TScreenLayoutVertex>;
   BezierSteps: Integer = 16): TArray<TPointF>;
+// 展開済み点列の先頭から終端までの合計距離を返す。
+function ScreenLayoutPolylineLength(const Points: TArray<TPointF>): Single;
+// 先頭からの距離に対応する座標と接線を返し、点列が無効ならFalseを返す。
+function ScreenLayoutPolylinePointAtDistance(const Points: TArray<TPointF>;
+  Distance: Single; out PointValue, Tangent: TPointF): Boolean;
 // 指定頂点を鋭角または滑らかなベジェ接続へ変更し、隣接区間も更新する。
 procedure SetScreenLayoutPathVertexKind(var Vertices: TArray<TScreenLayoutVertex>; VertexIndex: Integer;
   Kind: TScreenLayoutVertexKind);
@@ -303,6 +308,63 @@ begin
     end;
   end;
   SetLength(Result, OutputIndex + 1);
+end;
+
+function ScreenLayoutPolylineLength(const Points: TArray<TPointF>): Single;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(Points) - 1 do
+    Result := Result + Hypot(Points[I + 1].X - Points[I].X,
+      Points[I + 1].Y - Points[I].Y);
+end;
+
+function ScreenLayoutPolylinePointAtDistance(const Points: TArray<TPointF>;
+  Distance: Single; out PointValue, Tangent: TPointF): Boolean;
+var
+  I: Integer;
+  SegmentLength: Single;
+  T: Single;
+begin
+  PointValue := TPointF.Zero;
+  Tangent := TPointF.Zero;
+  Result := Length(Points) >= 2;
+  if not Result then
+    Exit;
+  Distance := Max(Distance, 0.0);
+  for I := 0 to High(Points) - 1 do
+  begin
+    Tangent := TPointF.Create(Points[I + 1].X - Points[I].X,
+      Points[I + 1].Y - Points[I].Y);
+    SegmentLength := Hypot(Tangent.X, Tangent.Y);
+    if SegmentLength <= 0.0001 then
+      Continue;
+    if Distance <= SegmentLength then
+    begin
+      T := Distance / SegmentLength;
+      PointValue := TPointF.Create(Points[I].X + Tangent.X * T,
+        Points[I].Y + Tangent.Y * T);
+      Tangent := TPointF.Create(Tangent.X / SegmentLength,
+        Tangent.Y / SegmentLength);
+      Exit(True);
+    end;
+    Distance := Distance - SegmentLength;
+  end;
+  for I := High(Points) - 1 downto 0 do
+  begin
+    Tangent := TPointF.Create(Points[I + 1].X - Points[I].X,
+      Points[I + 1].Y - Points[I].Y);
+    SegmentLength := Hypot(Tangent.X, Tangent.Y);
+    if SegmentLength > 0.0001 then
+    begin
+      PointValue := Points[High(Points)];
+      Tangent := TPointF.Create(Tangent.X / SegmentLength,
+        Tangent.Y / SegmentLength);
+      Exit(True);
+    end;
+  end;
+  Result := False;
 end;
 
 procedure SetScreenLayoutPathVertexKind(var Vertices: TArray<TScreenLayoutVertex>; VertexIndex: Integer;

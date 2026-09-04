@@ -13,7 +13,10 @@ type
     FActive: Boolean;
     FCanvasBounds: TRect;
     FCreationTool: TVectArtEditorTool;
+    FCreatedTextPathBeforeSelection: TArray<Integer>;
+    FCreatedTextPathIndex: Integer;
     FCurrentPoint: TPoint;
+    FDeferTextPathHistory: Boolean;
     FDocument: TVectArtDocument;
     FEditorState: TVectArtEditorState;
     FEditHistory: TVectArtEditHistory;
@@ -30,11 +33,13 @@ type
     procedure CreateEllipseLine;
     procedure CreateLine;
     procedure CreatePath(Closed: Boolean);
+    procedure CreateTextPath;
     procedure CreateRectangle;
     procedure CreateRectangleLine;
     procedure CreateRoundedRectangle;
     procedure CreateRoundedRectangleLine;
     procedure CreateShape;
+    function BuildPathVertices: TArray<TScreenLayoutVertex>;
     function BuildOpenPathPreview(out Points: TArray<TPoint>): Boolean;
     function BuildShapePreview(out Points: TArray<TPoint>): Boolean;
   public
@@ -62,18 +67,23 @@ type
     function PreviewArc(out Points: TArray<TPoint>): Boolean;
     // ドラッグ作成中の直線プレビュー端点を返す。
     function PreviewLine(out StartPoint, EndPoint: TPoint): Boolean;
-    // V／Bキーを次に確定するPath／Shape頂点の種別として受け付ける。
+    // 旧B／V入力を含むキーを処理せず、呼び出し側の通常入力へ渡す。
     function KeyDown(Key: Word; Shift: TShiftState): Boolean;
+    // Canvasが初回文字入力を完了するまで履歴確定を保留した文字パスを受け取る。
+    function TakeCreatedTextPath(out LayerIndex: Integer;
+      out BeforeSelection: TArray<Integer>): Boolean;
     property Active: Boolean read FActive;
+    property DeferTextPathHistory: Boolean read FDeferTextPathHistory
+      write FDeferTextPathHistory;
   end;
 
 implementation
 
 uses
-  System.Math,
+  System.Math, Vcl.Graphics,
   ScreenLayoutGeometry, ScreenLayoutLayerStructureCommands,
   ScreenLayoutLayerNaming, ScreenLayoutPathOperations,
-  ScreenLayoutShapeOperations;
+  ScreenLayoutShapeOperations, ScreenLayoutTextCommands;
 
 const
   MIN_DRAG_SIZE = 3;
@@ -214,27 +224,13 @@ var
   AfterSelection: TArray<Integer>;
   BeforeSelection: TArray<Integer>;
   Data: TVectArtPathData;
-  I: Integer;
   Index: Integer;
 begin
   if Length(FPathPoints) < 2 then
     Exit;
   if Closed and (Length(FPathPoints) < 3) then
     Closed := False;
-  SetLength(Data.Vertices, Length(FPathPoints));
-  for I := 0 to High(FPathPoints) do
-  begin
-    Data.Vertices[I].Position := TPointF.Create(
-      ScreenToLogicalX(FPathPoints[I].X, FCanvasBounds, FZoom,
-        FDocument.CanvasLayer.Width),
-      ScreenToLogicalY(FPathPoints[I].Y, FCanvasBounds, FZoom,
-        FDocument.CanvasLayer.Height));
-    if I <= High(FVertexKinds) then
-      Data.Vertices[I].Kind := FVertexKinds[I]
-    else
-      Data.Vertices[I].Kind := slvkSharp;
-  end;
-  ConfigureScreenLayoutOpenPath(Data.Vertices);
+  Data.Vertices := BuildPathVertices;
   Data.Closed := Closed;
   Data.LineCap := FEditorState.LineCap;
   Data.Locked := False;
@@ -251,6 +247,82 @@ begin
   if FEditHistory <> nil then
     FEditHistory.AddApplied(TVectArtInsertPathCommand.Create(FDocument,
       Index, Data, BeforeSelection, AfterSelection));
+end;
+
+function TVectArtShapeCreation.BuildPathVertices:
+  TArray<TScreenLayoutVertex>;
+var
+  I: Integer;
+begin
+  SetLength(Result, Length(FPathPoints));
+  for I := 0 to High(FPathPoints) do
+  begin
+    Result[I].Position := TPointF.Create(
+      ScreenToLogicalX(FPathPoints[I].X, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Width),
+      ScreenToLogicalY(FPathPoints[I].Y, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Height));
+    if I <= High(FVertexKinds) then
+      Result[I].Kind := FVertexKinds[I]
+    else
+      Result[I].Kind := slvkSharp;
+  end;
+  ConfigureScreenLayoutOpenPath(Result);
+end;
+
+procedure TVectArtShapeCreation.CreateTextPath;
+const
+  DEFAULT_FONT_FAMILY = 'Yu Gothic UI';
+  DEFAULT_FONT_SIZE = 32.0;
+  DEFAULT_TEXT = 'Text';
+var
+  AfterSelection: TArray<Integer>;
+  BeforeSelection: TArray<Integer>;
+  Bounds: TRectF;
+  Index: Integer;
+  Layer: TScreenLayoutTextPathLayer;
+  Vertices: TArray<TScreenLayoutVertex>;
+begin
+  if Length(FPathPoints) < 2 then
+    Exit;
+  Vertices := BuildPathVertices;
+  Bounds := ScreenLayoutPathVerticesBounds(Vertices);
+  Bounds.Top := Bounds.Top - DEFAULT_FONT_SIZE;
+  if Bounds.Width < 1.0 then
+    Bounds.Right := Bounds.Left + 1.0;
+  Layer := TScreenLayoutTextPathLayer.Create(
+    NextScreenLayoutLayerName(FDocument, 'Text Path'), Bounds,
+    DEFAULT_TEXT, DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE,
+    Max(Bounds.Width, 1.0), clWhite, Vertices);
+  Layer.Opacity := FEditorState.RectangleOpacity;
+  BeforeSelection := FDocument.GetSelectedLayerIndices;
+  Index := FDocument.InsertLayer(FDocument.LayerCount, Layer);
+  FDocument.SetSelectedLayers([Index]);
+  AfterSelection := FDocument.GetSelectedLayerIndices;
+  if FDeferTextPathHistory then
+  begin
+    FCreatedTextPathIndex := Index;
+    FCreatedTextPathBeforeSelection := Copy(BeforeSelection);
+  end
+  else if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutInsertTextPathCommand.Create(
+      FDocument, Index, Layer, BeforeSelection, AfterSelection));
+end;
+
+function TVectArtShapeCreation.TakeCreatedTextPath(out LayerIndex: Integer;
+  out BeforeSelection: TArray<Integer>): Boolean;
+begin
+  Result := FCreatedTextPathIndex > 0;
+  if not Result then
+  begin
+    LayerIndex := -1;
+    BeforeSelection := nil;
+    Exit;
+  end;
+  LayerIndex := FCreatedTextPathIndex;
+  BeforeSelection := Copy(FCreatedTextPathBeforeSelection);
+  FCreatedTextPathIndex := -1;
+  SetLength(FCreatedTextPathBeforeSelection, 0);
 end;
 
 function TVectArtShapeCreation.ClampToCanvas(const Point: TPoint): TPoint;
@@ -611,7 +683,8 @@ begin
     (FEditorState.CurrentTool in [vetRectangleLine, vetRectangle,
       vetRoundedRectangleLine,
       vetRoundedRectangle, vetEllipseLine,
-      vetEllipse, vetArc, vetArcShape, vetLine, vetPath, vetShape]) and
+      vetEllipse, vetArc, vetArcShape, vetLine, vetPath, vetShape,
+      vetTextPath]) and
     (FZoom > 0) and
     PtInRect(FCanvasBounds, Point(X, Y));
   if not Result then
@@ -619,12 +692,12 @@ begin
   PointValue := ClampToCanvas(Point(X, Y));
   if not FActive then
     FDocument.SetSelectedLayers([]);
-  if FEditorState.CurrentTool in [vetPath, vetShape] then
+  if FEditorState.CurrentTool in [vetPath, vetShape, vetTextPath] then
   begin
     if (ssDouble in Shift) and
       (((FEditorState.CurrentTool = vetShape) and
         (Length(FPathPoints) >= 3)) or
-       ((FEditorState.CurrentTool = vetPath) and
+       ((FEditorState.CurrentTool in [vetPath, vetTextPath]) and
         (Length(FPathPoints) >= 2))) then
     begin
       FinishPath(FEditorState.CurrentTool = vetShape);
@@ -661,23 +734,6 @@ function TVectArtShapeCreation.KeyDown(Key: Word;
   Shift: TShiftState): Boolean;
 begin
   Result := False;
-  if (FEditorState = nil) or
-    not (FEditorState.CurrentTool in [vetPath, vetShape]) or
-    ((Shift * [ssCtrl, ssAlt]) <> []) then
-    Exit;
-  if Key = Ord('V') then
-  begin
-    FNextVertexKind := slvkSharp;
-    FEditorState.NextVertexKind := slvkSharp;
-  end
-  else if Key = Ord('B') then
-  begin
-    FNextVertexKind := slvkBezier;
-    FEditorState.NextVertexKind := slvkBezier;
-  end
-  else
-    Exit;
-  Result := True;
 end;
 
 function TVectArtShapeCreation.MouseMove(Shift: TShiftState;
@@ -687,7 +743,7 @@ begin
   if not FActive then
     Exit;
   if (FEditorState <> nil) and
-    (FEditorState.CurrentTool in [vetPath, vetShape]) then
+    (FEditorState.CurrentTool in [vetPath, vetShape, vetTextPath]) then
   begin
     FCurrentPoint := ClampToCanvas(Point(X, Y));
     Exit;
@@ -705,7 +761,7 @@ function TVectArtShapeCreation.MouseUp(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer): Boolean;
 begin
   if FActive and (FEditorState <> nil) and
-    (FEditorState.CurrentTool in [vetPath, vetShape]) then
+    (FEditorState.CurrentTool in [vetPath, vetShape, vetTextPath]) then
     Exit(False);
   Result := (Button = mbLeft) and FActive;
   if not Result then
@@ -736,7 +792,7 @@ end;
 function TVectArtShapeCreation.FinishPath(Closed: Boolean): Boolean;
 begin
   Result := FActive and (FEditorState <> nil) and
-    (FEditorState.CurrentTool in [vetPath, vetShape]) and
+    (FEditorState.CurrentTool in [vetPath, vetShape, vetTextPath]) and
     (Length(FPathPoints) >= 2);
   if not Result then
     Exit;
@@ -746,6 +802,8 @@ begin
       Exit(False);
     CreateShape;
   end
+  else if FEditorState.CurrentTool = vetTextPath then
+    CreateTextPath
   else
     CreatePath(Closed);
   CancelPath;
@@ -756,7 +814,7 @@ function TVectArtShapeCreation.PreviewPath(
   out Points: TArray<TPoint>): Boolean;
 begin
   Result := FActive and (FEditorState <> nil) and
-    (FEditorState.CurrentTool in [vetPath, vetShape]) and
+    (FEditorState.CurrentTool in [vetPath, vetShape, vetTextPath]) and
     (Length(FPathPoints) > 0);
   if not Result then
   begin

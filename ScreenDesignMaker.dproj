@@ -32,7 +32,7 @@
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;Vcl;Winapi;$(DCC_Namespace)</DCC_Namespace>
-        <DCC_UnitSearchPath>Lib\VerticalScrollBar;Lib\ColorPicker;Source\ObjectProperties;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>Lib\VerticalScrollBar;Lib\ColorPicker;Lib\InputMethod;Source\ObjectProperties;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <DCC_DcuOutput>$(MSBuildProjectDirectory)\$(Platform)\$(ProjectName)\$(Config)\DCU</DCC_DcuOutput>
         <SanitizedProjectName>ScreenDesignMaker</SanitizedProjectName>
     </PropertyGroup>
@@ -45,9 +45,9 @@
     <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
         <BT_BuildType>Debug</BT_BuildType>
         <VerInfo_Locale>1041</VerInfo_Locale>
-        <Icon_MainIcon>Image\Icon.ico</Icon_MainIcon>
-        <UWP_DelphiLogo44>Image\Icon.png</UWP_DelphiLogo44>
-        <UWP_DelphiLogo150>Image\Icon.png</UWP_DelphiLogo150>
+        <Icon_MainIcon>Image\Icon_4.ico</Icon_MainIcon>
+        <UWP_DelphiLogo44>Image\Icon_4.png</UWP_DelphiLogo44>
+        <UWP_DelphiLogo150>Image\Icon_4.png</UWP_DelphiLogo150>
         <Manifest_File>(なし)</Manifest_File>
         <AppDPIAwarenessMode>none</AppDPIAwarenessMode>
     </PropertyGroup>
@@ -74,6 +74,7 @@
         <DCCReference Include="Lib\ShortcutAction\ShortcutAction.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas"/>
+        <DCCReference Include="Lib\InputMethod\WindowsImeController.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutMainForm.pas">
             <Form>MainForm</Form>
         </DCCReference>
@@ -99,6 +100,7 @@
         <DCCReference Include="Source\Rendering\ScreenLayoutRenderer.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutCanvasGuides.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutCanvasPreview.pas"/>
+        <DCCReference Include="Source\Rendering\ScreenLayoutTextEditOverlay.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutShapePath.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutContext.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutEditorState.pas"/>
@@ -188,7 +190,7 @@
                 <Platform value="Win64">True</Platform>
             </Platforms>
             <Deployment Version="5">
-                <DeployFile LocalName="Image\Icon.png" Configuration="Debug" Class="UWP_DelphiLogo44">
+                <DeployFile LocalName="Image\Icon_4.png" Configuration="Debug" Class="UWP_DelphiLogo44">
                     <Platform Name="Win64">
                         <RemoteDir>Assets\</RemoteDir>
                         <RemoteName>Logo44x44.png</RemoteName>

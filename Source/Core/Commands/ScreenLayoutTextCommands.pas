@@ -26,6 +26,27 @@ type
     procedure Undo; override;
   end;
 
+  TScreenLayoutInsertTextPathCommand = class(TVectArtEditCommand)
+  private
+    FAfterSelection: TArray<Integer>;
+    FBeforeSelection: TArray<Integer>;
+    FDocument: TVectArtDocument;
+    FInDocument: Boolean;
+    FIndex: Integer;
+    FLayer: TScreenLayoutTextPathLayer;
+  public
+    // 適用済み文字パスの所有権をDocumentとコマンドの間で移してUndo／Redoする。
+    constructor Create(ADocument: TVectArtDocument; Index: Integer;
+      Layer: TScreenLayoutTextPathLayer; const BeforeSelection,
+      AfterSelection: TArray<Integer>);
+    // Undo後にコマンドが所有している文字パスだけを解放する。
+    destructor Destroy; override;
+    // 保持中の文字パスを元の積層位置へ戻して作成後の選択を復元する。
+    procedure Execute; override;
+    // 文字パスをDocumentから取り出して所有し、作成前の選択を復元する。
+    procedure Undo; override;
+  end;
+
   TScreenLayoutDeleteTextCommand = class(TVectArtEditCommand)
   private
     FAfterSelection: TArray<Integer>;
@@ -55,6 +76,45 @@ type
   end;
 
 implementation
+
+constructor TScreenLayoutInsertTextPathCommand.Create(
+  ADocument: TVectArtDocument; Index: Integer;
+  Layer: TScreenLayoutTextPathLayer; const BeforeSelection,
+  AfterSelection: TArray<Integer>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FIndex := Index;
+  FLayer := Layer;
+  FBeforeSelection := Copy(BeforeSelection);
+  FAfterSelection := Copy(AfterSelection);
+  FInDocument := True;
+end;
+
+destructor TScreenLayoutInsertTextPathCommand.Destroy;
+begin
+  if not FInDocument then
+    FLayer.Free;
+  inherited Destroy;
+end;
+
+procedure TScreenLayoutInsertTextPathCommand.Execute;
+begin
+  if (FDocument = nil) or FInDocument or (FLayer = nil) then
+    Exit;
+  FIndex := FDocument.InsertLayer(FIndex, FLayer);
+  FInDocument := True;
+  FDocument.SetSelectedLayers(FAfterSelection);
+end;
+
+procedure TScreenLayoutInsertTextPathCommand.Undo;
+begin
+  if (FDocument = nil) or not FInDocument then
+    Exit;
+  FLayer := TScreenLayoutTextPathLayer(FDocument.ExtractLayer(FIndex));
+  FInDocument := False;
+  FDocument.SetSelectedLayers(FBeforeSelection);
+end;
 
 function CaptureScreenLayoutTextData(
   Layer: TScreenLayoutTextLayer): TScreenLayoutTextData;

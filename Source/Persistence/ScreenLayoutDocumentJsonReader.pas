@@ -222,6 +222,77 @@ begin
   end;
 end;
 
+function ReadPathVertices(LayerJson: TJSONObject; LayerIndex: Integer;
+  const LayerDescription: string): TArray<TScreenLayoutVertex>;
+var
+  SegmentKind: string;
+  VertexIndex: Integer;
+  VertexJson: TJSONObject;
+  VertexKind: string;
+  VerticesJson: TJSONArray;
+begin
+  VerticesJson := TJSONArray(RequireValue(LayerJson, 'vertices',
+    TJSONArray));
+  if VerticesJson.Count < 2 then
+    raise EConvertError.CreateFmt('%s layer %d has too few points',
+      [LayerDescription, LayerIndex]);
+  SetLength(Result, VerticesJson.Count);
+  for VertexIndex := 0 to VerticesJson.Count - 1 do
+  begin
+    if not (VerticesJson.Items[VertexIndex] is TJSONObject) then
+      raise EConvertError.CreateFmt('%s layer %d vertex %d is invalid',
+        [LayerDescription, LayerIndex, VertexIndex]);
+    VertexJson := TJSONObject(VerticesJson.Items[VertexIndex]);
+    with Result[VertexIndex] do
+    begin
+      Position := TPointF.Create(ReadSingle(VertexJson, 'x'),
+        ReadSingle(VertexJson, 'y'));
+      IncomingControl := TPointF.Create(
+        ReadSingle(VertexJson, 'incomingX'),
+        ReadSingle(VertexJson, 'incomingY'));
+      OutgoingControl := TPointF.Create(
+        ReadSingle(VertexJson, 'outgoingX'),
+        ReadSingle(VertexJson, 'outgoingY'));
+      VertexKind := ReadString(VertexJson, 'kind');
+      if VertexKind = 'sharp' then
+        Kind := slvkSharp
+      else if VertexKind = 'bezier' then
+        Kind := slvkBezier
+      else
+        raise EConvertError.CreateFmt(
+          '%s layer %d vertex %d has an invalid kind',
+          [LayerDescription, LayerIndex, VertexIndex]);
+      SegmentKind := ReadString(VertexJson, 'outgoingSegment');
+      if SegmentKind = 'line' then
+        OutgoingSegment := slskLine
+      else if SegmentKind = 'cubicBezier' then
+        OutgoingSegment := slskCubicBezier
+      else
+        raise EConvertError.CreateFmt(
+          '%s layer %d vertex %d has an invalid outgoing segment',
+          [LayerDescription, LayerIndex, VertexIndex]);
+    end;
+  end;
+end;
+
+function CreateTextPathLayer(const Data: TScreenLayoutTextData;
+  const Vertices: TArray<TScreenLayoutVertex>): TScreenLayoutTextPathLayer;
+begin
+  Result := TScreenLayoutTextPathLayer.Create(Data.Name, Data.Bounds,
+    Data.Text, Data.FontFamily, Data.FontSize, Data.WrapWidth, Data.TextColor,
+    Vertices);
+  Result.Alignment := Data.Alignment;
+  Result.FontStyle := Data.FontStyle;
+  Result.LetterSpacingRatio := 0;
+  Result.IndividualLetterSpacingRatios := nil;
+  Result.LineSpacingRatio := Data.LineSpacingRatio;
+  Result.Locked := Data.Locked;
+  Result.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  Result.RotationDegrees := Data.RotationDegrees;
+  Result.TransformMode := Data.TransformMode;
+  Result.Visible := Data.Visible;
+end;
+
 function TryDeserializeVectArtDocumentCore(const Text, BaseDirectory: string;
   Document: TVectArtDocument; out SkippedReferenceCount: Integer;
   out ErrorMessage: string): Boolean;
@@ -298,6 +369,8 @@ var
   ShapeData: TArray<TScreenLayoutShapeData>;
   ShapeValue: TScreenLayoutShapeData;
   TextData: TArray<TScreenLayoutTextData>;
+  TextPathVerticesData: TArray<TArray<TScreenLayoutVertex>>;
+  TextPathLayer: TScreenLayoutTextPathLayer;
   TextValue: TScreenLayoutTextData;
   LoadedSelectedIndex: Integer;
   SourceKind: string;
@@ -353,6 +426,7 @@ begin
       SetLength(ImageData, LayersJson.Count);
       SetLength(ShapeData, LayersJson.Count);
       SetLength(TextData, LayersJson.Count);
+      SetLength(TextPathVerticesData, LayersJson.Count);
       SetLength(GroupData, LayersJson.Count);
       SetLength(LayerTypes, LayersJson.Count);
       for I := 0 to LayersJson.Count - 1 do
@@ -418,7 +492,8 @@ begin
           end;
           Continue;
         end;
-        if LayerTypes[I] = 'text' then
+        if (LayerTypes[I] = 'text') or
+          (LayerTypes[I] = 'textPath') then
         begin
           TextValue.Alignment := ParseTextAlignment(ReadOptionalString(
             LayerJson, 'alignment', 'topLeft'));
@@ -478,6 +553,9 @@ begin
           TextValue.Visible := ReadBoolean(LayerJson, 'visible');
           TextValue.Locked := ReadBoolean(LayerJson, 'locked');
           TextData[I] := TextValue;
+          if LayerTypes[I] = 'textPath' then
+            TextPathVerticesData[I] := ReadPathVertices(LayerJson, I,
+              'Text path');
           Continue;
         end;
         if LayerTypes[I] = 'image' then
@@ -551,51 +629,10 @@ begin
             PathValue.LineCap := TVectArtLineCap(LineCapValue);
           PathValue.Visible := ReadBoolean(LayerJson, 'visible');
           PathValue.Locked := ReadBoolean(LayerJson, 'locked');
-          VerticesJson := TJSONArray(RequireValue(LayerJson, 'vertices',
-            TJSONArray));
-          if VerticesJson.Count < 2 then
-            raise EConvertError.CreateFmt('Path layer %d has too few points',
-              [I]);
-          if PathValue.Closed and (VerticesJson.Count < 3) then
+          PathValue.Vertices := ReadPathVertices(LayerJson, I, 'Path');
+          if PathValue.Closed and (Length(PathValue.Vertices) < 3) then
             raise EConvertError.CreateFmt(
               'Closed path layer %d must contain at least three points', [I]);
-          SetLength(PathValue.Vertices, VerticesJson.Count);
-          for VertexIndex := 0 to VerticesJson.Count - 1 do
-          begin
-            if not (VerticesJson.Items[VertexIndex] is TJSONObject) then
-              raise EConvertError.CreateFmt(
-                'Path layer %d vertex %d is invalid', [I, VertexIndex]);
-            VertexJson := TJSONObject(VerticesJson.Items[VertexIndex]);
-            with PathValue.Vertices[VertexIndex] do
-            begin
-              Position := TPointF.Create(ReadSingle(VertexJson, 'x'),
-                ReadSingle(VertexJson, 'y'));
-              IncomingControl := TPointF.Create(
-                ReadSingle(VertexJson, 'incomingX'),
-                ReadSingle(VertexJson, 'incomingY'));
-              OutgoingControl := TPointF.Create(
-                ReadSingle(VertexJson, 'outgoingX'),
-                ReadSingle(VertexJson, 'outgoingY'));
-              VertexKind := ReadString(VertexJson, 'kind');
-              if VertexKind = 'sharp' then
-                Kind := slvkSharp
-              else if VertexKind = 'bezier' then
-                Kind := slvkBezier
-              else
-                raise EConvertError.CreateFmt(
-                  'Path layer %d vertex %d has an invalid kind',
-                  [I, VertexIndex]);
-              SegmentKind := ReadString(VertexJson, 'outgoingSegment');
-              if SegmentKind = 'line' then
-                OutgoingSegment := slskLine
-              else if SegmentKind = 'cubicBezier' then
-                OutgoingSegment := slskCubicBezier
-              else
-                raise EConvertError.CreateFmt(
-                  'Path layer %d vertex %d has an invalid outgoing segment',
-                  [I, VertexIndex]);
-            end;
-          end;
           PathData[I] := PathValue;
           Continue;
         end;
@@ -991,6 +1028,12 @@ begin
           Document.InsertImage(Document.LayerCount, ImageData[I])
         else if LayerTypes[I] = 'text' then
           Document.InsertText(Document.LayerCount, TextData[I])
+        else if LayerTypes[I] = 'textPath' then
+        begin
+          TextPathLayer := CreateTextPathLayer(TextData[I],
+            TextPathVerticesData[I]);
+          Document.InsertLayer(Document.LayerCount, TextPathLayer);
+        end
         else if LayerTypes[I] = 'path' then
           Document.InsertPath(Document.LayerCount, PathData[I])
         else if LayerTypes[I] = 'shape' then

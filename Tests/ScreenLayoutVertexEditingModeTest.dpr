@@ -25,6 +25,7 @@ var
   History: TVectArtEditHistory;
   Index: Integer;
   Interaction: TVectArtCanvasInteraction;
+  Kind: TScreenLayoutVertexKind;
   PathLayer: TVectArtPathLayer;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
@@ -83,15 +84,28 @@ begin
 
     Interaction.Configure(Document, Rect(0, 0, 200, 100), 1);
     Interaction.SetVertexStructureEditing(True, False);
+    Check(Interaction.SelectedPathVertexKind(Kind) and
+      (Kind = slvkSharp),
+      'Path edit did not report the selected sharp vertex');
+    Check(Interaction.SetSelectedPathVertexKind(slvkBezier),
+      'Path edit could not change the selected vertex kind');
+    Check(Interaction.SelectedPathVertexKind(Kind) and
+      (Kind = slvkBezier) and
+      (PathLayer.Vertices[1].Kind = slvkBezier),
+      'Path edit mode and selected vertex kind diverged');
+    Check(Length(Interaction.SelectedShapeVertexKindButtons) = 0,
+      'Path edit exposed the removed vertex kind buttons');
+    Check(Interaction.SetSelectedPathVertexKind(slvkSharp),
+      'Path edit could not restore the selected vertex to sharp');
     Check(Interaction.MouseDownSelectedVertex(mbLeft, [], 82, 52,
       CaptureNeeded) and not CaptureNeeded,
-      'Line tool could not insert a vertex');
+      'Path edit did not insert a vertex from a segment click');
     Check(Length(PathLayer.Vertices) = 4,
-      'Line tool did not add the vertex');
-    Check(Interaction.MouseDown(mbRight, [], 82, 52),
-      'Line tool vertex deletion was not reported as handled');
+      'Path edit did not add a vertex');
+    Check(Interaction.MouseDownSelectedVertex(mbRight, [], 82, 52,
+      CaptureNeeded), 'Path edit did not delete a vertex with right click');
     Check(Length(PathLayer.Vertices) = 3,
-      'Line tool did not delete the vertex');
+      'Path edit did not restore the vertex count after deletion');
   finally
     Interaction.Free;
     History.Free;

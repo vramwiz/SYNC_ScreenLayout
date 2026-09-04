@@ -69,6 +69,7 @@ type
     FDragIsPath: Boolean;
     FDragIsShape: Boolean; // 単一Shapeの輪郭を直接変形している状態。
     FDragIsText: Boolean;  // 単一Textの変形モードを伴う枠操作中ならTrue。
+    FDragIsTextPath: Boolean; // 文字枠と内包Pathを一体変形している状態。
     FDragMode: TVectArtCanvasDragMode;
     FMoveLayerIndices: TArray<Integer>;
     FMoveStartBounds: TArray<TRectF>;
@@ -126,6 +127,7 @@ type
     procedure CommitPathVerticesCommand;
     procedure CommitShapeContoursCommand;
     procedure CommitTextSpacingCommand;
+    procedure CommitTextPathRotationCommand;
     procedure CommitTextResizeCommand;
     function AxisAlignedResizedBounds(X, Y: Integer;
       RotationDegrees: Single): TRectF;
@@ -185,6 +187,14 @@ type
     function CancelTextSpacingDrag: Boolean;
     // 単一選択されたPathのアンカーを画面座標の矩形列として返す。
     function SelectedPathVertexRects: TArray<TRect>;
+    // 単一選択されたPathの直線・ベジェを表示用の画面座標点列として返す。
+    function SelectedPathPoints: TArray<TPoint>;
+    // パス編集で選択中のアンカー種別を返す。
+    function SelectedPathVertexKind(
+      out Kind: TScreenLayoutVertexKind): Boolean;
+    // パス編集で選択中のアンカーへ種別を適用する。
+    function SetSelectedPathVertexKind(
+      Kind: TScreenLayoutVertexKind): Boolean;
     // 単一選択されたShapeの全輪郭アンカーを画面座標の矩形列として返す。
     function SelectedShapeVertexRects: TArray<TRect>;
     // 選択頂点の外側へ表示する鋭角／ベジェ種別ボタンを返す。
@@ -214,7 +224,7 @@ type
     // 4隅の個別半径を選択・調整するハンドルを返す。
     function RoundedRectangleCornerHandles:
       TArray<TScreenLayoutRoundedCornerHandle>;
-    // 頂点の追加・削除・種別変更を、対応する作成ツールの選択中だけ許可する。
+    // 対応する作成ツールの選択中だけ、頂点の追加・削除・移動・種別変更を許可する。
     procedure SetVertexStructureEditing(PathEnabled, ShapeEnabled: Boolean);
     property Dragging: Boolean read GetDragging;
     property AxisAlignedSelection: Boolean read FAxisAlignedSelection;
@@ -460,7 +470,8 @@ begin
   Result := False;
   if (FDocument = nil) or (FZoom <= 0) or
     (FDocument.SelectionCount = 0) or (FDocument.SelectedIndex <= 0) or
-    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextLayer) then
+    not (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextLayer) or
+    (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextPathLayer) then
     Exit;
   Selection := FDocument.GetSelectedLayerIndices;
   for I := 0 to High(Selection) do
@@ -499,7 +510,7 @@ function TVectArtCanvasInteraction.SelectedTextIndividualSpacingHandlesCore:
   TArray<TScreenLayoutTextIndividualSpacingHandle>;
 const
   ARROW_HALF_LENGTH = 7.0;
-  ARROW_OUTSIDE_OFFSET = 10.0;
+  ARROW_OUTSIDE_FRAME_GAP = 12.0;
   HIT_HALF_SIZE = 8;
 var
   ArrowCenter: TPointF;
@@ -517,6 +528,7 @@ var
   Layer: TScreenLayoutTextLayer;
   Layout: TScreenLayoutTextLayout;
   LocalPoint: TPointF;
+  OutsideOffset: Single;
   ScreenPoint: TPointF;
   ScaleX: Single;
   UnitText: string;
@@ -525,6 +537,7 @@ begin
   if (FDocument = nil) or (FZoom <= 0) or
     (FDocument.SelectionCount <> 1) or (FDocument.SelectedIndex <= 0) or
     not (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextLayer) or
+    (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextPathLayer) or
     FDocument[FDocument.SelectedIndex].Locked then
     Exit;
   Layer := TScreenLayoutTextLayer(FDocument[FDocument.SelectedIndex]);
@@ -550,6 +563,8 @@ begin
     Layer.FontStyle);
   ScaleX := Layer.Bounds.Width / Layout.Width;
   Center := Layer.Bounds.CenterPoint;
+  OutsideOffset := SelectionFrameOffset(0, FZoom) +
+    ARROW_OUTSIDE_FRAME_GAP;
   BoundaryX := 0;
   CharacterIndex := 1;
   GapIndex := 0;
@@ -577,7 +592,7 @@ begin
     AxisX := AxisX / AxisLength;
     AxisY := AxisY / AxisLength;
     ArrowCenter := TPointF.Create(ScreenPoint.X - AxisY *
-      ARROW_OUTSIDE_OFFSET, ScreenPoint.Y + AxisX * ARROW_OUTSIDE_OFFSET);
+      OutsideOffset, ScreenPoint.Y + AxisX * OutsideOffset);
     Result[GapIndex].GapIndex := GapIndex;
     Result[GapIndex].LineStart := Point(
       Round(ArrowCenter.X - AxisX * ARROW_HALF_LENGTH),
@@ -939,6 +954,32 @@ begin
   if not SameValue(FRotationStartValue, NewValue) then
     FEditHistory.AddApplied(TVectArtRotationCommand.Create(FDocument,
       FDragLayerIndex, FRotationStartValue, NewValue));
+end;
+
+procedure TVectArtCanvasInteraction.CommitTextPathRotationCommand;
+var
+  Command: TVectArtCompoundCommand;
+  Layer: TScreenLayoutTextPathLayer;
+  NewVertices: TArray<TScreenLayoutVertex>;
+begin
+  if (FEditHistory = nil) or (FDocument = nil) or
+    (FDragLayerIndex <= 0) or
+    not (FDocument[FDragLayerIndex] is TScreenLayoutTextPathLayer) then
+    Exit;
+  Layer := TScreenLayoutTextPathLayer(FDocument[FDragLayerIndex]);
+  NewVertices := Layer.EditablePathVertices;
+  Command := TVectArtCompoundCommand.Create;
+  if not SameValue(FRotationStartValue, Layer.RotationDegrees) then
+    Command.Add(TVectArtRotationCommand.Create(FDocument,
+      FDragLayerIndex, FRotationStartValue, Layer.RotationDegrees));
+  if not ScreenLayoutPathVerticesEqual(FDragStartPathVertices,
+    NewVertices) then
+    Command.Add(TScreenLayoutPathVerticesCommand.Create(FDocument,
+      FDragLayerIndex, FDragStartPathVertices, NewVertices));
+  if Command.Count > 0 then
+    FEditHistory.AddApplied(Command)
+  else
+    Command.Free;
 end;
 
 procedure TVectArtCanvasInteraction.CommitTextSpacingCommand;
@@ -1348,6 +1389,14 @@ begin
           FMoveStartBounds[MoveIndex] :=
             TVectArtRectangleLayer(FDocument[I]).Bounds;
         Inc(MoveIndex);
+        if (FDragMode = vcdmMove) and
+          FDocument[I].SupportsPathEditing then
+        begin
+          FMovePathLayerIndices[PathIndex] := I;
+          FMoveStartPathVertices[PathIndex] :=
+            FDocument[I].EditablePathVertices;
+          Inc(PathIndex);
+        end;
       end
       else if FDocument[I] is TVectArtImageLayer then
       begin
@@ -1392,7 +1441,7 @@ var
   ImageLayer: TVectArtImageLayer;
   ImagePointIndex: Integer;
   NewBounds: TArray<TRectF>;
-  PathLayer: TVectArtPathLayer;
+  PathLayer: TVectArtLayer;
   ShapeLayer: TScreenLayoutShapeLayer;
 begin
   if (FEditHistory = nil) or (FDocument = nil) or
@@ -1442,12 +1491,12 @@ begin
   end;
   for I := 0 to High(FMovePathLayerIndices) do
   begin
-    PathLayer := TVectArtPathLayer(FDocument[FMovePathLayerIndices[I]]);
+    PathLayer := FDocument[FMovePathLayerIndices[I]];
     if not ScreenLayoutPathVerticesEqual(FMoveStartPathVertices[I],
-      PathLayer.Vertices) then
+      PathLayer.EditablePathVertices) then
       Command.Add(TScreenLayoutPathVerticesCommand.Create(FDocument,
         FMovePathLayerIndices[I], FMoveStartPathVertices[I],
-        PathLayer.Vertices));
+        PathLayer.EditablePathVertices));
   end;
   for I := 0 to High(FMoveShapeLayerIndices) do
   begin
@@ -1502,6 +1551,7 @@ begin
   FDragIsPath := False;
   FDragIsShape := False;
   FDragIsText := False;
+  FDragIsTextPath := False;
   FMoveOccurred := False;
   FToggleSelectionModeOnClick := False;
   SetLength(FMoveLayerIndices, 0);
@@ -2263,6 +2313,8 @@ begin
       FDragIsPath := FDocument[FDragLayerIndex] is TVectArtPathLayer;
       FDragIsShape := FDocument[FDragLayerIndex] is
         TScreenLayoutShapeLayer;
+      FDragIsTextPath := FDocument[FDragLayerIndex] is
+        TScreenLayoutTextPathLayer;
       if FDragIsGroup then
       begin
         if not TryGetScreenLayoutLayerBounds(
@@ -2304,6 +2356,16 @@ begin
         FRotationStartValue := 0;
         CenterX := ToScreenX((ShapeBounds.Left + ShapeBounds.Right) * 0.5);
         CenterY := ToScreenY((ShapeBounds.Top + ShapeBounds.Bottom) * 0.5);
+      end
+      else if FDragIsTextPath then
+      begin
+        TextLayer := TScreenLayoutTextLayer(FDocument[FDragLayerIndex]);
+        FDragStartBounds := TextLayer.Bounds;
+        FDragStartPathVertices :=
+          FDocument[FDragLayerIndex].EditablePathVertices;
+        FRotationStartValue := TextLayer.RotationDegrees;
+        CenterX := ToScreenX(FDragStartBounds.CenterPoint.X);
+        CenterY := ToScreenY(FDragStartBounds.CenterPoint.Y);
       end
       else
       begin
@@ -2473,9 +2535,6 @@ begin
   end;
   if (Button <> mbLeft) or (ssCtrl in Shift) then
     Exit;
-  if FPathStructureEditingEnabled and
-    FPathInteraction.ApplyVertexKindAt(X, Y) then
-    Exit(True);
   if FShapeStructureEditingEnabled and
     FShapeInteraction.ApplyVertexKindAt(X, Y) then
     Exit(True);
@@ -2511,11 +2570,11 @@ begin
     CaptureNeeded := True;
     Exit(True);
   end;
-  if FPathStructureEditingEnabled and
-    FPathInteraction.InsertVertexAt(X, Y) then
-    Exit(True);
   if FShapeStructureEditingEnabled and
     FShapeInteraction.InsertVertexAt(X, Y) then
+    Exit(True);
+  if FPathStructureEditingEnabled and
+    FPathInteraction.InsertVertexAt(X, Y) then
     Exit(True);
 end;
 
@@ -2903,6 +2962,26 @@ begin
       FDocument.SetShapeContours(FDragLayerIndex, NewShapeContours);
       Exit(True);
     end;
+    if FDragIsTextPath and
+      (FDocument[FDragLayerIndex] is TScreenLayoutTextPathLayer) then
+    begin
+      CenterX := ToScreenX(FDragStartBounds.CenterPoint.X);
+      CenterY := ToScreenY(FDragStartBounds.CenterPoint.Y);
+      CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
+      DesiredRotation := CurrentMouseAngle - FRotationStartMouseAngle;
+      NewPathVertices := RotateScreenLayoutPathVertices(
+        FDragStartPathVertices, FDragStartBounds.CenterPoint,
+        DesiredRotation);
+      FDocument.BeginUpdate;
+      try
+        FDocument.SetPathVertices(FDragLayerIndex, NewPathVertices);
+        FDocument.SetRectangleRotation(FDragLayerIndex,
+          FRotationStartValue + DesiredRotation);
+      finally
+        FDocument.EndUpdate;
+      end;
+      Exit(True);
+    end;
     if FDocument[FDragLayerIndex] is TScreenLayoutRectangleLineLayer then
     begin
       RectangleLine := TScreenLayoutRectangleLineLayer(
@@ -2999,6 +3078,8 @@ begin
         CommitPathVerticesCommand
       else if FDragIsShape then
         CommitShapeContoursCommand
+      else if FDragIsTextPath then
+        CommitTextPathRotationCommand
       else
         CommitRotationCommand;
     if FDragMode in [vcdmRoundedRadius, vcdmRoundedCornerRadius] then
@@ -3045,6 +3126,25 @@ begin
   Result := FPathInteraction.SelectedVertexRects;
 end;
 
+function TVectArtCanvasInteraction.SelectedPathPoints: TArray<TPoint>;
+begin
+  Result := FPathInteraction.SelectedPathPoints;
+end;
+
+function TVectArtCanvasInteraction.SelectedPathVertexKind(
+  out Kind: TScreenLayoutVertexKind): Boolean;
+begin
+  Result := FPathStructureEditingEnabled and
+    FPathInteraction.SelectedVertexKind(Kind);
+end;
+
+function TVectArtCanvasInteraction.SetSelectedPathVertexKind(
+  Kind: TScreenLayoutVertexKind): Boolean;
+begin
+  Result := FPathStructureEditingEnabled and
+    FPathInteraction.SetSelectedVertexKind(Kind);
+end;
+
 function TVectArtCanvasInteraction.SelectedShapeVertexRects: TArray<TRect>;
 begin
   Result := FShapeInteraction.SelectedVertexRects;
@@ -3054,9 +3154,7 @@ function TVectArtCanvasInteraction.SelectedShapeVertexKindButtons:
   TArray<TScreenLayoutVertexKindButton>;
 begin
   Result := nil;
-  if FPathStructureEditingEnabled then
-    Result := FPathInteraction.SelectedVertexKindButtons;
-  if (Length(Result) = 0) and FShapeStructureEditingEnabled then
+  if FShapeStructureEditingEnabled then
     Result := FShapeInteraction.SelectedVertexKindButtons;
 end;
 
@@ -3098,207 +3196,39 @@ end;
 
 function TVectArtCanvasInteraction.AxisAlignedResizedBounds(X, Y: Integer;
   RotationDegrees: Single): TRectF;
-var
-  Cosine: Single;
-  DesiredOuter: TRectF;
-  Determinant: Single;
-  DX: Single;
-  DY: Single;
-  NewCenter: TPointF;
-  NewHeight: Single;
-  NewWidth: Single;
-  OriginalOuter: TRectF;
-  OuterHeight: Single;
-  OuterWidth: Single;
-  Scale: Single;
-  Sine: Single;
 begin
-  OriginalOuter := QuadBounds(RectangleCorners(FDragStartBounds,
-    RotationDegrees));
-  DesiredOuter := OriginalOuter;
-  DX := (X - FDragStartMouse.X) / FZoom;
-  DY := (Y - FDragStartMouse.Y) / FZoom;
-  if FDragHandle in [vshTopLeft, vshLeft, vshBottomLeft] then
-    DesiredOuter.Left := Min(DesiredOuter.Left + DX,
-      DesiredOuter.Right - MIN_RECTANGLE_SIZE)
-  else if FDragHandle in [vshTopRight, vshRight, vshBottomRight] then
-    DesiredOuter.Right := Max(DesiredOuter.Right + DX,
-      DesiredOuter.Left + MIN_RECTANGLE_SIZE);
-  if FDragHandle in [vshTopLeft, vshTop, vshTopRight] then
-    DesiredOuter.Top := Min(DesiredOuter.Top + DY,
-      DesiredOuter.Bottom - MIN_RECTANGLE_SIZE)
-  else if FDragHandle in [vshBottomLeft, vshBottom, vshBottomRight] then
-    DesiredOuter.Bottom := Max(DesiredOuter.Bottom + DY,
-      DesiredOuter.Top + MIN_RECTANGLE_SIZE);
-
-  Cosine := Abs(Cos(DegToRad(RotationDegrees)));
-  Sine := Abs(Sin(DegToRad(RotationDegrees)));
-  Determinant := Cosine * Cosine - Sine * Sine;
-  if Abs(Determinant) > 0.05 then
-  begin
-    NewWidth := (Cosine * DesiredOuter.Width -
-      Sine * DesiredOuter.Height) / Determinant;
-    NewHeight := (Cosine * DesiredOuter.Height -
-      Sine * DesiredOuter.Width) / Determinant;
-  end
-  else
-  begin
-    NewWidth := -1;
-    NewHeight := -1;
-  end;
-  if (NewWidth < MIN_RECTANGLE_SIZE) or
-    (NewHeight < MIN_RECTANGLE_SIZE) then
-  begin
-    // 45度付近や成立しない外接寸法では縦横比を保って破綻を避ける。
-    Scale := Max(DesiredOuter.Width / Max(OriginalOuter.Width, 0.001),
-      DesiredOuter.Height / Max(OriginalOuter.Height, 0.001));
-    NewWidth := FDragStartBounds.Width * Scale;
-    NewHeight := FDragStartBounds.Height * Scale;
-  end;
-  NewWidth := Max(NewWidth, MIN_RECTANGLE_SIZE);
-  NewHeight := Max(NewHeight, MIN_RECTANGLE_SIZE);
-  OuterWidth := Cosine * NewWidth + Sine * NewHeight;
-  OuterHeight := Sine * NewWidth + Cosine * NewHeight;
-  NewCenter := TPointF.Create(
-    (DesiredOuter.Left + DesiredOuter.Right) * 0.5,
-    (DesiredOuter.Top + DesiredOuter.Bottom) * 0.5);
-  if FDragHandle in [vshTopLeft, vshLeft, vshBottomLeft] then
-    NewCenter.X := DesiredOuter.Right - OuterWidth * 0.5
-  else if FDragHandle in [vshTopRight, vshRight, vshBottomRight] then
-    NewCenter.X := DesiredOuter.Left + OuterWidth * 0.5;
-  if FDragHandle in [vshTopLeft, vshTop, vshTopRight] then
-    NewCenter.Y := DesiredOuter.Bottom - OuterHeight * 0.5
-  else if FDragHandle in [vshBottomLeft, vshBottom, vshBottomRight] then
-    NewCenter.Y := DesiredOuter.Top + OuterHeight * 0.5;
-  Result := TRectF.Create(NewCenter.X - NewWidth * 0.5,
-    NewCenter.Y - NewHeight * 0.5, NewCenter.X + NewWidth * 0.5,
-    NewCenter.Y + NewHeight * 0.5);
+  Result := ResizeAxisAlignedOuterBounds(FDragStartBounds,
+    FDragStartMouse, Point(X, Y), FDragHandle, FZoom, RotationDegrees,
+    MIN_RECTANGLE_SIZE);
 end;
 
 function TVectArtCanvasInteraction.UniformResizedBounds(
   X, Y: Integer): TRectF;
 var
-  Anchor: TPointF;
-  Center: TPointF;
   CurrentLogical: TPointF;
-  DesiredHandle: TPointF;
-  HandlePoint: TPointF;
-  LocalCurrent: TPointF;
-  LocalStart: TPointF;
-  MinimumScale: Single;
-  NewAnchor: TPointF;
-  NewCenter: TPointF;
   RotationDegrees: Single;
-  Scale: Single;
-  StartAnchor: TPointF;
   StartLogical: TPointF;
-  VectorX: Single;
-  VectorY: Single;
 begin
   Result := FDragStartBounds;
   if (FDocument = nil) or (FDragLayerIndex <= 0) or
     not (FDocument[FDragLayerIndex] is TScreenLayoutTextLayer) then
     Exit;
-  Center := FDragStartBounds.CenterPoint;
-  case FDragHandle of
-    vshTopLeft:
-    begin
-      HandlePoint := FDragStartBounds.TopLeft;
-      Anchor := FDragStartBounds.BottomRight;
-    end;
-    vshTop:
-    begin
-      HandlePoint := TPointF.Create(Center.X, FDragStartBounds.Top);
-      Anchor := TPointF.Create(Center.X, FDragStartBounds.Bottom);
-    end;
-    vshTopRight:
-    begin
-      HandlePoint := TPointF.Create(FDragStartBounds.Right,
-        FDragStartBounds.Top);
-      Anchor := TPointF.Create(FDragStartBounds.Left,
-        FDragStartBounds.Bottom);
-    end;
-    vshRight:
-    begin
-      HandlePoint := TPointF.Create(FDragStartBounds.Right, Center.Y);
-      Anchor := TPointF.Create(FDragStartBounds.Left, Center.Y);
-    end;
-    vshBottomRight:
-    begin
-      HandlePoint := FDragStartBounds.BottomRight;
-      Anchor := FDragStartBounds.TopLeft;
-    end;
-    vshBottom:
-    begin
-      HandlePoint := TPointF.Create(Center.X, FDragStartBounds.Bottom);
-      Anchor := TPointF.Create(Center.X, FDragStartBounds.Top);
-    end;
-    vshBottomLeft:
-    begin
-      HandlePoint := TPointF.Create(FDragStartBounds.Left,
-        FDragStartBounds.Bottom);
-      Anchor := TPointF.Create(FDragStartBounds.Right,
-        FDragStartBounds.Top);
-    end;
-    vshLeft:
-    begin
-      HandlePoint := TPointF.Create(FDragStartBounds.Left, Center.Y);
-      Anchor := TPointF.Create(FDragStartBounds.Right, Center.Y);
-    end;
-  else
-    Exit;
-  end;
   RotationDegrees := TScreenLayoutTextLayer(
     FDocument[FDragLayerIndex]).RotationDegrees;
   StartLogical := TPointF.Create(ToLogicalX(FDragStartMouse.X),
     ToLogicalY(FDragStartMouse.Y));
   CurrentLogical := TPointF.Create(ToLogicalX(X), ToLogicalY(Y));
-  LocalStart := RotatePointAround(StartLogical, Center, -RotationDegrees);
-  LocalCurrent := RotatePointAround(CurrentLogical, Center,
-    -RotationDegrees);
-  DesiredHandle := TPointF.Create(
-    HandlePoint.X + LocalCurrent.X - LocalStart.X,
-    HandlePoint.Y + LocalCurrent.Y - LocalStart.Y);
-  VectorX := HandlePoint.X - Anchor.X;
-  VectorY := HandlePoint.Y - Anchor.Y;
-  Scale := ((DesiredHandle.X - Anchor.X) * VectorX +
-    (DesiredHandle.Y - Anchor.Y) * VectorY) /
-    Max(VectorX * VectorX + VectorY * VectorY, 0.001);
-  MinimumScale := Max(MIN_RECTANGLE_SIZE /
-    Max(FDragStartBounds.Width, 0.001), MIN_RECTANGLE_SIZE /
-    Max(FDragStartBounds.Height, 0.001));
-  Scale := Max(Scale, MinimumScale);
-  Result := TRectF.Create(
-    Anchor.X + (FDragStartBounds.Left - Anchor.X) * Scale,
-    Anchor.Y + (FDragStartBounds.Top - Anchor.Y) * Scale,
-    Anchor.X + (FDragStartBounds.Right - Anchor.X) * Scale,
-    Anchor.Y + (FDragStartBounds.Bottom - Anchor.Y) * Scale);
-  if not SameValue(RotationDegrees, 0.0) then
-  begin
-    NewCenter := Result.CenterPoint;
-    StartAnchor := RotatePointAround(Anchor, Center, RotationDegrees);
-    NewAnchor := RotatePointAround(Anchor, NewCenter, RotationDegrees);
-    Result.Offset(StartAnchor.X - NewAnchor.X,
-      StartAnchor.Y - NewAnchor.Y);
-  end;
+  Result := ResizeUniformBounds(FDragStartBounds, StartLogical,
+    CurrentLogical, FDragHandle, RotationDegrees, MIN_RECTANGLE_SIZE);
 end;
 
 function TVectArtCanvasInteraction.ResizedBounds(X, Y: Integer): TRectF;
 var
-  Anchor: TPointF;
   ArcLayer: TScreenLayoutArcLayer;
-  Center: TPointF;
   CurrentLogical: TPointF;
-  DX: Single;
-  DY: Single;
-  LocalCurrent: TPointF;
-  LocalStart: TPointF;
-  NewAnchor: TPointF;
-  NewCenter: TPointF;
   RectangleLine: TScreenLayoutRectangleLineLayer;
   RectangleLayer: TVectArtRectangleLayer;
   RotationDegrees: Single;
-  StartAnchor: TPointF;
   StartLogical: TPointF;
 begin
   Result := FDragStartBounds;
@@ -3327,55 +3257,11 @@ begin
   end;
   if FAxisAlignedSelection and not SameValue(RotationDegrees, 0.0) then
     Exit(AxisAlignedResizedBounds(X, Y, RotationDegrees));
-  if SameValue(RotationDegrees, 0.0) then
-  begin
-    DX := (X - FDragStartMouse.X) / FZoom;
-    DY := (Y - FDragStartMouse.Y) / FZoom;
-  end
-  else
-  begin
-    Center := TPointF.Create((FDragStartBounds.Left +
-      FDragStartBounds.Right) * 0.5, (FDragStartBounds.Top +
-      FDragStartBounds.Bottom) * 0.5);
-    StartLogical := TPointF.Create(ToLogicalX(FDragStartMouse.X),
-      ToLogicalY(FDragStartMouse.Y));
-    CurrentLogical := TPointF.Create(ToLogicalX(X), ToLogicalY(Y));
-    LocalStart := RotatePointAround(StartLogical, Center, -RotationDegrees);
-    LocalCurrent := RotatePointAround(CurrentLogical, Center,
-      -RotationDegrees);
-    DX := LocalCurrent.X - LocalStart.X;
-    DY := LocalCurrent.Y - LocalStart.Y;
-  end;
-  if FDragHandle in [vshTopLeft, vshLeft, vshBottomLeft] then
-    Result.Left := Min(FDragStartBounds.Left + DX,
-      FDragStartBounds.Right - MIN_RECTANGLE_SIZE);
-  if FDragHandle in [vshTopRight, vshRight, vshBottomRight] then
-    Result.Right := Max(FDragStartBounds.Right + DX,
-      FDragStartBounds.Left + MIN_RECTANGLE_SIZE);
-  if FDragHandle in [vshTopLeft, vshTop, vshTopRight] then
-    Result.Top := Min(FDragStartBounds.Top + DY,
-      FDragStartBounds.Bottom - MIN_RECTANGLE_SIZE);
-  if FDragHandle in [vshBottomLeft, vshBottom, vshBottomRight] then
-    Result.Bottom := Max(FDragStartBounds.Bottom + DY,
-      FDragStartBounds.Top + MIN_RECTANGLE_SIZE);
-  if not SameValue(RotationDegrees, 0.0) then
-  begin
-    Anchor := Center;
-    if FDragHandle in [vshTopLeft, vshLeft, vshBottomLeft] then
-      Anchor.X := FDragStartBounds.Right
-    else if FDragHandle in [vshTopRight, vshRight, vshBottomRight] then
-      Anchor.X := FDragStartBounds.Left;
-    if FDragHandle in [vshTopLeft, vshTop, vshTopRight] then
-      Anchor.Y := FDragStartBounds.Bottom
-    else if FDragHandle in [vshBottomLeft, vshBottom, vshBottomRight] then
-      Anchor.Y := FDragStartBounds.Top;
-    NewCenter := TPointF.Create((Result.Left + Result.Right) * 0.5,
-      (Result.Top + Result.Bottom) * 0.5);
-    StartAnchor := RotatePointAround(Anchor, Center, RotationDegrees);
-    NewAnchor := RotatePointAround(Anchor, NewCenter, RotationDegrees);
-    Result.Offset(StartAnchor.X - NewAnchor.X,
-      StartAnchor.Y - NewAnchor.Y);
-  end;
+  StartLogical := TPointF.Create(ToLogicalX(FDragStartMouse.X),
+    ToLogicalY(FDragStartMouse.Y));
+  CurrentLogical := TPointF.Create(ToLogicalX(X), ToLogicalY(Y));
+  Result := ResizeRotatedBounds(FDragStartBounds, StartLogical,
+    CurrentLogical, FDragHandle, RotationDegrees, MIN_RECTANGLE_SIZE);
 end;
 
 end.

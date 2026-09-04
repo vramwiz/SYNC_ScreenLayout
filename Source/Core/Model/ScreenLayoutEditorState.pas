@@ -11,7 +11,7 @@ type
   TVectArtEditorTool = (vetSelect, vetRectangleLine, vetRectangle,
     vetRoundedRectangleLine, vetRoundedRectangle,
     vetEllipseLine, vetEllipse, vetArc, vetArcShape, vetLine, vetPath,
-    vetShape, vetText);
+    vetShape, vetText, vetTextPath);
 
   TVectArtEditorState = class
   private
@@ -461,6 +461,14 @@ begin
       NextVertexKind := slvkBezier
     else
       NextVertexKind := slvkSharp;
+  end
+  else if (Value = vetText) and
+    (FCurrentTool in [vetText, vetTextPath]) then
+  begin
+    if FCurrentTool = vetText then
+      CurrentTool := vetTextPath
+    else
+      CurrentTool := vetText;
   end
   else
     CurrentTool := Value;

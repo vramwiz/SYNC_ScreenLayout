@@ -92,7 +92,6 @@ type
     function IsEditingSurfaceFocused: Boolean;
     function IsTextInputFocused: Boolean;
     function ToolShortcutEnabled: Boolean;
-    function VertexShortcutEnabled: Boolean;
     procedure LoadLayoutSettings;
     procedure LoadDocument;
     procedure SaveLayoutSettings;
@@ -437,7 +436,10 @@ begin
     (FGeometryPopupFrame <> nil) then
     FGeometryPopupFrame.RefreshFromDocument;
   if FEditorFrame <> nil then
+  begin
+    FEditorFrame.CanvasControl.ApplyPathVertexModeToSelection;
     FEditorFrame.CanvasControl.Invalidate;
+  end;
   if FLayerFrame <> nil then
     FLayerFrame.RefreshFromDocument;
   if FObjectPropertiesFrame <> nil then
@@ -499,6 +501,10 @@ begin
     (FEditorState.CurrentTool = vetText) then
     lblStatus.Caption := 'Text: drag an input guide, type, click outside to ' +
       'finish   Canvas: ' + CanvasSize
+  else if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetTextPath) then
+    lblStatus.Caption := 'Text Path: create an open path for text   Canvas: ' +
+      CanvasSize
   else
     lblStatus.Caption := 'Ready   Tool: Select   Canvas: ' + CanvasSize;
   if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) then
@@ -780,18 +786,6 @@ begin
       ActivateToolShortcut(vetText);
     end,
     ToolShortcutEnabled);
-  FShortcuts.Add(Ord('V'), [],
-    procedure
-    begin
-      FEditorState.NextVertexKind := slvkSharp;
-    end,
-    VertexShortcutEnabled);
-  FShortcuts.Add(Ord('B'), [],
-    procedure
-    begin
-      FEditorState.NextVertexKind := slvkBezier;
-    end,
-    VertexShortcutEnabled);
   FShortcuts.Add(Ord('Z'), [ssCtrl],
     procedure
     begin
@@ -919,12 +913,6 @@ end;
 function TMainForm.ToolShortcutEnabled: Boolean;
 begin
   Result := (FEditorState <> nil) and not IsTextInputFocused;
-end;
-
-function TMainForm.VertexShortcutEnabled: Boolean;
-begin
-  Result := ToolShortcutEnabled and
-    (FEditorState.CurrentTool in [vetPath, vetShape]);
 end;
 
 procedure TMainForm.SelectAllLayers;
