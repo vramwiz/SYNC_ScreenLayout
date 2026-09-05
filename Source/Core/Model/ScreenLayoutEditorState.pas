@@ -10,8 +10,8 @@ uses
 type
   TVectArtEditorTool = (vetSelect, vetRectangleLine, vetRectangle,
     vetRoundedRectangleLine, vetRoundedRectangle,
-    vetEllipseLine, vetEllipse, vetArc, vetArcShape, vetLine, vetPath,
-    vetShape, vetText, vetTextPath);
+    vetEllipseLine, vetEllipse, vetArc, vetArcShape, vetLine, vetFreehand,
+    vetPath, vetShape, vetText, vetTextPath);
 
   TVectArtEditorState = class
   private

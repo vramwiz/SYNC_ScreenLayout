@@ -52,10 +52,12 @@ type
     FContributors: TObjectList<TScreenLayoutObjectMenuContributor>;
     FDocument: TVectArtDocument;
     FEditorState: TVectArtEditorState;
+    FHitLayerIndices: TArray<Integer>;
     FHost: TWinControl;
     FMenu: TVectArtDarkPopupMenu;
     function CaptureContext: TScreenLayoutObjectMenuContext;
     procedure Rebuild(const Context: TScreenLayoutObjectMenuContext);
+    procedure SelectHitLayer(Sender: TObject);
   public
     // Host上へルートメニューを生成し、現在の選択を取得するモデルを非所有参照で保持する。
     constructor Create(AOwner: TComponent; Host: TWinControl;
@@ -67,6 +69,9 @@ type
       Contributor: TScreenLayoutObjectMenuContributor);
     // Canvasの通知座標へ、現在の選択に適用できる項目を構築してメニューを開く。
     procedure ShowForObject(Sender: TObject; const ScreenPoint: TPoint);
+      overload;
+    procedure ShowForObject(Sender: TObject; const ScreenPoint: TPoint;
+      const LayerIndices: TArray<Integer>); overload;
     // 実行済み項目からポップアップと開いている子メニューを閉じる。
     procedure Close;
     property Menu: TVectArtDarkPopupMenu read FMenu;
@@ -200,7 +205,10 @@ procedure TScreenLayoutObjectContextMenu.Rebuild(
   const Context: TScreenLayoutObjectMenuContext);
 var
   Contributor: TScreenLayoutObjectMenuContributor;
+  I: Integer;
+  LayerBuilder: TScreenLayoutObjectMenuBuilder;
   OrderBuilder: TScreenLayoutObjectMenuBuilder;
+  Panel: TPanel;
 begin
   FreeAndNil(FBuilder);
   FBuilder := TScreenLayoutObjectMenuBuilder.Create(FMenu, FHost);
@@ -213,6 +221,20 @@ begin
   OrderBuilder.AddItem('背面へ', nil);
   OrderBuilder.AddItem('最背面へ', nil);
   FBuilder.AddItem('削除        Delete', nil);
+  if (Length(FHitLayerIndices) > 1) and
+    ((FEditorState = nil) or (FEditorState.OpenGroup = nil)) then
+  begin
+    FBuilder.AddSeparator;
+    LayerBuilder := FBuilder.AddSubMenu('この位置のレイヤー', 208);
+    for I := 0 to High(FHitLayerIndices) do
+      if (FHitLayerIndices[I] > 0) and
+        (FHitLayerIndices[I] < FDocument.LayerCount) then
+      begin
+        Panel := LayerBuilder.AddItem(
+          FDocument[FHitLayerIndices[I]].Name, SelectHitLayer);
+        Panel.Tag := FHitLayerIndices[I];
+      end;
+  end;
   for Contributor in FContributors do
     if Contributor.AppliesTo(Context) then
     begin
@@ -232,8 +254,30 @@ end;
 procedure TScreenLayoutObjectContextMenu.ShowForObject(Sender: TObject;
   const ScreenPoint: TPoint);
 begin
+  FHitLayerIndices := nil;
   Rebuild(CaptureContext);
   FMenu.OpenAtScreenPoint(ScreenPoint);
+end;
+
+procedure TScreenLayoutObjectContextMenu.ShowForObject(Sender: TObject;
+  const ScreenPoint: TPoint; const LayerIndices: TArray<Integer>);
+begin
+  FHitLayerIndices := Copy(LayerIndices);
+  Rebuild(CaptureContext);
+  FMenu.OpenAtScreenPoint(ScreenPoint);
+end;
+
+procedure TScreenLayoutObjectContextMenu.SelectHitLayer(Sender: TObject);
+var
+  LayerIndex: Integer;
+begin
+  if not (Sender is TPanel) or (FDocument = nil) then
+    Exit;
+  LayerIndex := TPanel(Sender).Tag;
+  if (LayerIndex <= 0) or (LayerIndex >= FDocument.LayerCount) then
+    Exit;
+  FDocument.SelectedIndex := LayerIndex;
+  Close;
 end;
 
 end.

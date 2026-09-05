@@ -284,11 +284,12 @@ end;
 function TScreenLayoutTextPathCharacterInteraction.BeginDragAt(X,
   Y: Integer): TScreenLayoutTextPathCharacterDragMode;
 var
-  CharacterPathOffsets: TArray<Single>;
   CharacterScales: TArray<Single>;
   Geometry: TVectArtSelectionGeometry;
   I: Integer;
+  J: Integer;
   Layer: TScreenLayoutTextPathLayer;
+  NaturalPathDistance: Single;
   PathDistance: Single;
   PathPoints: TArray<TPointF>;
   Placements: TArray<TScreenLayoutTextPathPlacement>;
@@ -336,13 +337,15 @@ begin
       FDragMode := sltpcdmMove;
       FDragLayerIndex := FDocument.SelectedIndex;
       FStartData := CaptureScreenLayoutTextData(Layer);
-      CharacterPathOffsets := FStartData.CharacterPathOffsets;
-      if FSelectedCharacter < Length(CharacterPathOffsets) then
-        FOffsetStart := CharacterPathOffsets[FSelectedCharacter]
-      else
-        FOffsetStart := 0;
       FAdvanceWidthStart := Placements[I].PathAdvance;
       FPathDistanceStart := Placements[I].PathDistance;
+      NaturalPathDistance := FAdvanceWidthStart * 0.5;
+      for J := 0 to I - 1 do
+        NaturalPathDistance := NaturalPathDistance +
+          Placements[J].PathAdvance;
+      // 手動化すると配置基準が自然位置へ戻るため、表示中の実位置を
+      // 個別オフセットへ変換して最初のMouseMoveで跳ばないようにする。
+      FOffsetStart := FPathDistanceStart - NaturalPathDistance;
       FMousePathDistanceStart := PathDistance;
       FDragStartMouse := Point(X, Y);
       Exit(FDragMode);

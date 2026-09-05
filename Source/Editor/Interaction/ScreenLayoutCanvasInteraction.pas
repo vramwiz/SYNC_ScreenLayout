@@ -8,7 +8,8 @@ uses
   ScreenLayoutDocument, ScreenLayoutEditHistory,
   ScreenLayoutEditCommands,
   ScreenLayoutPathInteraction, ScreenLayoutSelectionGeometry,
-  ScreenLayoutShapeInteraction, ScreenLayoutTextPathCharacterInteraction;
+  ScreenLayoutShapeInteraction, ScreenLayoutSnapGeometry,
+  ScreenLayoutTextPathCharacterInteraction;
 
 type
   TVectArtCanvasDragMode = (vcdmNone, vcdmMove, vcdmResize, vcdmRotate,
@@ -106,9 +107,11 @@ type
     FPathStructureEditingEnabled: Boolean;
     FShapeInteraction: TScreenLayoutShapeInteraction;
     FShapeStructureEditingEnabled: Boolean;
+    FSnapGuides: TArray<TScreenLayoutSnapGuide>;
     FDragStartMouse: TPoint;
     FAxisAlignedSelection: Boolean;
     FMoveOccurred: Boolean;
+    FRotationSnapped: Boolean;
     FRotationStartMouseAngle: Single;
     FRotationStartValue: Single;
     FRoundedRadiusStartValue: TScreenLayoutCornerRadii;
@@ -117,8 +120,12 @@ type
     FRangeStart: TPoint;
     FSelectionModeLayerIndex: Integer;
     FToggleSelectionModeOnClick: Boolean;
+    FClickTopLayerIndex: Integer;
+    FSelectBehindOnClick: Boolean;
     FZoom: Single;
     procedure EndDrag;
+    procedure AdjustResizeSnapPoint(Shift: TShiftState; var X, Y: Integer);
+    procedure AdjustVertexSnapPoint(Shift: TShiftState; var X, Y: Integer);
     procedure ApplyRangeSelection;
     procedure ApplyResizeSelection(Shift: TShiftState; X, Y: Integer);
     procedure ApplyImageResize(X, Y: Integer);
@@ -133,13 +140,16 @@ type
     procedure CommitTextSpacingCommand;
     procedure CommitTextPathRotationCommand;
     procedure CommitTextResizeCommand;
+    function ResetSelectedRotation: Boolean;
     function AxisAlignedResizedBounds(X, Y: Integer;
       RotationDegrees: Single): TRectF;
     function GetDragging: Boolean;
     function GetRangeSelecting: Boolean;
     function GetRangeSelectionRect: TRect;
     procedure SetEditHistory(Value: TVectArtEditHistory);
-    function HitTestLayer(X, Y: Integer): Integer;
+    function HitTestLayer(X, Y: Integer; StartIndex: Integer = -1;
+      SelectedOnly: Boolean = False): Integer;
+    function NextLayerBehindAt(X, Y, CurrentIndex: Integer): Integer;
     function LayerScreenRect(Index: Integer): TRect;
     function ResizedBounds(X, Y: Integer): TRectF;
     function UniformResizedBounds(X, Y: Integer): TRectF;
@@ -175,6 +185,8 @@ type
     function BezierHandleAt(X, Y: Integer): TScreenLayoutBezierHandleKind;
     // 画面座標の最前面にある表示レイヤーを返し、該当しなければ-1を返す。
     function LayerAt(X, Y: Integer): Integer;
+    // 画面座標に重なる表示レイヤーを前面から背面の順で返す。
+    function LayersAt(X, Y: Integer): TArray<Integer>;
     // 修飾キーなしの押下を処理し、マウスキャプチャが必要ならTrueを返す。
     function MouseDown(Button: TMouseButton; X, Y: Integer): Boolean;
       overload;
@@ -235,12 +247,18 @@ type
       TArray<TScreenLayoutRoundedCornerHandle>;
     // 対応する作成ツールの選択中だけ、頂点の追加・削除・移動・種別変更を許可する。
     procedure SetVertexStructureEditing(PathEnabled, ShapeEnabled: Boolean);
+    // 回転角を独立して保持し、形状を変えずに0度へ戻せる単一選択かを返す。
+    function CanResetSelectedRotation: Boolean;
     property Dragging: Boolean read GetDragging;
     property AxisAlignedSelection: Boolean read FAxisAlignedSelection;
     property EditHistory: TVectArtEditHistory read FEditHistory
       write SetEditHistory;
     property RangeSelecting: Boolean read GetRangeSelecting;
     property RangeSelectionRect: TRect read GetRangeSelectionRect;
+    // 回転操作が主要角度またはShift刻みに吸着している間だけTrue。
+    property RotationSnapped: Boolean read FRotationSnapped;
+    // 移動中に一致した対象と座標をキャンバスへ表示する論理ガイド線。
+    property SnapGuides: TArray<TScreenLayoutSnapGuide> read FSnapGuides;
   end;
 
 implementation
@@ -254,6 +272,42 @@ uses
   ScreenLayoutShapeOperations, ScreenLayoutShapePath,
   ScreenLayoutTextCommands, ScreenLayoutTextGeometry,
   ScreenLayoutTextPathGeometry;
+
+function NormalizeScreenLayoutRotationDelta(Value: Single): Single;
+begin
+  Result := Value;
+  while Result > 180 do
+    Result := Result - 360;
+  while Result < -180 do
+    Result := Result + 360;
+end;
+
+function ScreenLayoutRotationDragDelta(CurrentAngle, StartAngle,
+  StartRotation: Single; Shift: TShiftState; out Snapped: Boolean): Single;
+const
+  SHIFT_ANGLE_INTERVAL = 15.0;
+var
+  ProposedRotation: Single;
+  SnappedRotation: Single;
+begin
+  Snapped := False;
+  Result := NormalizeScreenLayoutRotationDelta(CurrentAngle - StartAngle);
+  if ssShift in Shift then
+  begin
+    Result := Round(Result / SHIFT_ANGLE_INTERVAL) * SHIFT_ANGLE_INTERVAL;
+    Snapped := True;
+  end
+  else if not (ssAlt in Shift) then
+  begin
+    ProposedRotation := StartRotation + Result;
+    if SnapScreenLayoutAngle(ProposedRotation, SnappedRotation) then
+    begin
+      Result := NormalizeScreenLayoutRotationDelta(
+        Result + SnappedRotation - ProposedRotation);
+      Snapped := True;
+    end;
+  end;
+end;
 
 const
   MIN_RECTANGLE_SIZE = 16.0;
@@ -289,6 +343,7 @@ begin
   FTextPathCharacterClickCandidate := -1;
   FTextSpacingGapIndex := -1;
   FSelectionModeLayerIndex := -1;
+  FClickTopLayerIndex := -1;
 end;
 
 destructor TVectArtCanvasInteraction.Destroy;
@@ -1244,6 +1299,143 @@ begin
   FDocument.SetImagePoints(FDragLayerIndex, NewPoints);
 end;
 
+procedure TVectArtCanvasInteraction.AdjustVertexSnapPoint(
+  Shift: TShiftState; var X, Y: Integer);
+var
+  CandidatePoints: TArray<TPointF>;
+  LogicalPoint: TPointF;
+  SnappedPoint: TPointF;
+begin
+  FSnapGuides := nil;
+  if ssAlt in Shift then
+    Exit;
+  LogicalPoint := TPointF.Create(ToLogicalX(X), ToLogicalY(Y));
+  if FDragMode = vcdmPathVertex then
+    CandidatePoints := FPathInteraction.OtherDragVertexPositions
+  else if FDragMode = vcdmShapeVertex then
+    CandidatePoints := FShapeInteraction.OtherDragVertexPositions
+  else
+    CandidatePoints := nil;
+  if SnapScreenLayoutPointWithCandidates(FDocument, LogicalPoint, FZoom,
+    True, CandidatePoints, SnappedPoint, FSnapGuides) then
+  begin
+    X := ToScreenX(SnappedPoint.X);
+    Y := ToScreenY(SnappedPoint.Y);
+  end;
+end;
+
+function TVectArtCanvasInteraction.CanResetSelectedRotation: Boolean;
+var
+  Layer: TVectArtLayer;
+begin
+  Result := False;
+  if (FDocument = nil) or (FDocument.SelectionCount <> 1) or
+    (FDocument.SelectedIndex <= 0) then
+    Exit;
+  Layer := FDocument[FDocument.SelectedIndex];
+  if Layer.Locked or (Layer is TScreenLayoutTextPathLayer) then
+    Exit;
+  Result := (Layer is TScreenLayoutRectangleLineLayer) or
+    (Layer is TScreenLayoutArcLayer) or
+    (Layer is TVectArtRectangleLayer);
+end;
+
+function TVectArtCanvasInteraction.ResetSelectedRotation: Boolean;
+var
+  ArcLayer: TScreenLayoutArcLayer;
+  LayerIndex: Integer;
+  OldValue: Single;
+  RectangleLayer: TVectArtRectangleLayer;
+  RectangleLine: TScreenLayoutRectangleLineLayer;
+begin
+  Result := False;
+  if not CanResetSelectedRotation then
+    Exit;
+  LayerIndex := FDocument.SelectedIndex;
+  if FDocument[LayerIndex] is TScreenLayoutRectangleLineLayer then
+  begin
+    RectangleLine := TScreenLayoutRectangleLineLayer(FDocument[LayerIndex]);
+    OldValue := RectangleLine.RotationDegrees;
+    FDocument.SetRectangleLineRotation(LayerIndex, 0);
+  end
+  else if FDocument[LayerIndex] is TScreenLayoutArcLayer then
+  begin
+    ArcLayer := TScreenLayoutArcLayer(FDocument[LayerIndex]);
+    OldValue := ArcLayer.RotationDegrees;
+    FDocument.SetArcRotation(LayerIndex, 0);
+  end
+  else
+  begin
+    RectangleLayer := TVectArtRectangleLayer(FDocument[LayerIndex]);
+    OldValue := RectangleLayer.RotationDegrees;
+    FDocument.SetRectangleRotation(LayerIndex, 0);
+  end;
+  if (FEditHistory <> nil) and not SameValue(OldValue, 0.0) then
+    FEditHistory.AddApplied(TVectArtRotationCommand.Create(FDocument,
+      LayerIndex, OldValue, 0));
+  Result := True;
+end;
+
+procedure TVectArtCanvasInteraction.AdjustResizeSnapPoint(
+  Shift: TShiftState; var X, Y: Integer);
+var
+  EnableX: Boolean;
+  EnableY: Boolean;
+  FilteredGuides: TArray<TScreenLayoutSnapGuide>;
+  Guide: TScreenLayoutSnapGuide;
+  ProposedBounds: TRectF;
+  SourcePoint: TPointF;
+  SnappedPoint: TPointF;
+  TextLayer: TScreenLayoutTextLayer;
+begin
+  FSnapGuides := nil;
+  if (ssAlt in Shift) or FDragIsImage then
+    Exit;
+  EnableX := FDragHandle in [vshTopLeft, vshTopRight, vshRight,
+    vshBottomRight, vshBottomLeft, vshLeft];
+  EnableY := FDragHandle in [vshTopLeft, vshTop, vshTopRight,
+    vshBottomRight, vshBottom, vshBottomLeft];
+  if not EnableX and not EnableY then
+    Exit;
+  if FDragIsTextPath then
+    ProposedBounds := UniformResizedBounds(X, Y)
+  else if FDragIsText and (FDragLayerIndex > 0) and
+    (FDocument[FDragLayerIndex] is TScreenLayoutTextLayer) then
+  begin
+    TextLayer := TScreenLayoutTextLayer(FDocument[FDragLayerIndex]);
+    if (ssShift in Shift) or
+      (not (ssCtrl in Shift) and
+       (TextLayer.TransformMode = slttmUniformScale)) then
+      ProposedBounds := UniformResizedBounds(X, Y)
+    else
+      ProposedBounds := ResizedBounds(X, Y);
+  end
+  else
+    ProposedBounds := ResizedBounds(X, Y);
+  SourcePoint := ProposedBounds.CenterPoint;
+  if FDragHandle in [vshTopLeft, vshLeft, vshBottomLeft] then
+    SourcePoint.X := ProposedBounds.Left
+  else if FDragHandle in [vshTopRight, vshRight, vshBottomRight] then
+    SourcePoint.X := ProposedBounds.Right;
+  if FDragHandle in [vshTopLeft, vshTop, vshTopRight] then
+    SourcePoint.Y := ProposedBounds.Top
+  else if FDragHandle in [vshBottomLeft, vshBottom, vshBottomRight] then
+    SourcePoint.Y := ProposedBounds.Bottom;
+  if not SnapScreenLayoutPoint(FDocument, SourcePoint, FZoom, True,
+    SnappedPoint, FSnapGuides) then
+    Exit;
+  if EnableX then
+    Inc(X, Round((SnappedPoint.X - SourcePoint.X) * FZoom));
+  if EnableY then
+    Inc(Y, Round((SnappedPoint.Y - SourcePoint.Y) * FZoom));
+  FilteredGuides := nil;
+  for Guide in FSnapGuides do
+    if (EnableX and (Guide.Axis = slsaX)) or
+      (EnableY and (Guide.Axis = slsaY)) then
+      FilteredGuides := FilteredGuides + [Guide];
+  FSnapGuides := FilteredGuides;
+end;
+
 procedure TVectArtCanvasInteraction.ApplyResizeSelection(
   Shift: TShiftState; X, Y: Integer);
 var
@@ -1610,7 +1802,11 @@ begin
   FDragIsText := False;
   FDragIsTextPath := False;
   FMoveOccurred := False;
+  FRotationSnapped := False;
   FToggleSelectionModeOnClick := False;
+  FClickTopLayerIndex := -1;
+  FSelectBehindOnClick := False;
+  FSnapGuides := nil;
   SetLength(FMoveLayerIndices, 0);
   SetLength(FMoveStartBounds, 0);
   SetLength(FMoveImageLayerIndices, 0);
@@ -1648,7 +1844,8 @@ begin
   Result := FDragMode = vcdmRangeSelect;
 end;
 
-function TVectArtCanvasInteraction.HitTestLayer(X, Y: Integer): Integer;
+function TVectArtCanvasInteraction.HitTestLayer(X, Y: Integer;
+  StartIndex: Integer; SelectedOnly: Boolean): Integer;
 var
   ArcLayer: TScreenLayoutArcLayer;
   Bounds: TRectF;
@@ -1657,6 +1854,7 @@ var
   Layer: TVectArtLayer;
   LogicalX: Single;
   LogicalY: Single;
+  TopIndex: Integer;
   PathLayer: TVectArtPathLayer;
   PathVertices: TArray<TScreenLayoutVertex>;
   ImageLayer: TVectArtImageLayer;
@@ -1676,10 +1874,15 @@ begin
     Exit;
   LogicalX := ToLogicalX(X);
   LogicalY := ToLogicalY(Y);
-  for I := FDocument.LayerCount - 1 downto 1 do
+  if StartIndex < 1 then
+    TopIndex := FDocument.LayerCount - 1
+  else
+    TopIndex := Min(StartIndex, FDocument.LayerCount - 1);
+  for I := TopIndex downto 1 do
   begin
     Layer := FDocument[I];
-    if not Layer.Visible then
+    if not Layer.Visible or
+      (SelectedOnly and not FDocument.IsLayerSelected(I)) then
       Continue;
     if (Layer is TScreenLayoutGroupLayer) and
       TryGetScreenLayoutLayerBounds(Layer, Bounds) then
@@ -1791,9 +1994,63 @@ begin
   end;
 end;
 
+function TVectArtCanvasInteraction.NextLayerBehindAt(X, Y,
+  CurrentIndex: Integer): Integer;
+var
+  HitIndex: Integer;
+  SearchIndex: Integer;
+begin
+  Result := -1;
+  if (FDocument = nil) or (FDocument.LayerCount <= 1) then
+    Exit;
+  SearchIndex := Min(CurrentIndex - 1, FDocument.LayerCount - 1);
+  while SearchIndex >= 1 do
+  begin
+    HitIndex := HitTestLayer(X, Y, SearchIndex);
+    if HitIndex < 1 then
+      Break;
+    if not FDocument[HitIndex].Locked then
+      Exit(HitIndex);
+    SearchIndex := HitIndex - 1;
+  end;
+  SearchIndex := FDocument.LayerCount - 1;
+  while SearchIndex > CurrentIndex do
+  begin
+    HitIndex := HitTestLayer(X, Y, SearchIndex);
+    if (HitIndex < 1) or (HitIndex <= CurrentIndex) then
+      Break;
+    if not FDocument[HitIndex].Locked then
+      Exit(HitIndex);
+    SearchIndex := HitIndex - 1;
+  end;
+  if (CurrentIndex > 0) and (CurrentIndex < FDocument.LayerCount) and
+    FDocument[CurrentIndex].Visible and
+    not FDocument[CurrentIndex].Locked then
+    Result := CurrentIndex;
+end;
+
 function TVectArtCanvasInteraction.LayerAt(X, Y: Integer): Integer;
 begin
   Result := HitTestLayer(X, Y);
+end;
+
+function TVectArtCanvasInteraction.LayersAt(X, Y: Integer): TArray<Integer>;
+var
+  HitIndex: Integer;
+  SearchIndex: Integer;
+begin
+  Result := nil;
+  if FDocument = nil then
+    Exit;
+  SearchIndex := FDocument.LayerCount - 1;
+  while SearchIndex >= 1 do
+  begin
+    HitIndex := HitTestLayer(X, Y, SearchIndex);
+    if HitIndex < 1 then
+      Break;
+    Result := Result + [HitIndex];
+    SearchIndex := HitIndex - 1;
+  end;
 end;
 
 function TVectArtCanvasInteraction.LayerScreenRect(Index: Integer): TRect;
@@ -2206,6 +2463,9 @@ var
   TextSelection: TArray<Integer>;
   TextSpacingHandles: TScreenLayoutTextSpacingHandles;
   I: Integer;
+  ProtectSelection: Boolean;
+  SelectedHitLayerIndex: Integer;
+  TopHitLayerIndex: Integer;
   VertexCaptureNeeded: Boolean;
   WasSelected: Boolean;
 begin
@@ -2225,6 +2485,8 @@ begin
     Exit(False);
   if Button <> mbLeft then
     Exit;
+  FClickTopLayerIndex := -1;
+  FSelectBehindOnClick := False;
   CtrlTextResize := False;
   if (ssCtrl in Shift) and (FDocument.SelectionCount = 1) and
     (FDocument.SelectedIndex > 0) and
@@ -2423,6 +2685,9 @@ begin
        (FDocument[FDocument.SelectedIndex] is TVectArtPathLayer) or
        (FDocument[FDocument.SelectedIndex] is TScreenLayoutShapeLayer)) then
     begin
+      if (ssDouble in Shift) and ResetSelectedRotation then
+        Exit(False);
+      FRotationSnapped := False;
       FDragMode := vcdmRotate;
       FDragLayerIndex := FDocument.SelectedIndex;
       FDragIsGroup := FDocument[FDragLayerIndex] is TScreenLayoutGroupLayer;
@@ -2590,7 +2855,17 @@ begin
   end;
   if FDragMode = vcdmNone then
   begin
-    FDragLayerIndex := HitTestLayer(X, Y);
+    TopHitLayerIndex := HitTestLayer(X, Y);
+    SelectedHitLayerIndex := HitTestLayer(X, Y, -1, True);
+    ProtectSelection := (SelectedHitLayerIndex > 0) and
+      not SelectionContainsLockedLayer and
+      not FDocument[SelectedHitLayerIndex].Locked;
+    if ProtectSelection then
+      FDragLayerIndex := SelectedHitLayerIndex
+    else
+      FDragLayerIndex := TopHitLayerIndex;
+    FClickTopLayerIndex := TopHitLayerIndex;
+    FSelectBehindOnClick := ssAlt in Shift;
     if FDragLayerIndex < 0 then
     begin
       FDocument.SelectedIndex := -1;
@@ -2627,6 +2902,7 @@ begin
         Exit(False);
       end;
       FDragMode := vcdmMove;
+      FDragStartBounds := SelectedLayersLogicalRect;
       FDragIsGroup := (FDocument.SelectionCount = 1) and
         (FDocument[FDragLayerIndex] is TScreenLayoutGroupLayer);
       FDragIsImage := (FDocument.SelectionCount = 1) and
@@ -2748,6 +3024,7 @@ var
   ShapeBounds: TRectF;
   TextCenter: TPointF;
   TextData: TScreenLayoutTextData;
+  SnappedDelta: TPointF;
 begin
   Result := False;
   if FDragMode = vcdmNone then
@@ -2764,11 +3041,19 @@ begin
   end;
   if FDragMode in [vcdmPathVertex, vcdmPathBezierHandle] then
   begin
+    if FDragMode = vcdmPathVertex then
+      AdjustVertexSnapPoint(Shift, X, Y)
+    else
+      FSnapGuides := nil;
     FPathInteraction.DragTo(Shift, X, Y);
     Exit(True);
   end;
   if FDragMode in [vcdmShapeVertex, vcdmShapeBezierHandle] then
   begin
+    if FDragMode = vcdmShapeVertex then
+      AdjustVertexSnapPoint(Shift, X, Y)
+    else
+      FSnapGuides := nil;
     FShapeInteraction.DragTo(Shift, X, Y);
     Exit(True);
   end;
@@ -2972,6 +3257,14 @@ begin
     FMoveOccurred := True;
     DX := (X - FDragStartMouse.X) / FZoom;
     DY := (Y - FDragStartMouse.Y) / FZoom;
+    FSnapGuides := nil;
+    if not (ssAlt in Shift) and SnapScreenLayoutMove(FDocument,
+      FDragStartBounds, TPointF.Create(DX, DY), FZoom, SnappedDelta,
+      FSnapGuides) then
+    begin
+      DX := SnappedDelta.X;
+      DY := SnappedDelta.Y;
+    end;
     if FDragIsImage then
     begin
       for I := 0 to High(NewImagePoints) do
@@ -3040,6 +3333,7 @@ begin
   end
   else if FDragMode = vcdmRotate then
   begin
+    FRotationSnapped := False;
     if FDragLayerIndex <= 0 then
       Exit(True);
     if FDragIsGroup and
@@ -3048,11 +3342,9 @@ begin
       CenterX := ToScreenX(FGroupRotationCenter.X);
       CenterY := ToScreenY(FGroupRotationCenter.Y);
       CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
-      DesiredRotation := CurrentMouseAngle - FRotationStartMouseAngle;
-      while DesiredRotation > 180 do
-        DesiredRotation := DesiredRotation - 360;
-      while DesiredRotation < -180 do
-        DesiredRotation := DesiredRotation + 360;
+      DesiredRotation := ScreenLayoutRotationDragDelta(CurrentMouseAngle,
+        FRotationStartMouseAngle, FRotationStartValue, Shift,
+        FRotationSnapped);
       IncrementRotation := DesiredRotation - FGroupRotationDegrees;
       RotateScreenLayoutLayer(FDocument[FDragLayerIndex],
         FGroupRotationCenter, IncrementRotation);
@@ -3067,11 +3359,14 @@ begin
       CenterX := ToScreenX((ImageBounds.Left + ImageBounds.Right) * 0.5);
       CenterY := ToScreenY((ImageBounds.Top + ImageBounds.Bottom) * 0.5);
       CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
+      DesiredRotation := ScreenLayoutRotationDragDelta(CurrentMouseAngle,
+        FRotationStartMouseAngle, FRotationStartValue, Shift,
+        FRotationSnapped);
       for I := 0 to High(NewImagePoints) do
         NewImagePoints[I] := RotatePointAround(FDragStartImagePoints[I],
           TPointF.Create((ImageBounds.Left + ImageBounds.Right) * 0.5,
             (ImageBounds.Top + ImageBounds.Bottom) * 0.5),
-          CurrentMouseAngle - FRotationStartMouseAngle);
+          DesiredRotation);
       FDocument.SetImagePoints(FDragLayerIndex, NewImagePoints);
       Exit(True);
     end;
@@ -3082,11 +3377,14 @@ begin
       CenterX := ToScreenX((PathBounds.Left + PathBounds.Right) * 0.5);
       CenterY := ToScreenY((PathBounds.Top + PathBounds.Bottom) * 0.5);
       CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
+      DesiredRotation := ScreenLayoutRotationDragDelta(CurrentMouseAngle,
+        FRotationStartMouseAngle, FRotationStartValue, Shift,
+        FRotationSnapped);
       NewPathVertices := RotateScreenLayoutPathVertices(
         FDragStartPathVertices,
         TPointF.Create((PathBounds.Left + PathBounds.Right) * 0.5,
           (PathBounds.Top + PathBounds.Bottom) * 0.5),
-        CurrentMouseAngle - FRotationStartMouseAngle);
+        DesiredRotation);
       FDocument.SetPathVertices(FDragLayerIndex, NewPathVertices);
       Exit(True);
     end;
@@ -3098,11 +3396,14 @@ begin
       CenterX := ToScreenX((ShapeBounds.Left + ShapeBounds.Right) * 0.5);
       CenterY := ToScreenY((ShapeBounds.Top + ShapeBounds.Bottom) * 0.5);
       CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
+      DesiredRotation := ScreenLayoutRotationDragDelta(CurrentMouseAngle,
+        FRotationStartMouseAngle, FRotationStartValue, Shift,
+        FRotationSnapped);
       NewShapeContours := RotateScreenLayoutShapeContours(
         FDragStartShapeContours,
         TPointF.Create((ShapeBounds.Left + ShapeBounds.Right) * 0.5,
           (ShapeBounds.Top + ShapeBounds.Bottom) * 0.5),
-        CurrentMouseAngle - FRotationStartMouseAngle);
+        DesiredRotation);
       FDocument.SetShapeContours(FDragLayerIndex, NewShapeContours);
       Exit(True);
     end;
@@ -3112,7 +3413,9 @@ begin
       CenterX := ToScreenX(FDragStartBounds.CenterPoint.X);
       CenterY := ToScreenY(FDragStartBounds.CenterPoint.Y);
       CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
-      DesiredRotation := CurrentMouseAngle - FRotationStartMouseAngle;
+      DesiredRotation := ScreenLayoutRotationDragDelta(CurrentMouseAngle,
+        FRotationStartMouseAngle, FRotationStartValue, Shift,
+        FRotationSnapped);
       NewPathVertices := RotateScreenLayoutPathVertices(
         FDragStartPathVertices, FDragStartBounds.CenterPoint,
         DesiredRotation);
@@ -3135,8 +3438,11 @@ begin
       CenterY := ToScreenY((RectangleLine.Bounds.Top +
         RectangleLine.Bounds.Bottom) * 0.5);
       CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
+      DesiredRotation := ScreenLayoutRotationDragDelta(CurrentMouseAngle,
+        FRotationStartMouseAngle, FRotationStartValue, Shift,
+        FRotationSnapped);
       FDocument.SetRectangleLineRotation(FDragLayerIndex,
-        FRotationStartValue + CurrentMouseAngle - FRotationStartMouseAngle);
+        FRotationStartValue + DesiredRotation);
       Exit(True);
     end;
     if FDocument[FDragLayerIndex] is TScreenLayoutArcLayer then
@@ -3147,8 +3453,11 @@ begin
       CenterY := ToScreenY((ArcLayer.Bounds.Top +
         ArcLayer.Bounds.Bottom) * 0.5);
       CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
+      DesiredRotation := ScreenLayoutRotationDragDelta(CurrentMouseAngle,
+        FRotationStartMouseAngle, FRotationStartValue, Shift,
+        FRotationSnapped);
       FDocument.SetArcRotation(FDragLayerIndex,
-        FRotationStartValue + CurrentMouseAngle - FRotationStartMouseAngle);
+        FRotationStartValue + DesiredRotation);
       Exit(True);
     end;
     if not (FDocument[FDragLayerIndex] is TVectArtRectangleLayer) then
@@ -3159,22 +3468,35 @@ begin
     CenterY := ToScreenY((RectangleLayer.Bounds.Top +
       RectangleLayer.Bounds.Bottom) * 0.5);
     CurrentMouseAngle := RadToDeg(ArcTan2(Y - CenterY, X - CenterX));
+    DesiredRotation := ScreenLayoutRotationDragDelta(CurrentMouseAngle,
+      FRotationStartMouseAngle, FRotationStartValue, Shift,
+      FRotationSnapped);
     FDocument.SetRectangleRotation(FDragLayerIndex,
-      FRotationStartValue + CurrentMouseAngle - FRotationStartMouseAngle);
+      FRotationStartValue + DesiredRotation);
     Exit(True);
   end
   else if FDragIsImage then
+  begin
+    FSnapGuides := nil;
     ApplyImageResize(X, Y)
+  end
   else
+  begin
+    AdjustResizeSnapPoint(Shift, X, Y);
     ApplyResizeSelection(Shift, X, Y);
+  end;
   Result := True;
 end;
 
 function TVectArtCanvasInteraction.MouseUp(Button: TMouseButton): Boolean;
+var
+  ClickSelectionChanged: Boolean;
+  TargetIndex: Integer;
 begin
   Result := (Button = mbLeft) and (FDragMode <> vcdmNone);
   if Result then
   begin
+    ClickSelectionChanged := False;
     if FDragMode = vcdmRangeSelect then
       ApplyRangeSelection;
     if FDragMode in [vcdmPathVertex, vcdmPathBezierHandle] then
@@ -3236,9 +3558,28 @@ begin
     if FDragMode in [vcdmTextPathCharacterMove,
       vcdmTextPathCharacterResize] then
       FTextPathCharacterInteraction.CommitDrag;
-    if FToggleSelectionModeOnClick and not FMoveOccurred then
+    if (FDragMode = vcdmMove) and not FMoveOccurred then
+    begin
+      if FSelectBehindOnClick then
+        TargetIndex := NextLayerBehindAt(FDragStartMouse.X,
+          FDragStartMouse.Y, FDragLayerIndex)
+      else
+        TargetIndex := FClickTopLayerIndex;
+      if TargetIndex > 0 then
+      begin
+        ClickSelectionChanged := FSelectBehindOnClick or
+          (FDocument.SelectionCount <> 1) or
+          (FDocument.SelectedIndex <> TargetIndex);
+        if (FDocument.SelectionCount <> 1) or
+          (FDocument.SelectedIndex <> TargetIndex) then
+          FDocument.SelectedIndex := TargetIndex;
+      end;
+    end;
+    if FToggleSelectionModeOnClick and not FMoveOccurred and
+      not ClickSelectionChanged then
       FAxisAlignedSelection := not FAxisAlignedSelection;
-    if (FTextPathCharacterClickCandidate >= 0) and not FMoveOccurred then
+    if (FTextPathCharacterClickCandidate >= 0) and not FMoveOccurred and
+      not ClickSelectionChanged then
       FTextPathCharacterInteraction.SelectedCharacter :=
         FTextPathCharacterClickCandidate;
     EndDrag;

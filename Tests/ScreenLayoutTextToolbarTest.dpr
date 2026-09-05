@@ -3,8 +3,11 @@ program ScreenLayoutTextToolbarTest;
 {$APPTYPE CONSOLE}
 
 uses
+  System.Math,
   System.SysUtils,
   System.Types,
+  Winapi.Messages,
+  Winapi.Windows,
   Vcl.Forms,
   Vcl.Graphics,
   ScreenLayoutDocument in '..\Source\Core\Model\ScreenLayoutDocument.pas',
@@ -48,6 +51,15 @@ begin
     Toolbar.EditorState := State;
     Check(Toolbar.FontFamilyCombo.Items.Count >= 2,
       'font family list is unexpectedly empty');
+    Check((Toolbar.StrokeWidthTrackBar.Left = 40) and
+      (Toolbar.StrokeWidthTrackBar.Width = 94),
+      'stroke width trackbar kept its unpositioned default bounds');
+    Check((Toolbar.StrokeWidthEdit.Left = 142) and
+      (Toolbar.StrokeWidthEdit.Width = 48),
+      'stroke width edit kept its unpositioned default bounds');
+    Check((Toolbar.DetailsButton.Left = 200) and
+      (Toolbar.DetailsButton.Width = 60),
+      'line details button kept its unpositioned default bounds');
 
     Data := Default(TScreenLayoutTextData);
     Data.Bounds := TRectF.Create(-80, -20, 80, 20);
@@ -74,6 +86,21 @@ begin
       'text alignment popup button was hidden for text selection');
     Check(not Toolbar.TextAlignmentPanel.Visible,
       'text alignment popup was initially visible');
+
+    State.LineStrokeWidth := 7.5;
+    State.ActivateTool(vetFreehand);
+    Toolbar.RefreshState;
+    Check(Toolbar.Visible,
+      'toolbar was hidden for freehand while text remained selected');
+    Check(Toolbar.StrokeWidthEdit.Visible,
+      'freehand stroke width was hidden by selected-object UI');
+    Check(not Toolbar.FontFamilyCombo.Visible,
+      'selected text UI covered the freehand stroke settings');
+    Check(Toolbar.StrokeWidthEdit.Text = '7.5',
+      'freehand stroke width did not reflect the drawing default');
+    State.ActivateTool(vetSelect);
+    Toolbar.RefreshState;
+
     Check(not Toolbar.TextAlignmentCell(sltaTopLeft).Enabled,
       'top alignment remained enabled in whole-frame fit mode');
     Check(Toolbar.TextAlignmentCell(sltaMiddleLeft).Enabled,
@@ -292,11 +319,64 @@ begin
   end;
 end;
 
+procedure CheckLineTrackBarDrag;
+var
+  Document: TVectArtDocument;
+  Form: TForm;
+  History: TVectArtEditHistory;
+  Layer: TScreenLayoutRectangleLineLayer;
+  State: TVectArtEditorState;
+  Toolbar: TVectArtLineToolbarControl;
+begin
+  Form := TForm.Create(nil);
+  Document := TVectArtDocument.Create;
+  History := TVectArtEditHistory.Create;
+  State := TVectArtEditorState.Create;
+  try
+    Toolbar := TVectArtLineToolbarControl.CreateForHost(Form, Form);
+    Toolbar.Document := Document;
+    Toolbar.EditHistory := History;
+    Toolbar.EditorState := State;
+    Layer := TScreenLayoutRectangleLineLayer.Create('Line',
+      TRectF.Create(-50, -30, 50, 30));
+    Document.InsertLayer(1, Layer);
+    Document.SetSelectedLayers([1]);
+    Toolbar.RefreshState;
+    Form.Show;
+
+    Toolbar.StrokeWidthTrackBar.Perform(WM_LBUTTONDOWN, MK_LBUTTON,
+      LPARAM(8 or (17 shl 16)));
+    Toolbar.StrokeWidthTrackBar.Perform(WM_MOUSEMOVE, MK_LBUTTON,
+      LPARAM(47 or (17 shl 16)));
+    Check(Toolbar.StrokeWidthEdit.Text = FormatFloat('0.##',
+      Toolbar.StrokeWidthTrackBar.Position / 10),
+      'stroke width text did not update during trackbar drag');
+    Check(SameValue(Layer.StrokeWidth,
+      Toolbar.StrokeWidthTrackBar.Position / 10),
+      'selected line width did not update during trackbar drag');
+    Check(not History.CanUndo,
+      'trackbar drag recorded history before mouse up');
+    Toolbar.StrokeWidthTrackBar.Perform(WM_LBUTTONUP, 0,
+      LPARAM(47 or (17 shl 16)));
+    Check(History.CanUndo,
+      'trackbar drag did not record one history item on mouse up');
+    History.Undo;
+    Check(SameValue(Layer.StrokeWidth, 1.0),
+      'trackbar drag undo did not restore the original width');
+  finally
+    State.Free;
+    History.Free;
+    Document.Free;
+    Form.Free;
+  end;
+end;
+
 begin
   Application.Initialize;
   try
     Run;
     CheckTextPathAttachmentToolbar;
+    CheckLineTrackBarDrag;
     Writeln('PASS');
   except
     on E: Exception do

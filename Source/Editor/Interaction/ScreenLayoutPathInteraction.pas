@@ -60,6 +60,8 @@ type
     function CursorAt(X, Y: Integer; out Cursor: TCursor): Boolean;
     // 進行中のアンカーまたは制御点ドラッグをDocumentへ反映する。
     function DragTo(Shift: TShiftState; X, Y: Integer): Boolean;
+    // ドラッグ中のアンカー以外にある同一Path内の吸着候補を返す。
+    function OtherDragVertexPositions: TArray<TPointF>;
     // 選択中Pathの全アンカーを画面座標の矩形列として返す。
     function SelectedVertexRects: TArray<TRect>;
     // 選択中Pathを直線・ベジェ共通の画面座標点列へ展開して返す。
@@ -539,6 +541,19 @@ begin
   end;
   ApplyScreenLayoutPathVertices(FDocument, FDragLayerIndex,
     NewVertices, True);
+end;
+
+function TScreenLayoutPathInteraction.OtherDragVertexPositions:
+  TArray<TPointF>;
+var
+  I: Integer;
+begin
+  Result := nil;
+  if FDragBezierHandle <> slbhNone then
+    Exit;
+  for I := 0 to High(FDragStartVertices) do
+    if I <> FDragVertexIndex then
+      Result := Result + [FDragStartVertices[I].Position];
 end;
 
 procedure TScreenLayoutPathInteraction.CommitDrag;

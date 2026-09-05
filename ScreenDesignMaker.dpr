@@ -18,6 +18,8 @@ uses
   ScreenLayoutEditActionsUI in 'Source\Shell\ScreenLayoutEditActionsUI.pas',
   ScreenLayoutStrokeStyleCombo in 'Source\ObjectProperties\ScreenLayoutStrokeStyleCombo.pas',
   ScreenLayoutLineToolbar in 'Source\Shell\ScreenLayoutLineToolbar.pas',
+  ScreenLayoutLineToolbarOperations in 'Source\Shell\ScreenLayoutLineToolbarOperations.pas',
+  ScreenLayoutTextToolbarOperations in 'Source\Shell\ScreenLayoutTextToolbarOperations.pas',
   ScreenLayoutLineStyleControls in 'Source\Shell\ScreenLayoutLineStyleControls.pas',
   ScreenLayoutCanvasSettingsDialog in 'Source\Shell\ScreenLayoutCanvasSettingsDialog.pas',
   ScreenLayoutDocument in 'Source\Core\Model\ScreenLayoutDocument.pas',
@@ -59,6 +61,7 @@ uses
   ScreenLayoutDocumentJsonWriter in 'Source\Persistence\ScreenLayoutDocumentJsonWriter.pas',
   ScreenLayoutCanvas in 'Source\Editor\ScreenLayoutCanvas.pas',
   ScreenLayoutCanvasInteraction in 'Source\Editor\Interaction\ScreenLayoutCanvasInteraction.pas',
+  ScreenLayoutSnapGeometry in 'Source\Core\Geometry\ScreenLayoutSnapGeometry.pas',
   ScreenLayoutTextPathCharacterInteraction in
     'Source\Editor\Interaction\ScreenLayoutTextPathCharacterInteraction.pas',
   ScreenLayoutContextMenuInteraction in 'Source\Editor\Interaction\ScreenLayoutContextMenuInteraction.pas',

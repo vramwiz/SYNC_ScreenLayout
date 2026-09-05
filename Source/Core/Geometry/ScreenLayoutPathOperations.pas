@@ -11,6 +11,9 @@ uses
 procedure ConfigureScreenLayoutOpenPath(var Vertices: TArray<TScreenLayoutVertex>);
 // 動的配列を共有しないPath頂点列の複製を返す。
 function CloneScreenLayoutPathVertices(const Source: TArray<TScreenLayoutVertex>): TArray<TScreenLayoutVertex>;
+// 折れ線の始終点と形状を許容誤差内で維持しながら、冗長な中間点を削減する。
+function SimplifyScreenLayoutPolyline(const Points: TArray<TPointF>;
+  Tolerance: Single): TArray<TPointF>;
 // 座標、制御点、頂点種別、区間種別がすべて等しい場合にTrueを返す。
 function ScreenLayoutPathVerticesEqual(const Left, Right: TArray<TScreenLayoutVertex>): Boolean;
 // アンカーと有効なベジェ制御点を含む外接範囲を返す。
@@ -185,6 +188,70 @@ end;
 function CloneScreenLayoutPathVertices(const Source: TArray<TScreenLayoutVertex>): TArray<TScreenLayoutVertex>;
 begin
   Result := Copy(Source);
+end;
+
+function SimplifyScreenLayoutPolyline(const Points: TArray<TPointF>;
+  Tolerance: Single): TArray<TPointF>;
+var
+  Distance: Single;
+  FirstIndex: Integer;
+  FirstStack: TArray<Integer>;
+  FarthestDistance: Single;
+  FarthestIndex: Integer;
+  I: Integer;
+  Keep: TArray<Boolean>;
+  LastIndex: Integer;
+  LastStack: TArray<Integer>;
+  OutputIndex: Integer;
+  StackCount: Integer;
+begin
+  if Length(Points) <= 2 then
+    Exit(Copy(Points));
+  Tolerance := Max(Tolerance, 0.0);
+  SetLength(Keep, Length(Points));
+  Keep[0] := True;
+  Keep[High(Points)] := True;
+  SetLength(FirstStack, Length(Points) * 2);
+  SetLength(LastStack, Length(Points) * 2);
+  StackCount := 1;
+  FirstStack[0] := 0;
+  LastStack[0] := High(Points);
+  while StackCount > 0 do
+  begin
+    Dec(StackCount);
+    FirstIndex := FirstStack[StackCount];
+    LastIndex := LastStack[StackCount];
+    FarthestDistance := -1;
+    FarthestIndex := -1;
+    for I := FirstIndex + 1 to LastIndex - 1 do
+    begin
+      Distance := DistanceToSegment(Points[I], Points[FirstIndex],
+        Points[LastIndex]);
+      if Distance > FarthestDistance then
+      begin
+        FarthestDistance := Distance;
+        FarthestIndex := I;
+      end;
+    end;
+    if (FarthestIndex < 0) or (FarthestDistance <= Tolerance) then
+      Continue;
+    Keep[FarthestIndex] := True;
+    FirstStack[StackCount] := FirstIndex;
+    LastStack[StackCount] := FarthestIndex;
+    Inc(StackCount);
+    FirstStack[StackCount] := FarthestIndex;
+    LastStack[StackCount] := LastIndex;
+    Inc(StackCount);
+  end;
+  SetLength(Result, Length(Points));
+  OutputIndex := 0;
+  for I := 0 to High(Points) do
+    if Keep[I] then
+    begin
+      Result[OutputIndex] := Points[I];
+      Inc(OutputIndex);
+    end;
+  SetLength(Result, OutputIndex);
 end;
 
 function ScreenLayoutPathVerticesEqual(const Left, Right: TArray<TScreenLayoutVertex>): Boolean;

@@ -6,7 +6,7 @@ interface
 
 uses
   System.Classes, System.SysUtils, System.Types, Winapi.Windows, Vcl.Controls,
-  Vcl.Direct2D, Vcl.Forms, Vcl.Graphics, Vcl.StdCtrls,
+  Vcl.Direct2D, Vcl.Forms, Vcl.Graphics,
   ScreenLayoutCanvasInteraction,
   ScreenLayoutDocument, ScreenLayoutEditHistory,
   ScreenLayoutEditorState, ScreenLayoutFilterInteraction,
@@ -18,7 +18,8 @@ uses
 
 type
   TScreenLayoutObjectContextMenuEvent = procedure(Sender: TObject;
-    const ScreenPoint: TPoint) of object;
+    const ScreenPoint: TPoint;
+    const LayerIndices: TArray<Integer>) of object;
 
   TVectArtCanvasControl = class(TCustomControl)
   private
@@ -47,7 +48,7 @@ type
     FTextSelectionAnchor: Integer;
     FTextCompositionActive: Boolean;
     FTextCompositionCursor: Integer;
-    FTextCompositionLabel: TLabel;
+    FTextCompositionText: string;
     FTextDragActive: Boolean;
     FTextDragCurrent: TPoint;
     FTextDragStart: TPoint;
@@ -89,6 +90,8 @@ type
     function TextEditOverlayState: TScreenLayoutTextEditOverlayState;
     procedure DrawTextEditingOverlay(ACanvas: TCanvas);
     procedure DrawTextEditingOverlayDirect2D(ACanvas: TDirect2DCanvas);
+    procedure DrawSnapGuides(ACanvas: TCanvas); overload;
+    procedure DrawSnapGuides(ACanvas: TDirect2DCanvas); overload;
     procedure FinishTextEdit(Cancel: Boolean;
       RestoreCanvasFocus: Boolean = True);
     procedure FinishTextEditAndSelect(RestoreCanvasFocus: Boolean);
@@ -159,16 +162,18 @@ uses
   ScreenLayoutPathOperations,
   ScreenLayoutShapeOperations, ScreenLayoutTextCommands,
   ScreenLayoutTextGeometry, ScreenLayoutTextPathGeometry,
-  ScreenLayoutLayerNaming;
+  ScreenLayoutLayerNaming, ScreenLayoutSnapGeometry;
 
 const
   CANVAS_MARGIN         = 32;
   CANVAS_SHADOW_OFFSET  = 6;
   COLOR_EDITOR_SURROUND = TColor($00484848); // 出力範囲外を背景色と区別する中間色。
   COLOR_CANVAS_SHADOW   = TColor($00070707);
-  COLOR_ROTATION_MARK   = TColor($00008000);
+  COLOR_ROTATION_MARK       = TColor($00008000); // ダブルクリックで0度へ戻せる回転。
+  COLOR_ROTATION_BAKED_MARK = TColor($000080FF); // 座標へ焼き込むためリセット対象外の回転。
   COLOR_SELECTION       = clBlack;
   COLOR_OPEN_GROUP      = TColor($00D6A04A);
+  COLOR_SNAP            = TColor($0048A8F8);
   COLOR_TRANSPARENT_A   = TColor($00D8D8D8);
   COLOR_TRANSPARENT_B   = TColor($00FFFFFF);
   TRANSPARENCY_CELL     = 16;
@@ -247,13 +252,6 @@ begin
   FTextEditor.OnComposition := TextEditorComposition;
   FTextEditor.OnExit := TextEditorExit;
   FTextEditor.OnKeyDown := TextEditorKeyDown;
-  FTextCompositionLabel := TLabel.Create(Self);
-  FTextCompositionLabel.Parent := Self;
-  FTextCompositionLabel.AutoSize := True;
-  FTextCompositionLabel.Font.Color := clWhite;
-  FTextCompositionLabel.Font.Style := [fsUnderline];
-  FTextCompositionLabel.Transparent := True;
-  FTextCompositionLabel.Visible := False;
   FImeState := Default(TWindowsImeState);
   FPanOffset := TPointF.Zero;
   FViewZoom := 1.0;
@@ -262,7 +260,6 @@ end;
 
 destructor TVectArtCanvasControl.Destroy;
 begin
-  FTextCompositionLabel.Free;
   FTextEditor.Free;
   FRenderBuffer.Free;
   FRenderedDocument.Free;
@@ -306,8 +303,7 @@ begin
   FTextPreferredCaretX := -1.0;
   FTextCompositionActive := False;
   FTextCompositionCursor := 0;
-  FTextCompositionLabel.Caption := '';
-  FTextCompositionLabel.Visible := False;
+  FTextCompositionText := '';
   FTextEditor.Text := '';
   FTextEditor.Font.Name := Data.FontFamily;
   FTextEditor.Font.Size := Round(Data.FontSize);
@@ -349,8 +345,7 @@ begin
   FTextPreferredCaretX := -1.0;
   FTextCompositionActive := False;
   FTextCompositionCursor := 0;
-  FTextCompositionLabel.Caption := '';
-  FTextCompositionLabel.Visible := False;
+  FTextCompositionText := '';
   FTextEditor.Text := '';
   FTextEditor.Font.Name := Layer.FontFamily;
   FTextEditor.Font.Size := Round(Layer.FontSize);
@@ -389,8 +384,7 @@ begin
   FTextPreferredCaretX := -1.0;
   FTextCompositionActive := False;
   FTextCompositionCursor := 0;
-  FTextCompositionLabel.Caption := '';
-  FTextCompositionLabel.Visible := False;
+  FTextCompositionText := '';
   FTextEditor.Text := '';
   FTextEditor.Font.Name := Layer.FontFamily;
   FTextEditor.Font.Size := Round(Layer.FontSize);
@@ -449,6 +443,11 @@ begin
   Result.Text := FTextBuffer;
   Result.CaretIndex := FTextCaretIndex;
   Result.SelectionAnchor := FTextSelectionAnchor;
+  if FTextCompositionActive then
+    Result.CompositionText := FTextCompositionText;
+  Result.CompositionPosition := Point(FTextEditor.Left + FTextEditor.Width,
+    FTextEditor.Top);
+  Result.CompositionFontHeight := FTextEditor.Font.Height;
   Result.CanvasBounds := FCanvasBounds;
   if (FDocument <> nil) and (FDocument.CanvasLayer <> nil) then
   begin
@@ -470,6 +469,116 @@ procedure TVectArtCanvasControl.DrawTextEditingOverlayDirect2D(
   ACanvas: TDirect2DCanvas);
 begin
   DrawScreenLayoutTextEditOverlay(ACanvas, TextEditOverlayState);
+end;
+
+procedure TVectArtCanvasControl.DrawSnapGuides(ACanvas: TCanvas);
+var
+  Guide: TScreenLayoutSnapGuide;
+  Guides: TArray<TScreenLayoutSnapGuide>;
+  TargetRect: TRect;
+begin
+  Guides := FInteraction.SnapGuides;
+  for Guide in Guides do
+  begin
+    DrawOverlayLine(ACanvas,
+      Point(ToScreenX(Guide.StartPoint.X), ToScreenY(Guide.StartPoint.Y)),
+      Point(ToScreenX(Guide.EndPoint.X), ToScreenY(Guide.EndPoint.Y)),
+      COLOR_SNAP, psDot);
+    if Guide.HighlightTarget then
+    begin
+      TargetRect := Rect(ToScreenX(Guide.TargetBounds.Left),
+        ToScreenY(Guide.TargetBounds.Top), ToScreenX(Guide.TargetBounds.Right),
+        ToScreenY(Guide.TargetBounds.Bottom));
+      DrawOverlayFrameRect(ACanvas, TargetRect, COLOR_SNAP, psDot);
+    end;
+  end;
+  Guides := FGroupDrag.SnapGuides;
+  for Guide in Guides do
+  begin
+    DrawOverlayLine(ACanvas,
+      Point(ToScreenX(Guide.StartPoint.X), ToScreenY(Guide.StartPoint.Y)),
+      Point(ToScreenX(Guide.EndPoint.X), ToScreenY(Guide.EndPoint.Y)),
+      COLOR_SNAP, psDot);
+    if Guide.HighlightTarget then
+    begin
+      TargetRect := Rect(ToScreenX(Guide.TargetBounds.Left),
+        ToScreenY(Guide.TargetBounds.Top), ToScreenX(Guide.TargetBounds.Right),
+        ToScreenY(Guide.TargetBounds.Bottom));
+      DrawOverlayFrameRect(ACanvas, TargetRect, COLOR_SNAP, psDot);
+    end;
+  end;
+  if not FShapeCreation.Active then
+    Exit;
+  Guides := FShapeCreation.SnapGuides;
+  for Guide in Guides do
+  begin
+    DrawOverlayLine(ACanvas,
+      Point(ToScreenX(Guide.StartPoint.X), ToScreenY(Guide.StartPoint.Y)),
+      Point(ToScreenX(Guide.EndPoint.X), ToScreenY(Guide.EndPoint.Y)),
+      COLOR_SNAP, psDot);
+    if Guide.HighlightTarget then
+    begin
+      TargetRect := Rect(ToScreenX(Guide.TargetBounds.Left),
+        ToScreenY(Guide.TargetBounds.Top), ToScreenX(Guide.TargetBounds.Right),
+        ToScreenY(Guide.TargetBounds.Bottom));
+      DrawOverlayFrameRect(ACanvas, TargetRect, COLOR_SNAP, psDot);
+    end;
+  end;
+end;
+
+procedure TVectArtCanvasControl.DrawSnapGuides(ACanvas: TDirect2DCanvas);
+var
+  Guide: TScreenLayoutSnapGuide;
+  Guides: TArray<TScreenLayoutSnapGuide>;
+  TargetRect: TRect;
+begin
+  Guides := FInteraction.SnapGuides;
+  for Guide in Guides do
+  begin
+    DrawOverlayLine(ACanvas,
+      Point(ToScreenX(Guide.StartPoint.X), ToScreenY(Guide.StartPoint.Y)),
+      Point(ToScreenX(Guide.EndPoint.X), ToScreenY(Guide.EndPoint.Y)),
+      COLOR_SNAP, psDot);
+    if Guide.HighlightTarget then
+    begin
+      TargetRect := Rect(ToScreenX(Guide.TargetBounds.Left),
+        ToScreenY(Guide.TargetBounds.Top), ToScreenX(Guide.TargetBounds.Right),
+        ToScreenY(Guide.TargetBounds.Bottom));
+      DrawOverlayFrameRect(ACanvas, TargetRect, COLOR_SNAP, psDot);
+    end;
+  end;
+  Guides := FGroupDrag.SnapGuides;
+  for Guide in Guides do
+  begin
+    DrawOverlayLine(ACanvas,
+      Point(ToScreenX(Guide.StartPoint.X), ToScreenY(Guide.StartPoint.Y)),
+      Point(ToScreenX(Guide.EndPoint.X), ToScreenY(Guide.EndPoint.Y)),
+      COLOR_SNAP, psDot);
+    if Guide.HighlightTarget then
+    begin
+      TargetRect := Rect(ToScreenX(Guide.TargetBounds.Left),
+        ToScreenY(Guide.TargetBounds.Top), ToScreenX(Guide.TargetBounds.Right),
+        ToScreenY(Guide.TargetBounds.Bottom));
+      DrawOverlayFrameRect(ACanvas, TargetRect, COLOR_SNAP, psDot);
+    end;
+  end;
+  if not FShapeCreation.Active then
+    Exit;
+  Guides := FShapeCreation.SnapGuides;
+  for Guide in Guides do
+  begin
+    DrawOverlayLine(ACanvas,
+      Point(ToScreenX(Guide.StartPoint.X), ToScreenY(Guide.StartPoint.Y)),
+      Point(ToScreenX(Guide.EndPoint.X), ToScreenY(Guide.EndPoint.Y)),
+      COLOR_SNAP, psDot);
+    if Guide.HighlightTarget then
+    begin
+      TargetRect := Rect(ToScreenX(Guide.TargetBounds.Left),
+        ToScreenY(Guide.TargetBounds.Top), ToScreenX(Guide.TargetBounds.Right),
+        ToScreenY(Guide.TargetBounds.Bottom));
+      DrawOverlayFrameRect(ACanvas, TargetRect, COLOR_SNAP, psDot);
+    end;
+  end;
 end;
 
 procedure TVectArtCanvasControl.FinishTextEdit(Cancel,
@@ -544,8 +653,7 @@ begin
     FTextPreferredCaretX := -1.0;
     FTextCompositionActive := False;
     FTextCompositionCursor := 0;
-    FTextCompositionLabel.Caption := '';
-    FTextCompositionLabel.Visible := False;
+    FTextCompositionText := '';
     FTextEditor.Text := '';
     if RestoreCanvasFocus and
       not (csDestroying in ComponentState) and
@@ -578,8 +686,7 @@ begin
     Exit;
   FTextCompositionActive := False;
   FTextCompositionCursor := 0;
-  FTextCompositionLabel.Caption := '';
-  FTextCompositionLabel.Visible := False;
+  FTextCompositionText := '';
   InputText := Text;
   if (FDocument <> nil) and (FTextLayerIndex > 0) and
     (FTextLayerIndex < FDocument.LayerCount) and
@@ -597,14 +704,9 @@ begin
     Exit;
   FTextCompositionActive := Active;
   FTextCompositionCursor := EnsureRange(CursorPosition, 0, Length(Text));
-  FTextCompositionLabel.Caption := Text;
-  FTextCompositionLabel.Visible := Active and (Text <> '');
+  FTextCompositionText := Text;
   UpdateTextEditorBounds;
-  if FTextCompositionLabel.Visible then
-  begin
-    FTextCompositionLabel.BringToFront;
-    FTextEditor.BringToFront;
-  end;
+  FTextEditor.BringToFront;
   Invalidate;
 end;
 
@@ -966,7 +1068,6 @@ var
   GreenTotal: Integer;
   I: Integer;
   J: Integer;
-  Luminance: Integer;
   RedTotal: Integer;
   SampleCount: Integer;
   SampleX: Integer;
@@ -1000,13 +1101,7 @@ begin
   begin
     FTextEditor.Color := RGB(RedTotal div SampleCount,
       GreenTotal div SampleCount, BlueTotal div SampleCount);
-    Luminance := (299 * (RedTotal div SampleCount) +
-      587 * (GreenTotal div SampleCount) +
-      114 * (BlueTotal div SampleCount)) div 1000;
-    if Luminance >= 128 then
-      FTextInputOutlineColor := clBlack
-    else
-      FTextInputOutlineColor := clWhite;
+    FTextInputOutlineColor := clWhite;
   end
   else
   begin
@@ -1091,11 +1186,6 @@ begin
   FTextEditor.SetBounds(ScreenPoint.X, ScreenPoint.Y,
     TEXT_INPUT_EDIT_WIDTH,
     Max(Round(CaretLayout.LineHeight * ScaleY * FZoom), 1));
-  FTextCompositionLabel.Font.Name := Layer.FontFamily;
-  FTextCompositionLabel.Font.Height := FTextEditor.Font.Height;
-  FTextCompositionLabel.Font.Color := Layer.FillColor;
-  FTextCompositionLabel.Left := ScreenPoint.X + TEXT_INPUT_EDIT_WIDTH;
-  FTextCompositionLabel.Top := ScreenPoint.Y;
 end;
 
 procedure TVectArtCanvasControl.UpdateTextLayerFromBuffer;
@@ -1366,7 +1456,8 @@ begin
       LayerIndex, LogicalPoint, LogicalPointValid) and
       Assigned(FOnObjectContextMenu) then
     begin
-      FOnObjectContextMenu(Self, ClientToScreen(Point(X, Y)));
+      FOnObjectContextMenu(Self, ClientToScreen(Point(X, Y)),
+        FInteraction.LayersAt(X, Y));
       Invalidate;
       Exit;
     end;
@@ -1565,8 +1656,8 @@ begin
     if (FEditorState <> nil) and
       (FEditorState.CurrentTool in [vetRectangleLine, vetRectangle,
         vetRoundedRectangleLine, vetRoundedRectangle,
-        vetEllipseLine, vetEllipse, vetArc, vetArcShape, vetLine, vetPath,
-        vetShape, vetText, vetTextPath]) then
+        vetEllipseLine, vetEllipse, vetArc, vetArcShape, vetLine,
+        vetFreehand, vetPath, vetShape, vetText, vetTextPath]) then
     begin
       if FEditorState.CurrentTool = vetText then
         Cursor := crIBeam
@@ -1619,7 +1710,7 @@ begin
     Angle := RadToDeg(ArcTan2(
       Y - ToScreenY(FGroupDrag.RotationCenter.Y),
       X - ToScreenX(FGroupDrag.RotationCenter.X)));
-    FGroupDrag.UpdateRotation(Angle);
+    FGroupDrag.UpdateRotation(Angle, Shift);
     Cursor := RotationHandleCursor;
     Invalidate;
     Exit;
@@ -1695,8 +1786,8 @@ begin
   if (FEditorState <> nil) and
     (FEditorState.CurrentTool in [vetRectangleLine, vetRectangle,
       vetRoundedRectangleLine, vetRoundedRectangle,
-      vetEllipseLine, vetEllipse, vetArc, vetArcShape, vetLine, vetPath,
-      vetShape, vetText, vetTextPath]) then
+      vetEllipseLine, vetEllipse, vetArc, vetArcShape, vetLine,
+      vetFreehand, vetPath, vetShape, vetText, vetTextPath]) then
   begin
     if FEditorState.CurrentTool = vetText then
       Cursor := crIBeam
@@ -1905,6 +1996,7 @@ var
   RotationHandleIndex: Integer;
   RotationArcPoints: TArray<TPoint>;
   RotationArrowPoints: TArray<TPoint>;
+  RotationMarkColor: TColor;
   I: Integer;
   ImageLayer: TVectArtImageLayer;
   Layer: TVectArtLayer;
@@ -2280,20 +2372,29 @@ begin
                TScreenLayoutShapeLayer)) and
             not FInteraction.AxisAlignedSelection then
           begin
-            DrawOverlayLine(Direct2DCanvas,
-              SelectionGeometry.RotationStem[0],
-              SelectionGeometry.RotationStem[1]);
+            if FInteraction.RotationSnapped then
+              DrawOverlayLine(Direct2DCanvas,
+                SelectionGeometry.RotationStem[0],
+                SelectionGeometry.RotationStem[1], COLOR_SNAP, psDot)
+            else
+              DrawOverlayLine(Direct2DCanvas,
+                SelectionGeometry.RotationStem[0],
+                SelectionGeometry.RotationStem[1]);
             DrawOverlayHandleEllipse(Direct2DCanvas,
               SelectionGeometry.PrimaryRotationHandle, clWhite,
               COLOR_ROTATION_MARK);
             BuildRotationMarkPoints(
               SelectionGeometry.PrimaryRotationHandle,
               RotationArcPoints, RotationArrowPoints);
+            if FInteraction.CanResetSelectedRotation then
+              RotationMarkColor := COLOR_ROTATION_MARK
+            else
+              RotationMarkColor := COLOR_ROTATION_BAKED_MARK;
             DrawOverlayPolyline(Direct2DCanvas, RotationArcPoints,
-              COLOR_ROTATION_MARK, psSolid, 1, 1);
+              RotationMarkColor, psSolid, 1, 1);
             DrawOverlayHandlePolygon(Direct2DCanvas,
-              RotationArrowPoints, COLOR_ROTATION_MARK,
-              COLOR_ROTATION_MARK, 1, 1);
+              RotationArrowPoints, RotationMarkColor,
+              RotationMarkColor, 1, 1);
           end;
           if FInteraction.SelectedTextPathCharacterGeometry(
             CharacterGeometry) then
@@ -2510,6 +2611,7 @@ begin
       begin
         DrawOverlayPolyline(Direct2DCanvas, PathPreview);
       end;
+      DrawSnapGuides(Direct2DCanvas);
       FFilterInteraction.Configure(FDocument, EditHistory, FEditorState,
         FCanvasBounds, FZoom);
       FFilterInteraction.Draw(Direct2DCanvas);
@@ -2546,6 +2648,7 @@ var
   RotationHandleIndex: Integer;
   RotationArcPoints: TArray<TPoint>;
   RotationArrowPoints: TArray<TPoint>;
+  RotationMarkColor: TColor;
   I: Integer;
   ImageLayer: TVectArtImageLayer;
   Layer: TVectArtLayer;
@@ -2888,17 +2991,25 @@ begin
            TScreenLayoutShapeLayer)) and
         not FInteraction.AxisAlignedSelection then
       begin
-        DrawOverlayLine(Canvas, SelectionGeometry.RotationStem[0],
-          SelectionGeometry.RotationStem[1]);
+        if FInteraction.RotationSnapped then
+          DrawOverlayLine(Canvas, SelectionGeometry.RotationStem[0],
+            SelectionGeometry.RotationStem[1], COLOR_SNAP, psDot)
+        else
+          DrawOverlayLine(Canvas, SelectionGeometry.RotationStem[0],
+            SelectionGeometry.RotationStem[1]);
         DrawOverlayHandleEllipse(Canvas,
           SelectionGeometry.PrimaryRotationHandle, clWhite,
           COLOR_ROTATION_MARK);
         BuildRotationMarkPoints(SelectionGeometry.PrimaryRotationHandle,
           RotationArcPoints, RotationArrowPoints);
+        if FInteraction.CanResetSelectedRotation then
+          RotationMarkColor := COLOR_ROTATION_MARK
+        else
+          RotationMarkColor := COLOR_ROTATION_BAKED_MARK;
         DrawOverlayPolyline(Canvas, RotationArcPoints,
-          COLOR_ROTATION_MARK, psSolid, 1, 1);
+          RotationMarkColor, psSolid, 1, 1);
         DrawOverlayHandlePolygon(Canvas, RotationArrowPoints,
-          COLOR_ROTATION_MARK, COLOR_ROTATION_MARK, 1, 1);
+          RotationMarkColor, RotationMarkColor, 1, 1);
       end;
       if FInteraction.SelectedTextPathCharacterGeometry(
         CharacterGeometry) then
@@ -3102,6 +3213,7 @@ begin
   begin
     DrawOverlayPolyline(Canvas, PathPreview);
   end;
+  DrawSnapGuides(Canvas);
   FFilterInteraction.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   FFilterInteraction.Draw(Canvas);

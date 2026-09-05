@@ -33,8 +33,8 @@ uses
   Vcl.Graphics, Winapi.Windows;
 
 const
-  BUTTON_SIZE = 46;
-  PALETTE_BUTTON_COUNT = 9;
+  BUTTON_SIZE = 40;
+  PALETTE_BUTTON_COUNT = 10;
   COLOR_BACKGROUND = TColor($00252525);
   COLOR_BUTTON = TColor($002D2D2D);
   COLOR_SELECTED = TColor($0046382B);
@@ -145,12 +145,13 @@ begin
   case Index of
     0: Result := vetSelect;
     1: Result := vetLine;
-    2: Result := vetPath;
-    3: Result := vetRectangle;
-    4: Result := vetRoundedRectangle;
-    5: Result := vetEllipse;
-    6: Result := vetArcShape;
-    7: Result := vetShape;
+    2: Result := vetFreehand;
+    3: Result := vetPath;
+    4: Result := vetRectangle;
+    5: Result := vetRoundedRectangle;
+    6: Result := vetEllipse;
+    7: Result := vetArcShape;
+    8: Result := vetShape;
   else
     Result := vetText;
   end;
@@ -251,6 +252,17 @@ begin
   begin
     Canvas.MoveTo(CenterX - 11, CenterY + 8);
     Canvas.LineTo(CenterX + 11, CenterY - 8);
+  end
+  else if Tool = vetFreehand then
+  begin
+    Canvas.Polyline([Point(CenterX - 13, CenterY + 5),
+      Point(CenterX - 10, CenterY - 3),
+      Point(CenterX - 6, CenterY - 7),
+      Point(CenterX - 3, CenterY - 2),
+      Point(CenterX, CenterY + 7),
+      Point(CenterX + 5, CenterY + 9),
+      Point(CenterX + 9, CenterY + 3),
+      Point(CenterX + 13, CenterY - 6)]);
   end
   else if Tool = vetPath then
     DrawPathKindIcon(Canvas, CenterX, CenterY, False,

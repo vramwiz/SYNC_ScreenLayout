@@ -5,7 +5,8 @@ interface
 
 uses
   System.Classes, System.Types, ScreenLayoutDocument, ScreenLayoutEditHistory,
-  ScreenLayoutEditorState, ScreenLayoutSelectionGeometry;
+  ScreenLayoutEditorState, ScreenLayoutSelectionGeometry,
+  ScreenLayoutSnapGeometry;
 
 type
   TScreenLayoutGroupDragMode = (slgdmNone, slgdmMove, slgdmResize,
@@ -23,6 +24,7 @@ type
     FRotationCenter: TPointF;
     FRotationDegrees: Single;
     FRotationStartAngle: Single;
+    FSnapGuides: TArray<TScreenLayoutSnapGuide>;
     FStartBounds: TRectF;
     FStartPoint: TPoint;
     FTextLayer: TScreenLayoutTextLayer;
@@ -47,11 +49,13 @@ type
     function UpdateMoveOrResize(Shift: TShiftState;
       X, Y: Integer; Zoom: Single): Boolean;
     // 現在角度に対応する回転差分をDocumentへ反映する。
-    function UpdateRotation(CurrentAngle: Single): Boolean;
+    function UpdateRotation(CurrentAngle: Single;
+      Shift: TShiftState): Boolean;
     property Active: Boolean read GetActive;
     property Mode: TScreenLayoutGroupDragMode read FMode;
     property ResizeHandle: TVectArtSelectionHandle read FResizeHandle;
     property RotationCenter: TPointF read FRotationCenter;
+    property SnapGuides: TArray<TScreenLayoutSnapGuide> read FSnapGuides;
   end;
 
 // グループ内の指定点で最前面にある表示中の直下レイヤーを返す。
@@ -71,11 +75,25 @@ uses
 
 procedure TScreenLayoutGroupDrag.BeginMove(Document: TVectArtDocument;
   const Layers: TArray<TVectArtLayer>; const StartPoint: TPoint);
+var
+  Bounds: TRectF;
+  BoundsInitialized: Boolean;
+  I: Integer;
 begin
   Reset;
   FDocument := Document;
   FLayers := Copy(Layers);
   FStartPoint := StartPoint;
+  BoundsInitialized := False;
+  for I := 0 to High(FLayers) do
+    if TryGetScreenLayoutLayerBounds(FLayers[I], Bounds) then
+      if not BoundsInitialized then
+      begin
+        FStartBounds := Bounds;
+        BoundsInitialized := True;
+      end
+      else
+        FStartBounds := TRectF.Union(FStartBounds, Bounds);
   FMode := slgdmMove;
 end;
 
@@ -169,6 +187,7 @@ begin
   FDY := 0;
   FResizeHandle := vshNone;
   FRotationDegrees := 0;
+  FSnapGuides := nil;
   FTextLayer := nil;
 end;
 
@@ -182,6 +201,7 @@ var
   I: Integer;
   MinimumScale: Single;
   Scale: Single;
+  SnappedDelta: TPointF;
   TargetBounds: TRectF;
   VectorX: Single;
   VectorY: Single;
@@ -193,6 +213,15 @@ begin
   DY := (Y - FStartPoint.Y) / Zoom;
   if FMode = slgdmMove then
   begin
+    FSnapGuides := nil;
+    if not (ssAlt in Shift) and not FStartBounds.IsEmpty and
+      SnapScreenLayoutMoveForLayers(FDocument, FStartBounds,
+        TPointF.Create(DX, DY), Zoom, FLayers, SnappedDelta,
+        FSnapGuides) then
+    begin
+      DX := SnappedDelta.X;
+      DY := SnappedDelta.Y;
+    end;
     for I := 0 to High(FLayers) do
       TranslateScreenLayoutLayer(FLayers[I], DX - FDX, DY - FDY);
     FDX := DX;
@@ -200,6 +229,7 @@ begin
   end
   else
   begin
+    FSnapGuides := nil;
     TargetBounds := FStartBounds;
     if FResizeHandle in [vshTopLeft, vshLeft, vshBottomLeft] then
       TargetBounds.Left := Min(FStartBounds.Right - 1,
@@ -295,8 +325,8 @@ begin
   FDocument.Changed;
 end;
 
-function TScreenLayoutGroupDrag.UpdateRotation(
-  CurrentAngle: Single): Boolean;
+function TScreenLayoutGroupDrag.UpdateRotation(CurrentAngle: Single;
+  Shift: TShiftState): Boolean;
 var
   DesiredDegrees: Single;
   I: Integer;
@@ -310,6 +340,8 @@ begin
     DesiredDegrees := DesiredDegrees - 360;
   while DesiredDegrees < -180 do
     DesiredDegrees := DesiredDegrees + 360;
+  if ssShift in Shift then
+    DesiredDegrees := Round(DesiredDegrees / 15) * 15;
   IncrementDegrees := DesiredDegrees - FRotationDegrees;
   for I := 0 to High(FLayers) do
     RotateScreenLayoutLayer(FLayers[I], FRotationCenter, IncrementDegrees);

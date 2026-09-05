@@ -12,6 +12,9 @@ type
     Text: string;                  // Document反映前を含む現在の編集文字列。
     CaretIndex: Integer;           // 選択可動端のUTF-16挿入位置。
     SelectionAnchor: Integer;      // 選択固定端のUTF-16挿入位置。
+    CompositionText: string;       // Document未反映のIME未確定文字列。
+    CompositionPosition: TPoint;   // 未確定文字列の画面座標上の左上。
+    CompositionFontHeight: Integer; // IME受取用Editと同じフォント高。
     CanvasBounds: TRect;           // コントロール座標上の出力範囲。
     CanvasWidth: Integer;          // 中央原点変換に使用する論理出力幅。
     CanvasHeight: Integer;         // 中央原点変換に使用する論理出力高。
@@ -158,6 +161,52 @@ begin
     Max(State.DragStart.Y, State.DragCurrent.Y));
 end;
 
+procedure DrawContrastText(Target: TCanvas; const State:
+  TScreenLayoutTextEditOverlayState); overload;
+var
+  OffsetX: Integer;
+  OffsetY: Integer;
+begin
+  if (State.Layer = nil) or (State.CompositionText = '') then
+    Exit;
+  Target.Font.Name := State.Layer.FontFamily;
+  Target.Font.Height := State.CompositionFontHeight;
+  Target.Font.Style := State.Layer.FontStyle + [fsUnderline];
+  Target.Brush.Style := bsClear;
+  Target.Font.Color := clWhite;
+  for OffsetY := -1 to 1 do
+    for OffsetX := -1 to 1 do
+      if (OffsetX <> 0) or (OffsetY <> 0) then
+        Target.TextOut(State.CompositionPosition.X + OffsetX,
+          State.CompositionPosition.Y + OffsetY, State.CompositionText);
+  Target.Font.Color := clBlack;
+  Target.TextOut(State.CompositionPosition.X, State.CompositionPosition.Y,
+    State.CompositionText);
+end;
+
+procedure DrawContrastText(Target: TDirect2DCanvas; const State:
+  TScreenLayoutTextEditOverlayState); overload;
+var
+  OffsetX: Integer;
+  OffsetY: Integer;
+begin
+  if (State.Layer = nil) or (State.CompositionText = '') then
+    Exit;
+  Target.Font.Name := State.Layer.FontFamily;
+  Target.Font.Height := State.CompositionFontHeight;
+  Target.Font.Style := State.Layer.FontStyle + [fsUnderline];
+  Target.Brush.Style := bsClear;
+  Target.Font.Color := clWhite;
+  for OffsetY := -1 to 1 do
+    for OffsetX := -1 to 1 do
+      if (OffsetX <> 0) or (OffsetY <> 0) then
+        Target.TextOut(State.CompositionPosition.X + OffsetX,
+          State.CompositionPosition.Y + OffsetY, State.CompositionText);
+  Target.Font.Color := clBlack;
+  Target.TextOut(State.CompositionPosition.X, State.CompositionPosition.Y,
+    State.CompositionText);
+end;
+
 procedure DrawScreenLayoutTextEditOverlay(Target: TCanvas;
   const State: TScreenLayoutTextEditOverlayState);
 var
@@ -182,6 +231,7 @@ begin
       Target.TextOut(Run.Bounds.Left, Run.Bounds.Top, Run.Text);
     end;
   end;
+  DrawContrastText(Target, State);
   if State.DragActive then
   begin
     GuideRect := InputGuideRect(State);
@@ -213,6 +263,7 @@ begin
       Target.TextOut(Run.Bounds.Left, Run.Bounds.Top, Run.Text);
     end;
   end;
+  DrawContrastText(Target, State);
   if State.DragActive then
   begin
     GuideRect := InputGuideRect(State);

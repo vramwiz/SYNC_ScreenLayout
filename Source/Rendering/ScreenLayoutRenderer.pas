@@ -801,8 +801,12 @@ begin
         Continue;
       Font := CreateScreenLayoutTextFont(TextLayer.FontFamily,
         TextLayer.FontSize, TextLayer.FontStyle);
-      Paint.Color := VclColorToAlphaColor(TextLayer.FillColor,
-        TextLayer.Opacity * OpacityMultiplier);
+      if (Layer = InputTextLayer) and (InputTextOutlineColor <> clNone) then
+        Paint.Color := VclColorToAlphaColor(clBlack,
+          TextLayer.Opacity * OpacityMultiplier)
+      else
+        Paint.Color := VclColorToAlphaColor(TextLayer.FillColor,
+          TextLayer.Opacity * OpacityMultiplier);
       Paint.Style := TSkPaintStyle.Fill;
       TextDecorationPaint.Color := Paint.Color;
       TextDecorationPaint.StrokeWidth := Max(TextLayer.FontSize / 16, 1.0);

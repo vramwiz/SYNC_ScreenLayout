@@ -82,6 +82,8 @@ type
     function CursorAt(X, Y: Integer; out Cursor: TCursor): Boolean;
     // 進行中の頂点または制御点ドラッグを現在位置へ反映する。
     function DragTo(Shift: TShiftState; X, Y: Integer): Boolean;
+    // ドラッグ中のアンカー以外にある同一Shape内の吸着候補を返す。
+    function OtherDragVertexPositions: TArray<TPointF>;
     // 単一選択Shapeの全輪郭アンカーを画面座標の矩形列として返す。
     function SelectedVertexRects: TArray<TRect>;
     // 選択頂点の外側へ表示する鋭角／ベジェ種別ボタンを返す。
@@ -660,6 +662,24 @@ begin
         -ControlVector.Y / ControlLength * OppositeLength);
   end;
   FDocument.SetShapeContours(FDragLayerIndex, NewContours);
+end;
+
+function TScreenLayoutShapeInteraction.OtherDragVertexPositions:
+  TArray<TPointF>;
+var
+  ContourIndex: Integer;
+  VertexIndex: Integer;
+begin
+  Result := nil;
+  if FDragBezierHandle <> slbhNone then
+    Exit;
+  for ContourIndex := 0 to High(FDragStartContours) do
+    for VertexIndex := 0 to High(
+      FDragStartContours[ContourIndex].Vertices) do
+      if (ContourIndex <> FDragContourIndex) or
+        (VertexIndex <> FDragVertexIndex) then
+        Result := Result + [FDragStartContours[ContourIndex].Vertices[
+          VertexIndex].Position];
 end;
 
 procedure TScreenLayoutShapeInteraction.CommitDrag;

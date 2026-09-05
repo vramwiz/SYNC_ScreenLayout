@@ -78,7 +78,7 @@ begin
       'Select tool could not start an existing vertex drag');
     Check(Length(Interaction.SelectedShapeVertexKindButtons) = 0,
       'Select tool exposed structural vertex controls');
-    Check(Interaction.MouseMove([ssLeft], 105, 55),
+    Check(Interaction.MouseMove([ssLeft, ssAlt], 105, 55),
       'Select tool could not drag an existing vertex');
     Check(Interaction.MouseUp(mbLeft),
       'Select tool did not finish the vertex drag');

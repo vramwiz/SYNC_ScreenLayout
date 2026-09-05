@@ -86,6 +86,8 @@
         <DCCReference Include="Source\Shell\ScreenLayoutEditActionsUI.pas"/>
         <DCCReference Include="Source\ObjectProperties\ScreenLayoutStrokeStyleCombo.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutLineToolbar.pas"/>
+        <DCCReference Include="Source\Shell\ScreenLayoutLineToolbarOperations.pas"/>
+        <DCCReference Include="Source\Shell\ScreenLayoutTextToolbarOperations.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutLineStyleControls.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutCanvasSettingsDialog.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutDocument.pas"/>
@@ -127,6 +129,7 @@
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJsonWriter.pas"/>
         <DCCReference Include="Source\Editor\ScreenLayoutCanvas.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutCanvasInteraction.pas"/>
+        <DCCReference Include="Source\Core\Geometry\ScreenLayoutSnapGeometry.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutTextPathCharacterInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutContextMenuInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutFilterInteraction.pas"/>

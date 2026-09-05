@@ -371,8 +371,7 @@ begin
     FEditActionsUI.RefreshState;
   if FEditorFrame <> nil then
     FEditorFrame.CanvasControl.Invalidate;
-  if FLayerFrame <> nil then
-    FLayerFrame.RefreshFromDocument;
+  // ドラッグ中はCanvasだけを更新し、重い属性UIの再同期は操作確定時にまとめる。
   if (FDocument <> nil) and FDocument.IsInteractiveUpdate then
     Exit;
   if FLayerFrame <> nil then
@@ -486,6 +485,10 @@ begin
   else if (FEditorState <> nil) and
     (FEditorState.CurrentTool = vetLine) then
     lblStatus.Caption := 'Ready   Tool: Line   Canvas: ' + CanvasSize
+  else if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetFreehand) then
+    lblStatus.Caption := 'Freehand: drag to draw one open path   Canvas: ' +
+      CanvasSize
   else if (FEditorState <> nil) and
     (FEditorState.CurrentTool = vetPath) then
     lblStatus.Caption := 'Path (' + VertexMode +

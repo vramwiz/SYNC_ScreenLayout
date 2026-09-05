@@ -132,7 +132,8 @@ implementation
 
 uses
   System.Math, System.SysUtils, Winapi.Windows, Vcl.Forms,
-  ScreenLayoutEditCommands, ScreenLayoutTextCommands;
+  ScreenLayoutEditCommands, ScreenLayoutLineToolbarOperations,
+  ScreenLayoutTextToolbarOperations;
 
 const
   COLOR_BACKGROUND = TColor($00282828);
@@ -154,61 +155,6 @@ begin
     Result[I + 1] := Char(CodePoints[I]);
 end;
 
-function ReadLineLayer(Layer: TVectArtLayer; out Color: TColor;
-  out Width: Single; out Style: TVectArtMifStrokeStyle;
-  out LineCap: TVectArtLineCap): Boolean;
-begin
-  Result := Layer is TScreenLayoutRectangleLineLayer;
-  if Result then
-  begin
-    Color := TScreenLayoutRectangleLineLayer(Layer).StrokeColor;
-    Width := TScreenLayoutRectangleLineLayer(Layer).StrokeWidth;
-    Style := TScreenLayoutRectangleLineLayer(Layer).StrokeStyle;
-    LineCap := vlcSquare;
-    Exit;
-  end;
-  Result := Layer is TScreenLayoutArcLayer;
-  if Result then
-  begin
-    Color := TScreenLayoutArcLayer(Layer).StrokeColor;
-    Width := TScreenLayoutArcLayer(Layer).StrokeWidth;
-    Style := TScreenLayoutArcLayer(Layer).StrokeStyle;
-    LineCap := TScreenLayoutArcLayer(Layer).LineCap;
-    Exit;
-  end;
-  Result := (Layer is TVectArtPathLayer) and
-    not TVectArtPathLayer(Layer).Closed;
-  if Result then
-  begin
-    Color := TVectArtPathLayer(Layer).StrokeColor;
-    Width := TVectArtPathLayer(Layer).StrokeWidth;
-    Style := TVectArtPathLayer(Layer).MifStrokeStyle;
-    LineCap := TVectArtPathLayer(Layer).LineCap;
-  end;
-end;
-
-procedure SetLineLayerStroke(Document: TVectArtDocument; Index: Integer;
-  Color: TColor; Width: Single; Style: TVectArtMifStrokeStyle);
-begin
-  if Document[Index] is TScreenLayoutRectangleLineLayer then
-    Document.SetRectangleLineStroke(Index, Color, Width, Style)
-  else if Document[Index] is TScreenLayoutArcLayer then
-    Document.SetArcStroke(Index, Color, Width, Style)
-  else
-    Document.SetPathStroke(Index, Color, Width, Style);
-end;
-
-procedure SetLineLayerCap(Document: TVectArtDocument; Index: Integer;
-  Value: TVectArtLineCap);
-begin
-  if Document[Index] is TScreenLayoutRectangleLineLayer then
-    Exit
-  else if Document[Index] is TScreenLayoutArcLayer then
-    Document.SetArcLineCap(Index, Value)
-  else
-    Document.SetPathLineCap(Index, Value);
-end;
-
 constructor TVectArtLineToolbarControl.CreateForHost(AOwner: TComponent;
   AHost: TWinControl);
 begin
@@ -222,6 +168,9 @@ begin
   FApplicationEvents := TApplicationEvents.Create(Self);
   FApplicationEvents.OnIdle := ApplicationIdle;
   BuildControls;
+  // Parent接続時のResizeは子Control生成前に発生するため、生成後にも必ず配置する。
+  // これがないとTEditなどがVCL既定の位置と幅で左側へ残り、ほかの線設定を覆う。
+  Resize;
   Visible := False;
 end;
 
@@ -463,11 +412,7 @@ end;
 procedure TVectArtLineToolbarControl.ApplyFontStyle(Style: TFontStyle;
   Enabled: Boolean);
 var
-  Command: TVectArtCompoundCommand;
-  I: Integer;
   Indices: TArray<Integer>;
-  NewData: TScreenLayoutTextData;
-  OldData: TScreenLayoutTextData;
 begin
   if FUpdating then
     Exit;
@@ -476,34 +421,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    Command := nil;
-    if FEditHistory <> nil then
-      Command := TVectArtCompoundCommand.Create;
-    FDocument.BeginUpdate;
-    try
-      for I := 0 to High(Indices) do
-      begin
-        OldData := CaptureScreenLayoutTextData(
-          TScreenLayoutTextLayer(FDocument[Indices[I]]));
-        if (Style in OldData.FontStyle) = Enabled then
-          Continue;
-        NewData := OldData;
-        if Enabled then
-          Include(NewData.FontStyle, Style)
-        else
-          Exclude(NewData.FontStyle, Style);
-        if Command <> nil then
-          Command.Add(TScreenLayoutTextDataCommand.Create(FDocument,
-            Indices[I], OldData, NewData));
-        FDocument.SetTextData(Indices[I], NewData);
-      end;
-    finally
-      FDocument.EndUpdate;
-    end;
-    if (Command <> nil) and (Command.Count > 0) then
-      FEditHistory.AddApplied(Command)
-    else
-      Command.Free;
+    ApplyScreenLayoutToolbarFontStyle(FDocument, FEditHistory, Indices,
+      Style, Enabled);
   finally
     FUpdating := False;
   end;
@@ -513,11 +432,7 @@ end;
 procedure TVectArtLineToolbarControl.ApplyTextAlignment(
   Value: TScreenLayoutTextAlignment);
 var
-  Command: TVectArtCompoundCommand;
-  I: Integer;
   Indices: TArray<Integer>;
-  NewData: TScreenLayoutTextData;
-  OldData: TScreenLayoutTextData;
 begin
   if FUpdating then
     Exit;
@@ -526,31 +441,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    Command := nil;
-    if FEditHistory <> nil then
-      Command := TVectArtCompoundCommand.Create;
-    FDocument.BeginUpdate;
-    try
-      for I := 0 to High(Indices) do
-      begin
-        OldData := CaptureScreenLayoutTextData(
-          TScreenLayoutTextLayer(FDocument[Indices[I]]));
-        if OldData.Alignment = Value then
-          Continue;
-        NewData := OldData;
-        NewData.Alignment := Value;
-        if Command <> nil then
-          Command.Add(TScreenLayoutTextDataCommand.Create(FDocument,
-            Indices[I], OldData, NewData));
-        FDocument.SetTextData(Indices[I], NewData);
-      end;
-    finally
-      FDocument.EndUpdate;
-    end;
-    if (Command <> nil) and (Command.Count > 0) then
-      FEditHistory.AddApplied(Command)
-    else
-      Command.Free;
+    ApplyScreenLayoutToolbarTextAlignment(FDocument, FEditHistory, Indices,
+      Value);
   finally
     FUpdating := False;
   end;
@@ -560,11 +452,7 @@ end;
 procedure TVectArtLineToolbarControl.ApplyTextPathAttachment(
   Value: TScreenLayoutTextPathAttachment);
 var
-  Command: TVectArtCompoundCommand;
-  I: Integer;
   Indices: TArray<Integer>;
-  NewData: TScreenLayoutTextData;
-  OldData: TScreenLayoutTextData;
 begin
   if FUpdating then
     Exit;
@@ -573,31 +461,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    Command := nil;
-    if FEditHistory <> nil then
-      Command := TVectArtCompoundCommand.Create;
-    FDocument.BeginUpdate;
-    try
-      for I := 0 to High(Indices) do
-      begin
-        OldData := CaptureScreenLayoutTextData(
-          TScreenLayoutTextPathLayer(FDocument[Indices[I]]));
-        if OldData.TextPathAttachment = Value then
-          Continue;
-        NewData := OldData;
-        NewData.TextPathAttachment := Value;
-        if Command <> nil then
-          Command.Add(TScreenLayoutTextDataCommand.Create(FDocument,
-            Indices[I], OldData, NewData));
-        FDocument.SetTextData(Indices[I], NewData);
-      end;
-    finally
-      FDocument.EndUpdate;
-    end;
-    if (Command <> nil) and (Command.Count > 0) then
-      FEditHistory.AddApplied(Command)
-    else
-      Command.Free;
+    ApplyScreenLayoutToolbarTextPathAttachment(FDocument, FEditHistory,
+      Indices, Value);
   finally
     FUpdating := False;
   end;
@@ -607,59 +472,17 @@ end;
 procedure TVectArtLineToolbarControl.ApplyTextSpacing(
   IsLetterSpacing: Boolean; Ratio: Single);
 var
-  Command: TVectArtCompoundCommand;
-  I: Integer;
   Indices: TArray<Integer>;
-  NewData: TScreenLayoutTextData;
-  OldData: TScreenLayoutTextData;
 begin
   if FUpdating then
     Exit;
-  if IsLetterSpacing then
-    Ratio := EnsureRange(Ratio, SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
-      SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX)
-  else
-    Ratio := EnsureRange(Ratio, SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN,
-      SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX);
   Indices := SelectedTextIndices;
   if (Length(Indices) = 0) or SelectionHasLockedText then
     Exit;
   FUpdating := True;
   try
-    Command := nil;
-    if FEditHistory <> nil then
-      Command := TVectArtCompoundCommand.Create;
-    FDocument.BeginUpdate;
-    try
-      for I := 0 to High(Indices) do
-      begin
-        OldData := CaptureScreenLayoutTextData(
-          TScreenLayoutTextLayer(FDocument[Indices[I]]));
-        NewData := OldData;
-        if IsLetterSpacing then
-        begin
-          if SameValue(OldData.LetterSpacingRatio, Ratio) then
-            Continue;
-          NewData.LetterSpacingRatio := Ratio;
-        end
-        else
-        begin
-          if SameValue(OldData.LineSpacingRatio, Ratio) then
-            Continue;
-          NewData.LineSpacingRatio := Ratio;
-        end;
-        if Command <> nil then
-          Command.Add(TScreenLayoutTextDataCommand.Create(FDocument,
-            Indices[I], OldData, NewData));
-        FDocument.SetTextData(Indices[I], NewData);
-      end;
-    finally
-      FDocument.EndUpdate;
-    end;
-    if (Command <> nil) and (Command.Count > 0) then
-      FEditHistory.AddApplied(Command)
-    else
-      Command.Free;
+    ApplyScreenLayoutToolbarTextSpacing(FDocument, FEditHistory, Indices,
+      IsLetterSpacing, Ratio);
   finally
     FUpdating := False;
   end;
@@ -668,11 +491,7 @@ end;
 
 procedure TVectArtLineToolbarControl.ApplyFontFamily(const Value: string);
 var
-  Command: TVectArtCompoundCommand;
-  I: Integer;
   Indices: TArray<Integer>;
-  NewData: TScreenLayoutTextData;
-  OldData: TScreenLayoutTextData;
 begin
   if FUpdating or (Trim(Value) = '') then
     Exit;
@@ -681,31 +500,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    Command := nil;
-    if FEditHistory <> nil then
-      Command := TVectArtCompoundCommand.Create;
-    FDocument.BeginUpdate;
-    try
-      for I := 0 to High(Indices) do
-      begin
-        OldData := CaptureScreenLayoutTextData(
-          TScreenLayoutTextLayer(FDocument[Indices[I]]));
-        if SameText(OldData.FontFamily, Value) then
-          Continue;
-        NewData := OldData;
-        NewData.FontFamily := Value;
-        if Command <> nil then
-          Command.Add(TScreenLayoutTextDataCommand.Create(FDocument,
-            Indices[I], OldData, NewData));
-        FDocument.SetTextData(Indices[I], NewData);
-      end;
-    finally
-      FDocument.EndUpdate;
-    end;
-    if (Command <> nil) and (Command.Count > 0) then
-      FEditHistory.AddApplied(Command)
-    else
-      Command.Free;
+    ApplyScreenLayoutToolbarFontFamily(FDocument, FEditHistory, Indices,
+      Value);
   finally
     FUpdating := False;
   end;
@@ -714,14 +510,7 @@ end;
 
 procedure TVectArtLineToolbarControl.ApplyLineCap(Value: TVectArtLineCap);
 var
-  Command: TVectArtCompoundCommand;
-  Color: TColor;
-  I: Integer;
   Indices: TArray<Integer>;
-  Layer: TVectArtLayer;
-  OldLineCap: TVectArtLineCap;
-  Style: TVectArtMifStrokeStyle;
-  Width: Single;
 begin
   if FUpdating then
     Exit;
@@ -730,33 +519,7 @@ begin
     Exit;
   FUpdating := True;
   try
-    Command := nil;
-    if (Length(Indices) > 0) and (FEditHistory <> nil) then
-      Command := TVectArtCompoundCommand.Create;
-    if FDocument <> nil then
-      FDocument.BeginUpdate;
-    try
-      for I := 0 to High(Indices) do
-      begin
-        Layer := FDocument[Indices[I]];
-        if Layer is TScreenLayoutRectangleLineLayer then
-          Continue;
-        ReadLineLayer(Layer, Color, Width, Style, OldLineCap);
-        if OldLineCap = Value then
-          Continue;
-        if Command <> nil then
-          Command.Add(TVectArtPathLineCapCommand.Create(FDocument, Indices[I],
-            OldLineCap, Value));
-        SetLineLayerCap(FDocument, Indices[I], Value);
-      end;
-    finally
-      if FDocument <> nil then
-        FDocument.EndUpdate;
-    end;
-    if (Command <> nil) and (Command.Count > 0) then
-      FEditHistory.AddApplied(Command)
-    else
-      Command.Free;
+    ApplyScreenLayoutToolbarLineCap(FDocument, FEditHistory, Indices, Value);
     if FEditorState <> nil then
       FEditorState.LineCap := Value;
   finally
@@ -768,14 +531,7 @@ end;
 procedure TVectArtLineToolbarControl.ApplyMifStrokeStyle(
   Value: TVectArtMifStrokeStyle);
 var
-  Command: TVectArtCompoundCommand;
-  Color: TColor;
-  I: Integer;
   Indices: TArray<Integer>;
-  Layer: TVectArtLayer;
-  LineCap: TVectArtLineCap;
-  OldStyle: TVectArtMifStrokeStyle;
-  Width: Single;
 begin
   if FUpdating then
     Exit;
@@ -784,24 +540,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    Command := nil;
-    if (Length(Indices) > 0) and (FEditHistory <> nil) then
-      Command := TVectArtCompoundCommand.Create;
-    for I := 0 to High(Indices) do
-    begin
-      Layer := FDocument[Indices[I]];
-      ReadLineLayer(Layer, Color, Width, OldStyle, LineCap);
-      if OldStyle = Value then
-        Continue;
-      if Command <> nil then
-        Command.Add(TVectArtStrokeCommand.Create(FDocument, Indices[I],
-          Color, Width, OldStyle, Color, Width, Value));
-      SetLineLayerStroke(FDocument, Indices[I], Color, Width, Value);
-    end;
-    if (Command <> nil) and (Command.Count > 0) then
-      FEditHistory.AddApplied(Command)
-    else
-      Command.Free;
+    ApplyScreenLayoutToolbarLineStyle(FDocument, FEditHistory, Indices,
+      Value);
     if FEditorState <> nil then
       FEditorState.LineMifStrokeStyle := Value;
   finally
@@ -818,14 +558,7 @@ end;
 procedure TVectArtLineToolbarControl.ApplyStrokeWidthInternal(Value: Single;
   RecordHistory: Boolean);
 var
-  Command: TVectArtCompoundCommand;
-  Color: TColor;
-  I: Integer;
   Indices: TArray<Integer>;
-  Layer: TVectArtLayer;
-  LineCap: TVectArtLineCap;
-  Style: TVectArtMifStrokeStyle;
-  Width: Single;
 begin
   if FUpdating then
     Exit;
@@ -835,32 +568,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    Command := nil;
-    if RecordHistory and (Length(Indices) > 0) and
-      (FEditHistory <> nil) then
-      Command := TVectArtCompoundCommand.Create;
-    if FDocument <> nil then
-      FDocument.BeginUpdate;
-    try
-      for I := 0 to High(Indices) do
-      begin
-        Layer := FDocument[Indices[I]];
-        ReadLineLayer(Layer, Color, Width, Style, LineCap);
-        if SameValue(Width, Value) then
-          Continue;
-        if Command <> nil then
-          Command.Add(TVectArtStrokeCommand.Create(FDocument, Indices[I],
-            Color, Width, Style, Color, Value, Style));
-        SetLineLayerStroke(FDocument, Indices[I], Color, Value, Style);
-      end;
-    finally
-      if FDocument <> nil then
-        FDocument.EndUpdate;
-    end;
-    if (Command <> nil) and (Command.Count > 0) then
-      FEditHistory.AddApplied(Command)
-    else
-      Command.Free;
+    ApplyScreenLayoutToolbarLineWidth(FDocument, FEditHistory, Indices,
+      Value, RecordHistory);
     if (FEditorState <> nil) and
       (RecordHistory or (Length(Indices) = 0)) then
       FEditorState.LineStrokeWidth := Value;
@@ -904,7 +613,7 @@ begin
            not TVectArtPathLayer(FDocument[Index]).Closed)) then
         Continue;
       Layer := FDocument[Index];
-      ReadLineLayer(Layer, Color, Width, Style, LineCap);
+      TryReadScreenLayoutToolbarLine(Layer, Color, Width, Style, LineCap);
       if SameValue(FTrackStartWidths[I], Width) then
         Continue;
       Command.Add(TVectArtStrokeCommand.Create(FDocument, Index,
@@ -917,7 +626,8 @@ begin
   Indices := SelectedLineIndices;
   HasFinalWidth := (FDocument <> nil) and (Length(Indices) > 0);
   if HasFinalWidth then
-    ReadLineLayer(FDocument[Indices[0]], Color, FinalWidth, Style, LineCap);
+    TryReadScreenLayoutToolbarLine(FDocument[Indices[0]], Color, FinalWidth,
+      Style, LineCap);
   FTrackStartIndices := nil;
   FTrackStartWidths := nil;
   if FTrackDocumentUpdateActive then
@@ -1170,6 +880,7 @@ var
   Style: TFontStyle;
   TextIndices: TArray<Integer>;
   TextPathIndices: TArray<Integer>;
+  UseLineToolDefaults: Boolean;
   FontFamilyValue: string;
   WidthValue: Single;
 begin
@@ -1177,7 +888,14 @@ begin
     Exit;
   FUpdating := True;
   try
-    TextIndices := SelectedTextIndices;
+    // 自由線の作成中は選択オブジェクトの属性より、これから描く線の設定を優先する。
+    // 選択が残ったままツールを切り替えても、太さUIを隠さない。
+    UseLineToolDefaults := (FEditorState <> nil) and
+      (FEditorState.CurrentTool = vetFreehand);
+    if UseLineToolDefaults then
+      TextIndices := nil
+    else
+      TextIndices := SelectedTextIndices;
     if Length(TextIndices) > 0 then
     begin
       TextPathIndices := SelectedTextPathIndices;
@@ -1284,12 +1002,16 @@ begin
       FStrokeWidthEdit.Visible := True;
       FStrokeWidthTrackBar.Visible := True;
       FDetailsButton.Visible := True;
-      Indices := SelectedLineIndices;
+      if UseLineToolDefaults then
+        Indices := nil
+      else
+        Indices := SelectedLineIndices;
       if Length(Indices) > 0 then
       begin
         Visible := True;
         Layer := FDocument[Indices[0]];
-        ReadLineLayer(Layer, Color, WidthValue, StyleValue, LineCapValue);
+        TryReadScreenLayoutToolbarLine(Layer, Color, WidthValue, StyleValue,
+          LineCapValue);
         CommonWidth := True;
         CommonStyle := True;
         CommonLineCap := True;
@@ -1299,7 +1021,7 @@ begin
           Layer := FDocument[Indices[I]];
           SupportsLineCap := SupportsLineCap and
             not (Layer is TScreenLayoutRectangleLineLayer);
-          ReadLineLayer(Layer, Color, CurrentWidth, CurrentStyle,
+          TryReadScreenLayoutToolbarLine(Layer, Color, CurrentWidth, CurrentStyle,
             CurrentLineCap);
           CommonWidth := CommonWidth and SameValue(CurrentWidth, WidthValue);
           CommonStyle := CommonStyle and (CurrentStyle = StyleValue);
@@ -1330,11 +1052,12 @@ begin
         for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
           FLineCapButtons[Cap].Enabled := not Locked and SupportsLineCap;
       end
-      else if (FDocument <> nil) and (FDocument.SelectionCount = 0) and
-        (FEditorState <> nil) and
-        (FEditorState.CurrentTool in [vetRectangleLine,
-          vetRoundedRectangleLine, vetArc, vetLine, vetEllipseLine,
-          vetPath]) then
+      else if UseLineToolDefaults or
+        ((FDocument <> nil) and (FDocument.SelectionCount = 0) and
+         (FEditorState <> nil) and
+         (FEditorState.CurrentTool in [vetRectangleLine,
+           vetRoundedRectangleLine, vetArc, vetLine, vetEllipseLine,
+           vetPath])) then
       begin
         Visible := True;
         FStrokeWidthEdit.Text := FormatFloat('0.##',
@@ -1476,11 +1199,20 @@ begin
 end;
 
 procedure TVectArtLineToolbarControl.TrackBarChanged(Sender: TObject);
+var
+  Value: Single;
 begin
   if FUpdating then
     Exit;
-  ApplyStrokeWidthInternal(FStrokeWidthTrackBar.Position /
-    STROKE_WIDTH_SCALE, not FTrackGestureActive);
+  Value := FStrokeWidthTrackBar.Position / STROKE_WIDTH_SCALE;
+  if FTrackGestureActive then
+  begin
+    // Document側の対話更新より先に操作中の値を表示し、MouseUpまで描画を滞留させない。
+    FStrokeWidthEdit.Text := FormatFloat('0.##', Value);
+    FStrokeWidthTrackBar.Repaint;
+    FStrokeWidthEdit.Repaint;
+  end;
+  ApplyStrokeWidthInternal(Value, not FTrackGestureActive);
 end;
 
 procedure TVectArtLineToolbarControl.TrackBarMouseDown(Sender: TObject;
@@ -1497,7 +1229,7 @@ begin
   FTrackStartIndices := SelectedLineIndices;
   SetLength(FTrackStartWidths, Length(FTrackStartIndices));
   for I := 0 to High(FTrackStartIndices) do
-    ReadLineLayer(FDocument[FTrackStartIndices[I]], Color,
+    TryReadScreenLayoutToolbarLine(FDocument[FTrackStartIndices[I]], Color,
       FTrackStartWidths[I], Style, LineCap);
   if (Length(FTrackStartIndices) > 0) and (FDocument <> nil) then
   begin

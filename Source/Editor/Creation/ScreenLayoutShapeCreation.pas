@@ -5,7 +5,8 @@ interface
 
 uses
   System.Classes, System.Types, Vcl.Controls, ScreenLayoutDocument,
-  ScreenLayoutEditorState, ScreenLayoutEditHistory;
+  ScreenLayoutEditorState, ScreenLayoutEditHistory,
+  ScreenLayoutSnapGeometry;
 
 type
   TVectArtShapeCreation = class
@@ -25,20 +26,24 @@ type
     FVertexKinds: TArray<TScreenLayoutVertexKind>; // 確定済みPath／Shape頂点の種別。
     FNextVertexKind: TScreenLayoutVertexKind;      // 次のクリックへ適用する種別。
     FStartPoint: TPoint;
+    FSnapGuides: TArray<TScreenLayoutSnapGuide>;
     FZoom: Single;
+    function AdjustInputPoint(const PointValue: TPoint;
+      Shift: TShiftState; ConstrainToPrevious: Boolean): TPoint;
     function ClampToCanvas(const Point: TPoint): TPoint;
     procedure CreateArc;
     procedure CreateArcShape;
     procedure CreateEllipse;
     procedure CreateEllipseLine;
     procedure CreateLine;
-    procedure CreatePath(Closed: Boolean);
+    procedure CreatePath(Closed: Boolean; const BaseName: string = 'Path');
     procedure CreateTextPath;
     procedure CreateRectangle;
     procedure CreateRectangleLine;
     procedure CreateRoundedRectangle;
     procedure CreateRoundedRectangleLine;
     procedure CreateShape;
+    function BuildFreehandPathVertices: TArray<TScreenLayoutVertex>;
     function BuildPathVertices: TArray<TScreenLayoutVertex>;
     function BuildOpenPathPreview(out Points: TArray<TPoint>): Boolean;
     function BuildShapePreview(out Points: TArray<TPoint>): Boolean;
@@ -75,6 +80,8 @@ type
     property Active: Boolean read FActive;
     property DeferTextPathHistory: Boolean read FDeferTextPathHistory
       write FDeferTextPathHistory;
+    // 作成中に一致した対象と座標をキャンバスへ表示する論理ガイド線。
+    property SnapGuides: TArray<TScreenLayoutSnapGuide> read FSnapGuides;
   end;
 
 implementation
@@ -86,9 +93,11 @@ uses
   ScreenLayoutShapeOperations, ScreenLayoutTextCommands;
 
 const
-  MIN_DRAG_SIZE = 3;
-  PATH_CLOSE_DISTANCE = 8;
-  SHAPE_PREVIEW_CURVE_STEPS = 16;
+  MIN_DRAG_SIZE               = 3;
+  FREEHAND_SAMPLE_DISTANCE    = 2;   // 入力点を追加する最小画面距離（px）。
+  FREEHAND_SIMPLIFY_TOLERANCE = 1.5; // 簡略化で許容する画面距離（px）。
+  PATH_CLOSE_DISTANCE         = 8;
+  SHAPE_PREVIEW_CURVE_STEPS   = 16;
 
 procedure ConfigureShapeContourSegments(var Contour: TScreenLayoutContour);
 var
@@ -128,9 +137,162 @@ procedure TVectArtShapeCreation.CancelPath;
 begin
   FActive := False;
   FCreationTool := vetSelect;
+  FSnapGuides := nil;
   SetLength(FPathPoints, 0);
   SetLength(FVertexKinds, 0);
   FNextVertexKind := slvkSharp;
+end;
+
+function PointAtScreenAngle(const Anchor, PointValue: TPoint;
+  AngleDegrees: Single): TPoint;
+var
+  Distance: Single;
+  Radians: Single;
+begin
+  Distance := Hypot(PointValue.X - Anchor.X, PointValue.Y - Anchor.Y);
+  Radians := DegToRad(AngleDegrees);
+  Result := Point(Round(Anchor.X + Cos(Radians) * Distance),
+    Round(Anchor.Y + Sin(Radians) * Distance));
+end;
+
+function TVectArtShapeCreation.AdjustInputPoint(const PointValue: TPoint;
+  Shift: TShiftState; ConstrainToPrevious: Boolean): TPoint;
+var
+  Anchor: TPoint;
+  AngleGuide: TScreenLayoutSnapGuide;
+  AngleSnapped: Boolean;
+  CandidatePoints: TArray<TPointF>;
+  ConstrainHorizontal: Boolean;
+  Guide: TScreenLayoutSnapGuide;
+  HasXGuide: Boolean;
+  HasYGuide: Boolean;
+  I: Integer;
+  LogicalPoint: TPointF;
+  MatchingGuideFound: Boolean;
+  NearExistingPoint: Boolean;
+  PointBeforeAngleProjection: TPoint;
+  ProposedAngle: Single;
+  SnappedAngle: Single;
+  SnappedPoint: TPointF;
+begin
+  Result := ClampToCanvas(PointValue);
+  AngleSnapped := False;
+  ConstrainHorizontal := False;
+  if ConstrainToPrevious then
+  begin
+    if Length(FPathPoints) > 0 then
+      Anchor := FPathPoints[High(FPathPoints)]
+    else
+      Anchor := FStartPoint;
+    if ssShift in Shift then
+    begin
+      ConstrainHorizontal := Abs(Result.X - Anchor.X) >=
+        Abs(Result.Y - Anchor.Y);
+      if ConstrainHorizontal then
+        Result.Y := Anchor.Y
+      else
+        Result.X := Anchor.X;
+    end
+    else if not (ssAlt in Shift) and
+      ((Result.X <> Anchor.X) or (Result.Y <> Anchor.Y)) then
+    begin
+      NearExistingPoint := False;
+      for I := 0 to High(FPathPoints) do
+        if Hypot(Result.X - FPathPoints[I].X,
+          Result.Y - FPathPoints[I].Y) <= PATH_CLOSE_DISTANCE then
+        begin
+          NearExistingPoint := True;
+          Break;
+        end;
+      if not NearExistingPoint then
+      begin
+        ProposedAngle := RadToDeg(ArcTan2(Result.Y - Anchor.Y,
+          Result.X - Anchor.X));
+        AngleSnapped := SnapScreenLayoutAngle(ProposedAngle, SnappedAngle);
+        if AngleSnapped then
+          Result := PointAtScreenAngle(Anchor, Result, SnappedAngle);
+      end;
+    end;
+  end;
+  FSnapGuides := nil;
+  if not (ssAlt in Shift) then
+  begin
+    LogicalPoint := TPointF.Create(
+      ScreenToLogicalX(Result.X, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Width),
+      ScreenToLogicalY(Result.Y, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Height));
+    CandidatePoints := nil;
+    for I := 0 to High(FPathPoints) do
+      CandidatePoints := CandidatePoints + [TPointF.Create(
+        ScreenToLogicalX(FPathPoints[I].X, FCanvasBounds, FZoom,
+          FDocument.CanvasLayer.Width),
+        ScreenToLogicalY(FPathPoints[I].Y, FCanvasBounds, FZoom,
+          FDocument.CanvasLayer.Height))];
+    if SnapScreenLayoutPointWithCandidates(FDocument, LogicalPoint,
+      FZoom, False, CandidatePoints, SnappedPoint, FSnapGuides) then
+    begin
+      Result := Point(
+        LogicalToScreenX(SnappedPoint.X, FCanvasBounds, FZoom,
+          FDocument.CanvasLayer.Width),
+        LogicalToScreenY(SnappedPoint.Y, FCanvasBounds, FZoom,
+          FDocument.CanvasLayer.Height));
+      HasXGuide := False;
+      HasYGuide := False;
+      for Guide in FSnapGuides do
+      begin
+        HasXGuide := HasXGuide or (Guide.Axis = slsaX);
+        HasYGuide := HasYGuide or (Guide.Axis = slsaY);
+      end;
+      if HasXGuide and HasYGuide then
+        AngleSnapped := False;
+      if ConstrainToPrevious and (ssShift in Shift) then
+      begin
+        if ConstrainHorizontal then
+          Result.Y := Anchor.Y
+        else
+          Result.X := Anchor.X;
+        MatchingGuideFound := False;
+        for I := 0 to High(FSnapGuides) do
+        begin
+          Guide := FSnapGuides[I];
+          if (ConstrainHorizontal and (Guide.Axis = slsaX)) or
+            ((not ConstrainHorizontal) and (Guide.Axis = slsaY)) then
+          begin
+            FSnapGuides := [Guide];
+            MatchingGuideFound := True;
+            Break;
+          end;
+        end;
+        if not MatchingGuideFound then
+          FSnapGuides := nil;
+      end;
+    end;
+  end;
+  Result := ClampToCanvas(Result);
+  if AngleSnapped then
+  begin
+    PointBeforeAngleProjection := Result;
+    Result := ClampToCanvas(PointAtScreenAngle(Anchor, Result,
+      SnappedAngle));
+    AngleGuide.Axis := slsaAngle;
+    AngleGuide.StartPoint := TPointF.Create(
+      ScreenToLogicalX(Anchor.X, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Width),
+      ScreenToLogicalY(Anchor.Y, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Height));
+    AngleGuide.EndPoint := TPointF.Create(
+      ScreenToLogicalX(Result.X, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Width),
+      ScreenToLogicalY(Result.Y, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Height));
+    AngleGuide.TargetBounds := TRectF.Empty;
+    AngleGuide.HighlightTarget := False;
+    if PointBeforeAngleProjection <> Result then
+      FSnapGuides := [AngleGuide]
+    else
+      FSnapGuides := FSnapGuides + [AngleGuide];
+  end;
 end;
 
 procedure TVectArtShapeCreation.CreateShape;
@@ -219,7 +381,8 @@ begin
       Index, Data, BeforeSelection, AfterSelection));
 end;
 
-procedure TVectArtShapeCreation.CreatePath(Closed: Boolean);
+procedure TVectArtShapeCreation.CreatePath(Closed: Boolean;
+  const BaseName: string);
 var
   AfterSelection: TArray<Integer>;
   BeforeSelection: TArray<Integer>;
@@ -230,11 +393,14 @@ begin
     Exit;
   if Closed and (Length(FPathPoints) < 3) then
     Closed := False;
-  Data.Vertices := BuildPathVertices;
+  if FCreationTool = vetFreehand then
+    Data.Vertices := BuildFreehandPathVertices
+  else
+    Data.Vertices := BuildPathVertices;
   Data.Closed := Closed;
   Data.LineCap := FEditorState.LineCap;
   Data.Locked := False;
-  Data.Name := NextScreenLayoutLayerName(FDocument, 'Path');
+  Data.Name := NextScreenLayoutLayerName(FDocument, BaseName);
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.StrokeColor := FEditorState.LineStrokeColor;
   Data.MifStrokeStyle := FEditorState.LineMifStrokeStyle;
@@ -683,13 +849,26 @@ begin
     (FEditorState.CurrentTool in [vetRectangleLine, vetRectangle,
       vetRoundedRectangleLine,
       vetRoundedRectangle, vetEllipseLine,
-      vetEllipse, vetArc, vetArcShape, vetLine, vetPath, vetShape,
+      vetEllipse, vetArc, vetArcShape, vetLine, vetFreehand, vetPath, vetShape,
       vetTextPath]) and
     (FZoom > 0) and
     PtInRect(FCanvasBounds, Point(X, Y));
   if not Result then
     Exit;
-  PointValue := ClampToCanvas(Point(X, Y));
+  if FEditorState.CurrentTool = vetFreehand then
+  begin
+    PointValue := ClampToCanvas(Point(X, Y));
+    FActive := True;
+    FCreationTool := vetFreehand;
+    FPathPoints := [PointValue];
+    FVertexKinds := [slvkSharp];
+    FCurrentPoint := PointValue;
+    FDocument.SetSelectedLayers([]);
+    Exit;
+  end;
+  PointValue := AdjustInputPoint(Point(X, Y), Shift,
+    FActive and (FEditorState.CurrentTool in [vetPath, vetShape,
+      vetTextPath]));
   if not FActive then
     FDocument.SetSelectedLayers([]);
   if FEditorState.CurrentTool in [vetPath, vetShape, vetTextPath] then
@@ -743,17 +922,32 @@ begin
   if not FActive then
     Exit;
   if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetFreehand) then
+  begin
+    if not (ssLeft in Shift) then
+      Exit;
+    FCurrentPoint := ClampToCanvas(Point(X, Y));
+    if (Length(FPathPoints) = 0) or
+      (Hypot(FCurrentPoint.X - FPathPoints[High(FPathPoints)].X,
+        FCurrentPoint.Y - FPathPoints[High(FPathPoints)].Y) >=
+        FREEHAND_SAMPLE_DISTANCE) then
+      FPathPoints := FPathPoints + [FCurrentPoint];
+    Exit;
+  end;
+  if (FEditorState <> nil) and
     (FEditorState.CurrentTool in [vetPath, vetShape, vetTextPath]) then
   begin
-    FCurrentPoint := ClampToCanvas(Point(X, Y));
+    FCurrentPoint := AdjustInputPoint(Point(X, Y), Shift, True);
     Exit;
   end;
   if not (ssLeft in Shift) then
   begin
     FActive := False;
+    FSnapGuides := nil;
     Exit;
   end;
-  FCurrentPoint := ClampToCanvas(Point(X, Y));
+  FCurrentPoint := AdjustInputPoint(Point(X, Y), Shift,
+    FEditorState.CurrentTool = vetLine);
   FModifiers := Shift;
 end;
 
@@ -766,7 +960,21 @@ begin
   Result := (Button = mbLeft) and FActive;
   if not Result then
     Exit;
-  FCurrentPoint := ClampToCanvas(Point(X, Y));
+  if (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetFreehand) then
+  begin
+    FCurrentPoint := ClampToCanvas(Point(X, Y));
+    if (Length(FPathPoints) = 0) or
+      (Hypot(FCurrentPoint.X - FPathPoints[High(FPathPoints)].X,
+        FCurrentPoint.Y - FPathPoints[High(FPathPoints)].Y) >=
+        FREEHAND_SAMPLE_DISTANCE) then
+      FPathPoints := FPathPoints + [FCurrentPoint];
+    CreatePath(False);
+    CancelPath;
+    Exit(True);
+  end;
+  FCurrentPoint := AdjustInputPoint(Point(X, Y), Shift,
+    FEditorState.CurrentTool = vetLine);
   FModifiers := Shift;
   if FEditorState.CurrentTool = vetLine then
     CreateLine
@@ -787,6 +995,32 @@ begin
   else
     CreateRectangle;
   FActive := False;
+  FSnapGuides := nil;
+end;
+
+function TVectArtShapeCreation.BuildFreehandPathVertices:
+  TArray<TScreenLayoutVertex>;
+var
+  I: Integer;
+  RawPoints: TArray<TPointF>;
+  SimplifiedPoints: TArray<TPointF>;
+begin
+  SetLength(RawPoints, Length(FPathPoints));
+  for I := 0 to High(FPathPoints) do
+    RawPoints[I] := TPointF.Create(
+      ScreenToLogicalX(FPathPoints[I].X, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Width),
+      ScreenToLogicalY(FPathPoints[I].Y, FCanvasBounds, FZoom,
+        FDocument.CanvasLayer.Height));
+  SimplifiedPoints := SimplifyScreenLayoutPolyline(RawPoints,
+    FREEHAND_SIMPLIFY_TOLERANCE / Max(FZoom, 0.001));
+  SetLength(Result, Length(SimplifiedPoints));
+  for I := 0 to High(SimplifiedPoints) do
+  begin
+    Result[I].Position := SimplifiedPoints[I];
+    Result[I].Kind := slvkBezier;
+  end;
+  ConfigureScreenLayoutOpenPath(Result);
 end;
 
 function TVectArtShapeCreation.FinishPath(Closed: Boolean): Boolean;
@@ -813,6 +1047,12 @@ end;
 function TVectArtShapeCreation.PreviewPath(
   out Points: TArray<TPoint>): Boolean;
 begin
+  if FActive and (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetFreehand) then
+  begin
+    Points := Copy(FPathPoints);
+    Exit(Length(Points) > 0);
+  end;
   Result := FActive and (FEditorState <> nil) and
     (FEditorState.CurrentTool in [vetPath, vetShape, vetTextPath]) and
     (Length(FPathPoints) > 0);

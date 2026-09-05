@@ -15,6 +15,8 @@ uses
     '..\Source\Core\Geometry\ScreenLayoutGeometry.pas',
   ScreenLayoutSelectionGeometry in
     '..\Source\Editor\Interaction\ScreenLayoutSelectionGeometry.pas',
+  ScreenLayoutTextPathCharacterInteraction in
+    '..\Source\Editor\Interaction\ScreenLayoutTextPathCharacterInteraction.pas',
   ScreenLayoutTextPathGeometry in
     '..\Source\Core\Geometry\ScreenLayoutTextPathGeometry.pas',
   ScreenLayoutShapeCreation in
@@ -78,7 +80,7 @@ begin
 
     Check(Interaction.MouseDown(mbLeft, [], 90, 40),
       'text path frame move did not start');
-    Check(Interaction.MouseMove([ssLeft], 100, 45),
+    Check(Interaction.MouseMove([ssLeft, ssAlt], 100, 45),
       'text path frame move did not update');
     Check(Interaction.MouseUp(mbLeft),
       'text path frame move did not commit');
@@ -401,11 +403,19 @@ end;
 
 procedure CheckTextPathCollisionHandling;
 var
+  CharacterInteraction: TScreenLayoutTextPathCharacterInteraction;
   CornerDistance: Single;
+  Document: TVectArtDocument;
+  History: TVectArtEditHistory;
   Layer: TScreenLayoutTextPathLayer;
+  OriginalPathDistance: Single;
   Placements: TArray<TScreenLayoutTextPathPlacement>;
+  StartPoint: TPoint;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
+  Document := TVectArtDocument.Create;
+  History := TVectArtEditHistory.Create;
+  CharacterInteraction := TScreenLayoutTextPathCharacterInteraction.Create;
   SetLength(Vertices, 2);
   Vertices[0].Position := TPointF.Create(0, 0);
   Vertices[0].Kind := slvkSharp;
@@ -417,6 +427,9 @@ begin
     TRectF.Create(0, -30, 400, 0), 'ABC', 'Yu Gothic UI', 24, 400,
     clWhite, Vertices);
   try
+    Document.SetCanvasSize(500, 500);
+    Document.InsertLayer(1, Layer);
+    Document.SelectedIndex := 1;
     Placements := BuildScreenLayoutTextPathPlacements(Layer);
     Check(Length(Placements) = 3,
       'collision test could not measure the characters');
@@ -438,6 +451,22 @@ begin
       Placements[2].CollisionAdjusted and
       not Placements[2].CollidesWithPrevious,
       'automatic text path collision was not resolved');
+    OriginalPathDistance := Placements[2].PathDistance;
+    CharacterInteraction.Configure(Document, History,
+      Rect(0, 0, 500, 500), 1);
+    CharacterInteraction.SelectedCharacter := 2;
+    StartPoint := Point(Round(Placements[2].Anchor.X + 250),
+      Round(Placements[2].Anchor.Y + 250));
+    Check(CharacterInteraction.BeginDragAt(StartPoint.X, StartPoint.Y) =
+      sltpcdmMove, 'collision-adjusted character move did not start');
+    Check(CharacterInteraction.DragTo([], StartPoint.X, StartPoint.Y),
+      'initial character move did not update');
+    Placements := BuildScreenLayoutTextPathPlacements(Layer);
+    Check(SameValue(Placements[2].PathDistance, OriginalPathDistance, 0.01),
+      Format('first manual conversion moved the character from %.2f to %.2f',
+        [OriginalPathDistance, Placements[2].PathDistance]));
+    CharacterInteraction.EndDrag;
+    Layer.CharacterPathOffsets := nil;
     Layer.CharacterPositionManual := [False, False, True];
     Placements := BuildScreenLayoutTextPathPlacements(Layer);
     Check((Length(Placements) = 3) and
@@ -445,7 +474,9 @@ begin
       Placements[2].CollidesWithPrevious,
       'manual character position did not suppress collision correction');
   finally
-    Layer.Free;
+    CharacterInteraction.Free;
+    History.Free;
+    Document.Free;
   end;
 end;
 
@@ -459,11 +490,13 @@ var
   Layer: TScreenLayoutTextPathLayer;
   Loaded: TVectArtDocument;
   LoadedLayer: TScreenLayoutTextPathLayer;
+  BlackInputPixelCount: Integer;
   NearPathPixelCount: Integer;
   OutlinedInputPixelCount: Integer;
   PlainInputPixelCount: Integer;
   Serialized: string;
   Vertices: TArray<TScreenLayoutVertex>;
+  WhiteInputPixelCount: Integer;
   X: Integer;
   Y: Integer;
 begin
@@ -578,17 +611,33 @@ begin
       ExtractFilePath(ParamStr(0)) + 'sk4d.dll');
     try
       RenderVectArtDocument(Loaded, Buffer, 200, 100, 0, LoadedLayer,
-        clBlack);
+        clWhite);
     finally
       TTextRendererSkiaRuntime.Release;
     end;
     OutlinedInputPixelCount := 0;
+    BlackInputPixelCount := 0;
+    WhiteInputPixelCount := 0;
     for Y := 5 to 35 do
       for X := 20 to 179 do
+      begin
         if Buffer.Pixels[Y * 200 + X].A <> 0 then
           Inc(OutlinedInputPixelCount);
+        if (Buffer.Pixels[Y * 200 + X].R = 0) and
+          (Buffer.Pixels[Y * 200 + X].G = 0) and
+          (Buffer.Pixels[Y * 200 + X].B = 0) and
+          (Buffer.Pixels[Y * 200 + X].A = 255) then
+          Inc(BlackInputPixelCount);
+        if (Buffer.Pixels[Y * 200 + X].R = 255) and
+          (Buffer.Pixels[Y * 200 + X].G = 255) and
+          (Buffer.Pixels[Y * 200 + X].B = 255) and
+          (Buffer.Pixels[Y * 200 + X].A = 255) then
+          Inc(WhiteInputPixelCount);
+      end;
     Check(OutlinedInputPixelCount > PlainInputPixelCount,
       'text input contrast outline was not rendered');
+    Check((BlackInputPixelCount > 0) and (WhiteInputPixelCount > 0),
+      'text input preview did not use black text and a white outline');
   finally
     Buffer.Free;
     Loaded.Free;
@@ -660,7 +709,7 @@ begin
     Check(Interaction.MouseDownSelectedVertex(mbLeft, [], 100, 50,
       CaptureNeeded) and CaptureNeeded,
       'shared path interaction could not start a text path vertex drag');
-    Check(Interaction.MouseMove([ssLeft], 105, 55),
+    Check(Interaction.MouseMove([ssLeft, ssAlt], 105, 55),
       'shared path interaction could not drag a text path vertex');
     Check(Interaction.MouseUp(mbLeft),
       'shared path interaction did not commit a text path vertex drag');

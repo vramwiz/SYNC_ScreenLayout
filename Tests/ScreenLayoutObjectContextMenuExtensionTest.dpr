@@ -83,9 +83,11 @@ begin
     TextData.WrapWidth := 160;
     Document.InsertText(2, TextData);
     Document.SelectedIndex := 2;
-    ContextMenu.ShowForObject(nil, Point(0, 0));
+    ContextMenu.ShowForObject(nil, Point(0, 0), [2, 1]);
     Check(FindMenuItem(ContextMenu.Menu, 'テキストの分解  >'),
       'registered text item was not added for a top-level text layer');
+    Check(FindMenuItem(ContextMenu.Menu, 'この位置のレイヤー  >'),
+      'overlapping layer selection submenu was not added');
     Document.SetSelectedLayers([1, 2]);
     ContextMenu.ShowForObject(nil, Point(0, 0));
     Check(not FindMenuItem(ContextMenu.Menu, 'テキストの分解  >'),
