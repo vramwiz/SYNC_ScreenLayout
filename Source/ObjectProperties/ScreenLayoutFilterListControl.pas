@@ -344,7 +344,10 @@ begin
     if FilterColor(Filter, ColorValue) then
     begin
       Canvas.Brush.Color := ColorValue;
-      Canvas.Pen.Color := COLOR_TEXT_SECONDARY;
+      if I = FSelectedIndex then
+        Canvas.Pen.Color := COLOR_SLIDER_VALUE
+      else
+        Canvas.Pen.Color := COLOR_TEXT_SECONDARY;
       Canvas.Rectangle(ColorRect);
     end;
 

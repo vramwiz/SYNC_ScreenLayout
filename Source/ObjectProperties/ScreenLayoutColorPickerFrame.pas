@@ -12,19 +12,27 @@ type
   TScreenLayoutColorPickerFrame = class(TFrame)
   private
     FColor: TColor;
+    FColorEnabled: Boolean;
     FCurrentHue: Double;
     FHueBar: TColorPickerHueBar;
     FOnChange: TNotifyEvent;
+    FOnColorGestureEnd: TNotifyEvent;
+    FOnColorGestureStart: TNotifyEvent;
     FOnOpacityChange: TNotifyEvent;
     FOnOpacityGestureEnd: TNotifyEvent;
     FOnOpacityGestureStart: TNotifyEvent;
     FOpacityLabel: TLabel;
+    FOpacityEnabled: Boolean;
     FOpacityTrackBar: THorizontalTrackBarControl;
     FColorTargetSelector: TPaintBox;
     FSVArea: TColorPickerSVArea;
     FTitleLabel: TLabel;
     FUpdating: Boolean;
     procedure HueBarChange(Sender: TObject);
+    procedure ColorMouseDown(Sender: TObject; Button: TMouseButton;
+      Shift: TShiftState; X, Y: Integer);
+    procedure ColorMouseUp(Sender: TObject; Button: TMouseButton;
+      Shift: TShiftState; X, Y: Integer);
     procedure OpacityChanged(Sender: TObject);
     procedure OpacityMouseDown(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
@@ -33,6 +41,7 @@ type
     procedure PaintColorTargetSelector(Sender: TObject);
     procedure SetSelectedColor(const Value: TColor);
     procedure SetColorEnabled(Value: Boolean);
+    procedure SetTargetCaption(const Value: string);
     function GetOpacity: Integer;
     procedure SetOpacity(Value: Integer);
     procedure SetOpacityEnabled(Value: Boolean);
@@ -46,12 +55,20 @@ type
     // VCLのTColor値で現在色を同期する。設定だけではOnChangeを発生させない。
     property SelectedColor: TColor read FColor write SetSelectedColor;
     // 色を持たない選択では色操作だけを無効化し、不透明度操作は独立して維持する。
-    property ColorEnabled: Boolean write SetColorEnabled;
+    property ColorEnabled: Boolean read FColorEnabled write SetColorEnabled;
+    // 選択中のオブジェクトまたはフィルターなど、現在の色適用先を見出しへ表示する。
+    property TargetCaption: string write SetTargetCaption;
     // 0から100の整数で表示・編集する不透明度。
     property Opacity: Integer read GetOpacity write SetOpacity;
-    property OpacityEnabled: Boolean write SetOpacityEnabled;
+    property OpacityEnabled: Boolean read FOpacityEnabled
+      write SetOpacityEnabled;
     // ユーザーが色を変更した時だけ発生する。
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
+    // 色相またはSVのドラッグ境界を通知し、連続変更を1件の履歴へまとめられるようにする。
+    property OnColorGestureEnd: TNotifyEvent read FOnColorGestureEnd
+      write FOnColorGestureEnd;
+    property OnColorGestureStart: TNotifyEvent read FOnColorGestureStart
+      write FOnColorGestureStart;
     // ユーザーが不透明度を変更するたびに発生し、ドラッグ中は連続して通知する。
     property OnOpacityChange: TNotifyEvent read FOnOpacityChange
       write FOnOpacityChange;
@@ -134,13 +151,34 @@ begin
   FHueBar := TColorPickerHueBar.Create(Self);
   FHueBar.Parent := Self;
   FHueBar.OnChange := HueBarChange;
+  FHueBar.OnMouseDown := ColorMouseDown;
+  FHueBar.OnMouseUp := ColorMouseUp;
   FSVArea := TColorPickerSVArea.Create(Self);
   FSVArea.Parent := Self;
   FSVArea.OnChange := SVAreaChange;
+  FSVArea.OnMouseDown := ColorMouseDown;
+  FSVArea.OnMouseUp := ColorMouseUp;
 
   FColor := clBlack;
+  FColorEnabled := True;
   FCurrentHue := 0;
+  FOpacityEnabled := True;
   SyncControls;
+end;
+
+procedure TScreenLayoutColorPickerFrame.ColorMouseDown(Sender: TObject;
+  Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+begin
+  if (Button = mbLeft) and FColorEnabled and
+    Assigned(FOnColorGestureStart) then
+    FOnColorGestureStart(Self);
+end;
+
+procedure TScreenLayoutColorPickerFrame.ColorMouseUp(Sender: TObject;
+  Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+begin
+  if (Button = mbLeft) and Assigned(FOnColorGestureEnd) then
+    FOnColorGestureEnd(Self);
 end;
 
 procedure TScreenLayoutColorPickerFrame.HueBarChange(Sender: TObject);
@@ -247,14 +285,22 @@ end;
 
 procedure TScreenLayoutColorPickerFrame.SetColorEnabled(Value: Boolean);
 begin
+  FColorEnabled := Value;
   FHueBar.Enabled := Value;
   FSVArea.Enabled := Value;
   FColorTargetSelector.Enabled := Value;
   FColorTargetSelector.Invalidate;
 end;
 
+procedure TScreenLayoutColorPickerFrame.SetTargetCaption(
+  const Value: string);
+begin
+  FTitleLabel.Caption := Value;
+end;
+
 procedure TScreenLayoutColorPickerFrame.SetOpacityEnabled(Value: Boolean);
 begin
+  FOpacityEnabled := Value;
   FOpacityTrackBar.Enabled := Value;
   FOpacityLabel.Enabled := Value;
 end;
