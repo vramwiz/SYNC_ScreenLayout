@@ -133,6 +133,7 @@ begin
     PropertiesFrame.Context := Context;
     Harness.Frame := PropertiesFrame;
     Document.OnChanged := Harness.DocumentChanged;
+    EditorState.CreationColor := clFuchsia;
     EditorState.CurrentTool := vetRectangle;
     Form.SetBounds(-10000, -10000, 320, 340);
     Form.Show;
@@ -145,6 +146,9 @@ begin
       'drawing over an open-group child selected it instead of creating');
     Check(Document[2] is TVectArtRectangleLayer,
       'overlapping rectangle was not created');
+    Check(ColorToRGB(TVectArtRectangleLayer(Document[2]).FillColor) =
+      ColorToRGB(clRed),
+      'rectangle did not adopt the color visible before tool activation');
     Check(Document.SelectedIndex = 2,
       'newly created overlapping rectangle was not selected');
 
@@ -155,6 +159,9 @@ begin
       'text frame was not created for the focus-finish test');
     Check(Document[3] is TScreenLayoutTextLayer,
       'created text frame has the wrong layer type');
+    Check(ColorToRGB(TScreenLayoutTextLayer(Document[3]).FillColor) =
+      ColorToRGB(clRed),
+      'text did not keep the picker color adopted by the creation tools');
     Check(Form.ActiveControl <> nil,
       'text input control did not receive focus');
     SendMessage(Form.ActiveControl.Handle, WM_CHAR, Ord('A'), 0);

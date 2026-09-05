@@ -1,4 +1,4 @@
-// フィルターUI下端の補助領域で、一覧スライダーを補う厳密な数値入力を扱う。
+﻿// フィルターUI下端の補助領域で、一覧スライダーを補う厳密な数値入力を扱う。
 unit ScreenLayoutFilterDetailsFrame;
 
 interface
@@ -69,7 +69,7 @@ begin
   FTitleLabel.Align := alTop;
   FTitleLabel.AutoSize := False;
   FTitleLabel.Height := MulDiv(TITLE_HEIGHT, CurrentPPI, 96);
-  FTitleLabel.Caption := 'Filter settings';
+  FTitleLabel.Caption := 'フィルター設定';
   FTitleLabel.Color := COLOR_HEADER;
   FTitleLabel.Font.Name := 'Segoe UI';
   FTitleLabel.Font.Height := -12;
@@ -161,16 +161,16 @@ begin
   try
     for I := 0 to High(FEdits) do
       SetRow(I, '', '', False);
-    FTitleLabel.Caption := 'Filter settings';
+    FTitleLabel.Caption := 'フィルター設定';
     Visible := False;
     if FFilter = nil then
       Exit;
-    FTitleLabel.Caption := 'Filter settings: ' + FFilter.DisplayName;
+    FTitleLabel.Caption := 'フィルター設定：' + FFilter.DisplayName;
     Editable := (FLayer <> nil) and not FLayer.Locked;
     case FFilter.Kind of
       slfkBlur:
       begin
-        SetRow(0, 'Radius', FormatFloat('0.##',
+        SetRow(0, '半径', FormatFloat('0.##',
           TScreenLayoutBlurFilter(FFilter).Radius), True);
         Visible := True;
       end;

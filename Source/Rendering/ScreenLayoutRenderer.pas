@@ -1,5 +1,5 @@
 ﻿// Documentの表示オブジェクトを、各ホストで共有できる透明RGBA8画像へ描画する。
-// 線種と四角・丸・三角の線端をSkia描画へ反映する。
+// 描画スタイルのシェーダー生成はScreenLayoutPaintRendererへ委譲する。
 unit ScreenLayoutRenderer;
 
 interface
@@ -10,10 +10,10 @@ uses
 
 type
   TVectArtRgbaPixel = packed record
-    R: Byte;
-    G: Byte;
-    B: Byte;
-    A: Byte;
+    R: Byte; // ストレートアルファ合成前の赤成分。
+    G: Byte; // ストレートアルファ合成前の緑成分。
+    B: Byte; // ストレートアルファ合成前の青成分。
+    A: Byte; // 0を透明、255を不透明とするアルファ成分。
   end;
   PVectArtRgbaPixel = ^TVectArtRgbaPixel;
 
@@ -57,23 +57,13 @@ uses
   TextRendererSkiaRuntime, Winapi.Windows,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
   ScreenLayoutFilters, ScreenLayoutLayerGeometry, ScreenLayoutPathOperations,
+  ScreenLayoutPaintRenderer,
   ScreenLayoutShapePath, ScreenLayoutTextGeometry,
   ScreenLayoutTextPathGeometry;
 
 const
   MAX_RENDER_DIMENSION = 16384;
-
-function VclColorToAlphaColor(Color: TColor; Opacity: Single): TAlphaColor;
-var
-  RGBColor: TColor;
-begin
-  RGBColor := ColorToRGB(Color);
-  Result := TAlphaColor(
-    (Cardinal(EnsureRange(Round(Opacity * 255), 0, 255)) shl 24) or
-    (Cardinal(GetRValue(RGBColor)) shl 16) or
-    (Cardinal(GetGValue(RGBColor)) shl 8) or
-    Cardinal(GetBValue(RGBColor)));
-end;
+  SKIA_DEFAULT_STROKE_MITER_LIMIT = 4.0;
 
 function BuildScreenLayoutImageFilter(
   Filter: TScreenLayoutFilter; ScaleX: Single = 1.0;
@@ -175,23 +165,35 @@ function TryGetScreenLayoutPaintBounds(Layer: TVectArtLayer;
   MinimumStrokeWidth: Single; out Bounds: TRectF): Boolean;
 var
   StrokeMargin: Single;
+  StrokeWidth: Single;
 begin
   Result := TryGetScreenLayoutLayerBounds(Layer, Bounds);
   if not Result then
     Exit;
   StrokeMargin := 0.0;
   if Layer is TScreenLayoutShapeLayer then
-    StrokeMargin := Max(TScreenLayoutShapeLayer(Layer).StrokeWidth,
-      MinimumStrokeWidth) * 0.5
+  begin
+    StrokeWidth := Max(TScreenLayoutShapeLayer(Layer).StrokeWidth,
+      MinimumStrokeWidth);
+    StrokeMargin := StrokeWidth * 0.5 * SKIA_DEFAULT_STROKE_MITER_LIMIT;
+  end
   else if Layer is TScreenLayoutRectangleLineLayer then
-    StrokeMargin := Max(TScreenLayoutRectangleLineLayer(Layer).StrokeWidth,
-      MinimumStrokeWidth) * 0.5
+  begin
+    StrokeWidth := Max(TScreenLayoutRectangleLineLayer(Layer).StrokeWidth,
+      MinimumStrokeWidth);
+    StrokeMargin := StrokeWidth * 0.5 * SKIA_DEFAULT_STROKE_MITER_LIMIT;
+  end
   else if Layer is TScreenLayoutArcLayer then
     StrokeMargin := Max(TScreenLayoutArcLayer(Layer).StrokeWidth,
-      MinimumStrokeWidth) * 0.5
+      MinimumStrokeWidth) * Sqrt(0.5)
   else if Layer is TVectArtPathLayer then
-    StrokeMargin := Max(TVectArtPathLayer(Layer).StrokeWidth,
-      MinimumStrokeWidth) * 0.5;
+  begin
+    StrokeWidth := Max(TVectArtPathLayer(Layer).StrokeWidth,
+      MinimumStrokeWidth);
+    // Skiaの既定マイター上限まで確保し、鋭角の線がフィルター用
+    // SaveLayerの境界で先に切り落とされないようにする。
+    StrokeMargin := StrokeWidth * 0.5 * SKIA_DEFAULT_STROKE_MITER_LIMIT;
+  end;
   InflateScreenLayoutBounds(Bounds, StrokeMargin, StrokeMargin);
   ExpandScreenLayoutFilterBounds(Layer, Bounds);
 end;
@@ -713,6 +715,8 @@ begin
   for I := 0 to High(RenderLayers) do
   begin
     Layer := RenderLayers[I];
+    Paint.Shader := nil;
+    StrokePaint.Shader := nil;
     FilterSaveCount := 0;
     if not TryGetScreenLayoutPaintBounds(Layer, MinimumStrokeWidth,
       FilterBounds) then
@@ -774,7 +778,7 @@ begin
         Continue;
       Font := CreateScreenLayoutTextFont(TextLayer.FontFamily,
         TextLayer.FontSize, TextLayer.FontStyle);
-      Paint.Color := VclColorToAlphaColor(TextLayer.FillColor,
+      ApplyScreenLayoutPaintStyle(Paint, TextLayer, TextLayer.FillColor,
         TextLayer.Opacity * OpacityMultiplier);
       Paint.Style := TSkPaintStyle.Fill;
       DrawScreenLayoutTextOnPath(Canvas,
@@ -805,7 +809,7 @@ begin
         Paint.Color := VclColorToAlphaColor(clBlack,
           TextLayer.Opacity * OpacityMultiplier)
       else
-        Paint.Color := VclColorToAlphaColor(TextLayer.FillColor,
+        ApplyScreenLayoutPaintStyle(Paint, TextLayer, TextLayer.FillColor,
           TextLayer.Opacity * OpacityMultiplier);
       Paint.Style := TSkPaintStyle.Fill;
       TextDecorationPaint.Color := Paint.Color;
@@ -837,6 +841,12 @@ begin
           (TextLayer.Bounds.Top + TextLayer.Bounds.Bottom) * 0.5);
         Canvas.Translate(TextLayer.Bounds.Left, TextLayer.Bounds.Top);
         Canvas.Scale(TextRenderScaleX, TextRenderScaleY);
+        if not ((Layer = InputTextLayer) and
+          (InputTextOutlineColor <> clNone)) then
+          ApplyScreenLayoutPaintStyleLocal(Paint, TextLayer,
+            TextLayer.FillColor, TextLayer.Opacity * OpacityMultiplier,
+            TRectF.Create(0.0, 0.0, TextLayout.Width,
+              TextLayout.Height));
         for J := 0 to High(TextLayout.Lines) do
         begin
           TextWidth := MeasureScreenLayoutText(TextLayout.Lines[J], Font,
@@ -885,13 +895,14 @@ begin
       ShapeLayer := TScreenLayoutShapeLayer(Layer);
       Path := BuildScreenLayoutShapePath(ShapeLayer);
       Paint.AntiAlias := True;
-      Paint.Color := VclColorToAlphaColor(ShapeLayer.FillColor,
+      ApplyScreenLayoutPaintStyle(Paint, ShapeLayer, ShapeLayer.FillColor,
         ShapeLayer.Opacity * OpacityMultiplier);
       Canvas.DrawPath(Path, Paint);
       if ShapeLayer.StrokeWidth > 0 then
       begin
         StrokeWidth := Max(ShapeLayer.StrokeWidth, MinimumStrokeWidth);
         StrokePaint.AntiAlias := True;
+        StrokePaint.Shader := nil;
         StrokePaint.Color := VclColorToAlphaColor(ShapeLayer.StrokeColor,
           ShapeLayer.Opacity * OpacityMultiplier);
         StrokePaint.StrokeWidth := StrokeWidth;
@@ -933,8 +944,14 @@ begin
         Path := PathBuilder.Detach;
       end;
       StrokeWidth := Max(RectangleLine.StrokeWidth, MinimumStrokeWidth);
-      StrokePaint.Color := VclColorToAlphaColor(RectangleLine.StrokeColor,
-        RectangleLine.Opacity * OpacityMultiplier);
+      if Layer is TScreenLayoutRoundedRectangleLineLayer then
+        ApplyScreenLayoutPaintStyleLocal(StrokePaint, RectangleLine,
+          RectangleLine.StrokeColor,
+          RectangleLine.Opacity * OpacityMultiplier, RectangleLine.Bounds)
+      else
+        ApplyScreenLayoutPaintStyle(StrokePaint, RectangleLine,
+          RectangleLine.StrokeColor,
+          RectangleLine.Opacity * OpacityMultiplier);
       StrokePaint.StrokeWidth := StrokeWidth;
       StrokePaint.StrokeCap := TSkStrokeCap.Butt;
       DashIntervals := VectArtStrokeDashIntervals(RectangleLine.StrokeStyle,
@@ -964,7 +981,7 @@ begin
       ArcLayer := TScreenLayoutArcLayer(Layer);
       Path := BuildScreenLayoutArcPath(ArcLayer);
       StrokeWidth := Max(ArcLayer.StrokeWidth, MinimumStrokeWidth);
-      StrokePaint.Color := VclColorToAlphaColor(ArcLayer.StrokeColor,
+      ApplyScreenLayoutPaintStyle(StrokePaint, ArcLayer, ArcLayer.StrokeColor,
         ArcLayer.Opacity * OpacityMultiplier);
       StrokePaint.StrokeWidth := StrokeWidth;
       DashIntervals := VectArtStrokeDashIntervals(ArcLayer.StrokeStyle,
@@ -993,6 +1010,7 @@ begin
           ArcLayer.RotationDegrees, ArcLayer.StartAngleDegrees +
           ArcLayer.SweepAngleDegrees);
         Paint.Color := StrokePaint.Color;
+        Paint.Shader := StrokePaint.Shader;
         Paint.Style := TSkPaintStyle.Fill;
         DrawTriangleLineCap(Canvas, ArcStartPoint,
           TPointF.Create(-ArcStartTangent.X, -ArcStartTangent.Y),
@@ -1036,8 +1054,8 @@ begin
         PathBuilder.Close;
       Path := PathBuilder.Detach;
       StrokeWidth := Max(PathLayer.StrokeWidth, MinimumStrokeWidth);
-      StrokePaint.Color := VclColorToAlphaColor(PathLayer.StrokeColor,
-        PathLayer.Opacity * OpacityMultiplier);
+      ApplyScreenLayoutPaintStyle(StrokePaint, PathLayer,
+        PathLayer.StrokeColor, PathLayer.Opacity * OpacityMultiplier);
       StrokePaint.StrokeWidth := StrokeWidth;
       DashIntervals := VectArtStrokeDashIntervals(PathLayer.MifStrokeStyle,
         StrokeWidth);
@@ -1055,6 +1073,7 @@ begin
       if not PathLayer.Closed and (PathLayer.LineCap = vlcTriangle) then
       begin
         Paint.Color := StrokePaint.Color;
+        Paint.Shader := StrokePaint.Shader;
         Paint.Style := TSkPaintStyle.Fill;
         DrawPathTriangleCaps(Canvas, PathVertices, StrokeWidth, Paint);
       end;
@@ -1064,8 +1083,8 @@ begin
     begin
       EllipseArcShape := TScreenLayoutEllipseArcShapeLayer(Layer);
       Paint.AntiAlias := True;
-      Paint.Color := VclColorToAlphaColor(EllipseArcShape.FillColor,
-        EllipseArcShape.Opacity * OpacityMultiplier);
+      ApplyScreenLayoutPaintStyle(Paint, EllipseArcShape,
+        EllipseArcShape.FillColor, EllipseArcShape.Opacity * OpacityMultiplier);
       Canvas.DrawPath(BuildScreenLayoutEllipseArcShapePath(EllipseArcShape),
         Paint);
       Continue;
@@ -1074,7 +1093,7 @@ begin
     begin
       EllipseLayer := TScreenLayoutEllipseLayer(Layer);
       Paint.AntiAlias := True;
-      Paint.Color := VclColorToAlphaColor(EllipseLayer.FillColor,
+      ApplyScreenLayoutPaintStyle(Paint, EllipseLayer, EllipseLayer.FillColor,
         EllipseLayer.Opacity * OpacityMultiplier);
       Canvas.DrawPath(BuildScreenLayoutEllipsePath(EllipseLayer), Paint);
       Continue;
@@ -1083,8 +1102,10 @@ begin
     begin
       RoundedRectangleLayer := TScreenLayoutRoundedRectangleLayer(Layer);
       Paint.AntiAlias := True;
-      Paint.Color := VclColorToAlphaColor(RoundedRectangleLayer.FillColor,
-        RoundedRectangleLayer.Opacity * OpacityMultiplier);
+      ApplyScreenLayoutPaintStyleLocal(Paint, RoundedRectangleLayer,
+        RoundedRectangleLayer.FillColor,
+        RoundedRectangleLayer.Opacity * OpacityMultiplier,
+        RoundedRectangleLayer.Bounds);
       Canvas.Save;
       try
         Canvas.Rotate(RoundedRectangleLayer.RotationDegrees,
@@ -1103,8 +1124,9 @@ begin
       Continue;
     RectangleLayer := TVectArtRectangleLayer(Layer);
     Paint.AntiAlias := True;
-    Paint.Color := VclColorToAlphaColor(RectangleLayer.FillColor,
-      RectangleLayer.Opacity * OpacityMultiplier);
+    ApplyScreenLayoutPaintStyleLocal(Paint, RectangleLayer,
+      RectangleLayer.FillColor, RectangleLayer.Opacity * OpacityMultiplier,
+      RectangleLayer.Bounds);
     Canvas.Save;
     try
       Canvas.Rotate(RectangleLayer.RotationDegrees,

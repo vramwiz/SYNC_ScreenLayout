@@ -14,9 +14,9 @@ uses
   ScreenLayoutEditorState in
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
   ScreenLayoutGroupChildCommands in
-    '..\Source\Core\Commands\ScreenLayoutGroupChildCommands.pas',
+    '..\Source\Core\Commands\Layer\ScreenLayoutGroupChildCommands.pas',
   ScreenLayoutGroupCommands in
-    '..\Source\Core\Commands\ScreenLayoutGroupCommands.pas';
+    '..\Source\Core\Commands\Layer\ScreenLayoutGroupCommands.pas';
 
 procedure Check(Condition: Boolean; const MessageText: string);
 begin

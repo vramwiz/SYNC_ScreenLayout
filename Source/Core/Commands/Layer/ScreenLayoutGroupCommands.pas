@@ -246,6 +246,7 @@ var
 begin
   Target.Locked := False;
   Target.Opacity := Source.Opacity;
+  Target.PaintStyle := Source.PaintStyle;
   Target.Visible := Source.Visible;
   for I := 0 to Source.FilterCount - 1 do
     Target.AddFilter(Source.Filters[I].Clone);

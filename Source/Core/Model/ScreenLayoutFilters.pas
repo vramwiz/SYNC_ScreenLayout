@@ -1,4 +1,4 @@
-// 非破壊フィルターの種類と編集可能な値だけを保持する。
+﻿// 非破壊フィルターの種類と編集可能な値だけを保持する。
 // 描画、永続化、UI操作には依存しない。
 unit ScreenLayoutFilters;
 
@@ -127,11 +127,11 @@ function TScreenLayoutFilter.DisplayName: string;
 begin
   case FKind of
     slfkOutline:
-      Result := 'Outline';
+      Result := '縁取り';
     slfkShadow:
-      Result := 'Shadow';
+      Result := '影';
     slfkBlur:
-      Result := 'Blur';
+      Result := 'ぼかし';
   else
     raise EArgumentOutOfRangeException.Create('Unknown filter kind');
   end;

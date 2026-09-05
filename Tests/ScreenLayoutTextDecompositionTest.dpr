@@ -16,7 +16,7 @@ uses
   ScreenLayoutFilters in
     '..\Source\Core\Model\ScreenLayoutFilters.pas',
   ScreenLayoutTextDecompositionCommands in
-    '..\Source\Core\Commands\ScreenLayoutTextDecompositionCommands.pas',
+    '..\Source\Core\Commands\Text\ScreenLayoutTextDecompositionCommands.pas',
   ScreenLayoutRenderer in
     '..\Source\Rendering\ScreenLayoutRenderer.pas',
   TextRendererSkiaRuntime in

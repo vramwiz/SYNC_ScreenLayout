@@ -5,7 +5,7 @@ interface
 
 uses
   System.Classes, System.Generics.Collections, Vcl.Graphics,
-  ScreenLayoutDocument, ScreenLayoutFilters;
+  ScreenLayoutDocument, ScreenLayoutFilters, ScreenLayoutPaintStyles;
 
 type
   TVectArtEditorTool = (vetSelect, vetRectangleLine, vetRectangle,
@@ -15,9 +15,9 @@ type
 
   TVectArtEditorState = class
   private
+    FCreationPaintStyle: TScreenLayoutPaintStyle;
     FCurrentTool: TVectArtEditorTool;
     FLineCap: TVectArtLineCap;
-    FLineStrokeColor: TColor;
     FLineMifStrokeStyle: TVectArtMifStrokeStyle;
     FLineStrokeWidth: Single;
     FNextVertexKind: TScreenLayoutVertexKind;
@@ -26,19 +26,21 @@ type
     FOpenGroupChild: TVectArtLayer;
     FOpenGroupChildren: TList<TVectArtLayer>;
     FOpenGroupPath: TList<TScreenLayoutGroupLayer>;
-    FRectangleFillColor: TColor;
     FRectangleOpacity: Single;
+    FSelectedGradientLayer: TVectArtLayer;
+    FSelectedGradientStopId: Integer;
     FSelectedFilter: TScreenLayoutFilter;
     FSelectedFilterLayer: TVectArtLayer;
+    function GetCreationColor: TColor;
+    procedure SetCreationColor(const Value: TColor);
+    procedure SetCreationPaintStyle(const Value: TScreenLayoutPaintStyle);
     procedure SetCurrentTool(const Value: TVectArtEditorTool);
     procedure SetLineCap(const Value: TVectArtLineCap);
-    procedure SetLineStrokeColor(const Value: TColor);
     procedure SetLineMifStrokeStyle(const Value: TVectArtMifStrokeStyle);
     procedure SetLineStrokeWidth(const Value: Single);
     procedure SetNextVertexKind(const Value: TScreenLayoutVertexKind);
     procedure SetOpenGroup(const Value: TScreenLayoutGroupLayer);
     procedure SetOpenGroupChild(const Value: TVectArtLayer);
-    procedure SetRectangleFillColor(const Value: TColor);
     procedure SetRectangleOpacity(const Value: Single);
   public
     constructor Create;
@@ -63,16 +65,25 @@ type
     // Selects one filter for direct manipulation on the editing canvas.
     procedure SelectFilter(Layer: TVectArtLayer;
       Filter: TScreenLayoutFilter);
+    // Selects a stable gradient stop so the shared color picker edits that stop.
+    procedure SelectGradientStop(Layer: TVectArtLayer; StopId: Integer);
     procedure ToggleOpenGroupChild(Layer: TVectArtLayer);
     // Document変更後に編集パスと直下選択を実在する階層まで復旧する。
     procedure ValidateOpenGroupPath(Document: TVectArtDocument);
+    procedure ValidateSelectedGradientStop(Document: TVectArtDocument);
     procedure ValidateSelectedFilter(Document: TVectArtDocument);
     function OpenGroupChildCount: Integer;
     property CurrentTool: TVectArtEditorTool read FCurrentTool
       write SetCurrentTool;
+    // 新規配置へ値として複製する、各描画モード共通の作成スタイル。
+    property CreationPaintStyle: TScreenLayoutPaintStyle
+      read FCreationPaintStyle write SetCreationPaintStyle;
+    property CreationColor: TColor read GetCreationColor
+      write SetCreationColor;
     property LineCap: TVectArtLineCap read FLineCap write SetLineCap;
-    property LineStrokeColor: TColor read FLineStrokeColor
-      write SetLineStrokeColor;
+    // 既存の作成・プレビュー処理から共通作成色を参照する互換プロパティ。
+    property LineStrokeColor: TColor read GetCreationColor
+      write SetCreationColor;
     property LineMifStrokeStyle: TVectArtMifStrokeStyle read FLineMifStrokeStyle
       write SetLineMifStrokeStyle;
     property LineStrokeWidth: Single read FLineStrokeWidth
@@ -85,10 +96,13 @@ type
       write SetOpenGroup;
     property OpenGroupChild: TVectArtLayer read FOpenGroupChild
       write SetOpenGroupChild;
-    property RectangleFillColor: TColor read FRectangleFillColor
-      write SetRectangleFillColor;
+    property RectangleFillColor: TColor read GetCreationColor
+      write SetCreationColor;
     property RectangleOpacity: Single read FRectangleOpacity
       write SetRectangleOpacity;
+    property SelectedGradientLayer: TVectArtLayer
+      read FSelectedGradientLayer;
+    property SelectedGradientStopId: Integer read FSelectedGradientStopId;
     property SelectedFilter: TScreenLayoutFilter read FSelectedFilter;
     property SelectedFilterLayer: TVectArtLayer read FSelectedFilterLayer;
   end;
@@ -169,12 +183,18 @@ begin
   FOpenGroupPath := TList<TScreenLayoutGroupLayer>.Create;
   FCurrentTool := vetSelect;
   FLineCap := vlcSquare;
-  FLineStrokeColor := clBlack;
+  FCreationPaintStyle := TScreenLayoutPaintStyle.Solid(
+    DEFAULT_RECTANGLE_COLOR);
   FLineMifStrokeStyle := vssSolid;
   FLineStrokeWidth := 1.0;
   FNextVertexKind := slvkSharp;
-  FRectangleFillColor := DEFAULT_RECTANGLE_COLOR;
   FRectangleOpacity := 1.0;
+  FSelectedGradientStopId := SCREEN_LAYOUT_GRADIENT_STOP_NONE;
+end;
+
+function TVectArtEditorState.GetCreationColor: TColor;
+begin
+  Result := FCreationPaintStyle.SolidColor;
 end;
 
 destructor TVectArtEditorState.Destroy;
@@ -398,6 +418,57 @@ begin
     Exit;
   FSelectedFilterLayer := Layer;
   FSelectedFilter := Filter;
+  if Filter <> nil then
+  begin
+    FSelectedGradientLayer := nil;
+    FSelectedGradientStopId := SCREEN_LAYOUT_GRADIENT_STOP_NONE;
+  end;
+  if Assigned(FOnChanged) then
+    FOnChanged(Self);
+end;
+
+procedure TVectArtEditorState.ValidateSelectedGradientStop(
+  Document: TVectArtDocument);
+var
+  Color: TColor;
+begin
+  if FSelectedGradientLayer = nil then
+    Exit;
+  if (Document = nil) or (Document.SelectionCount <> 1) or
+    (Document.SelectedIndex <= 0) or
+    (Document[Document.SelectedIndex] <> FSelectedGradientLayer) or
+    (FSelectedGradientLayer.PaintStyle.Kind <> slpkGradient) then
+  begin
+    SelectGradientStop(nil, SCREEN_LAYOUT_GRADIENT_STOP_NONE);
+    Exit;
+  end;
+  if not FSelectedGradientLayer.PaintStyle.GetGradientStopColor(
+    FSelectedGradientStopId, Color) then
+    SelectGradientStop(FSelectedGradientLayer,
+      SCREEN_LAYOUT_GRADIENT_START_STOP_ID);
+end;
+
+procedure TVectArtEditorState.SelectGradientStop(Layer: TVectArtLayer;
+  StopId: Integer);
+var
+  Color: TColor;
+begin
+  if (Layer = nil) or (Layer.PaintStyle.Kind <> slpkGradient) or
+    not Layer.PaintStyle.GetGradientStopColor(StopId, Color) then
+  begin
+    Layer := nil;
+    StopId := SCREEN_LAYOUT_GRADIENT_STOP_NONE;
+  end;
+  if (FSelectedGradientLayer = Layer) and
+    (FSelectedGradientStopId = StopId) then
+    Exit;
+  FSelectedGradientLayer := Layer;
+  FSelectedGradientStopId := StopId;
+  if Layer <> nil then
+  begin
+    FSelectedFilter := nil;
+    FSelectedFilterLayer := nil;
+  end;
   if Assigned(FOnChanged) then
     FOnChanged(Self);
 end;
@@ -522,11 +593,22 @@ begin
     FOnChanged(Self);
 end;
 
-procedure TVectArtEditorState.SetLineStrokeColor(const Value: TColor);
+procedure TVectArtEditorState.SetCreationColor(const Value: TColor);
+var
+  NewStyle: TScreenLayoutPaintStyle;
 begin
-  if FLineStrokeColor = Value then
+  NewStyle := FCreationPaintStyle;
+  NewStyle.Kind := slpkSolid;
+  NewStyle.SolidColor := Value;
+  SetCreationPaintStyle(NewStyle);
+end;
+
+procedure TVectArtEditorState.SetCreationPaintStyle(
+  const Value: TScreenLayoutPaintStyle);
+begin
+  if FCreationPaintStyle.SameAs(Value) then
     Exit;
-  FLineStrokeColor := Value;
+  FCreationPaintStyle := Value;
   if Assigned(FOnChanged) then
     FOnChanged(Self);
 end;
@@ -562,16 +644,9 @@ begin
   begin
     FSelectedFilter := nil;
     FSelectedFilterLayer := nil;
+    FSelectedGradientLayer := nil;
+    FSelectedGradientStopId := SCREEN_LAYOUT_GRADIENT_STOP_NONE;
   end;
-  if Assigned(FOnChanged) then
-    FOnChanged(Self);
-end;
-
-procedure TVectArtEditorState.SetRectangleFillColor(const Value: TColor);
-begin
-  if FRectangleFillColor = Value then
-    Exit;
-  FRectangleFillColor := Value;
   if Assigned(FOnChanged) then
     FOnChanged(Self);
 end;

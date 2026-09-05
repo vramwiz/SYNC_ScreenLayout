@@ -365,6 +365,7 @@ begin
   if FEditorState <> nil then
   begin
     FEditorState.ValidateOpenGroupPath(FDocument);
+    FEditorState.ValidateSelectedGradientStop(FDocument);
     FEditorState.ValidateSelectedFilter(FDocument);
   end;
   if FEditActionsUI <> nil then

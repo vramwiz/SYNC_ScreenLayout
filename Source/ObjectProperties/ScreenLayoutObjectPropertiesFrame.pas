@@ -37,7 +37,7 @@ uses
 
 const
   COLOR_PANEL_BACKGROUND       = TColor($00212121);
-  COLOR_PICKER_PANEL_HEIGHT    = 205; // スクロールさせず下端に固定する高さ。
+  COLOR_PICKER_PANEL_HEIGHT    = 241; // モード列を含め下端に固定する高さ。
   OBJECT_PROPERTIES_DOCK_WIDTH = 160;
 
 constructor TObjectPropertiesFrame.Create(AOwner: TComponent);

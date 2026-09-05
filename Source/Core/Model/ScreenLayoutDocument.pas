@@ -6,7 +6,7 @@ interface
 
 uses
   System.Classes, System.Generics.Collections, System.SysUtils, System.Types,
-  Vcl.Graphics, ScreenLayoutFilters;
+  Vcl.Graphics, ScreenLayoutFilters, ScreenLayoutPaintStyles;
 
 const
   SCREEN_LAYOUT_TEXT_PATH_CHARACTER_SCALE_MIN = 0.1;
@@ -63,6 +63,7 @@ type
     FLocked: Boolean;
     FName: string;
     FOpacity: Single;
+    FPaintStyle: TScreenLayoutPaintStyle;
     FVisible: Boolean;
     function GetFilter(Index: Integer): TScreenLayoutFilter;
     function GetFilterCount: Integer;
@@ -89,6 +90,9 @@ type
     property Locked: Boolean read FLocked write FLocked;
     property Name: string read FName write FName;
     property Opacity: Single read FOpacity write FOpacity;
+    // レイヤーの主色（塗り、または線）へ適用する共通描画スタイル。
+    property PaintStyle: TScreenLayoutPaintStyle read FPaintStyle
+      write FPaintStyle;
     property Visible: Boolean read FVisible write FVisible;
   end;
 
@@ -143,6 +147,7 @@ type
   TVectArtRectangleData = record
     Bounds: TRectF;                         // 回転前の基本矩形。
     FillColor: TColor;                      // 内部の塗り色。
+    PaintStyle: TScreenLayoutPaintStyle;    // 単色以外を含む内部の描画スタイル。
     Locked: Boolean;                        // 編集を禁止する状態。
     Name: string;                           // レイヤー一覧の表示名。
     Opacity: Single;                        // 0.0..1.0のレイヤー不透明度。
@@ -171,6 +176,7 @@ type
     Bounds: TRectF;                         // 回転前の基本矩形。
     CornerRadii: TScreenLayoutCornerRadii; // 左上から時計回りの角丸半径。
     FillColor: TColor;                      // 内部の塗り色。
+    PaintStyle: TScreenLayoutPaintStyle;    // 単色以外を含む内部の描画スタイル。
     Locked: Boolean;                        // 編集を禁止する状態。
     Name: string;                           // レイヤー一覧の表示名。
     Opacity: Single;                        // 0.0..1.0のレイヤー不透明度。
@@ -187,6 +193,7 @@ type
   TScreenLayoutEllipseData = record
     Bounds: TRectF;          // 回転前の楕円へ外接する基本矩形。
     FillColor: TColor;       // 楕円内部の塗り色。
+    PaintStyle: TScreenLayoutPaintStyle; // 単色以外を含む内部の描画スタイル。
     Locked: Boolean;         // 編集を禁止する状態。
     Name: string;            // レイヤー一覧の表示名。
     Opacity: Single;         // 0.0..1.0のレイヤー不透明度。
@@ -296,6 +303,7 @@ type
     RotationDegrees: Single; // 中心回りの時計回り角度。
     Text: string;            // 明示改行を含むUnicode文字列。
     TextColor: TColor;       // 本文色。基底のFillColorと同じ値を保持する。
+    PaintStyle: TScreenLayoutPaintStyle; // 本文へ適用する共通描画スタイル。
     TransformMode: TScreenLayoutTextTransformMode; // 枠変形時の縦横比拘束方式。
     Visible: Boolean;        // 描画対象に含める状態。
     WrapWidth: Single;       // 入力時の自動折り返し幅。
@@ -327,6 +335,7 @@ type
     Opacity: Single;         // 0.0..1.0のレイヤー不透明度。
     RotationDegrees: Single; // 中心回りの時計回り角度。
     StrokeColor: TColor;     // 四辺へ適用する線色。
+    PaintStyle: TScreenLayoutPaintStyle; // 四辺へ適用する共通描画スタイル。
     StrokeStyle: TVectArtMifStrokeStyle; // 四辺へ適用する線パターン。
     StrokeWidth: Single;     // 四辺へ適用する線幅。
     Visible: Boolean;        // 描画対象に含める状態。
@@ -351,6 +360,7 @@ type
     Opacity: Single;
     RotationDegrees: Single;
     StrokeColor: TColor;
+    PaintStyle: TScreenLayoutPaintStyle;
     StrokeStyle: TVectArtMifStrokeStyle;
     StrokeWidth: Single;
     Visible: Boolean;
@@ -368,6 +378,7 @@ type
     Opacity: Single;
     RotationDegrees: Single;
     StrokeColor: TColor;
+    PaintStyle: TScreenLayoutPaintStyle;
     StrokeStyle: TVectArtMifStrokeStyle;
     StrokeWidth: Single;
     Visible: Boolean;
@@ -404,6 +415,7 @@ type
     RotationDegrees: Single;   // 基礎楕円中心回りの時計回り角度。
     StartAngleDegrees: Single; // 基礎楕円の右向きを0度とする開始角。
     StrokeColor: TColor;       // 円弧の線色。
+    PaintStyle: TScreenLayoutPaintStyle; // 円弧へ適用する共通描画スタイル。
     StrokeStyle: TVectArtMifStrokeStyle; // 円弧の線パターン。
     StrokeWidth: Single;       // 円弧の線幅。
     SweepAngleDegrees: Single; // 開始角から時計回りへ進む角度。
@@ -426,6 +438,7 @@ type
   TScreenLayoutEllipseArcShapeData = record
     Bounds: TRectF;
     FillColor: TColor;
+    PaintStyle: TScreenLayoutPaintStyle;
     Locked: Boolean;
     Name: string;
     Opacity: Single;
@@ -469,6 +482,7 @@ type
     Name: string;                           // レイヤー一覧の表示名。
     Opacity: Single;                        // 0.0..1.0のレイヤー不透明度。
     StrokeColor: TColor;                    // 開いたPathの線色。
+    PaintStyle: TScreenLayoutPaintStyle;    // Pathへ適用する共通描画スタイル。
     MifStrokeStyle: TVectArtMifStrokeStyle; // 開いたPathの線パターン。
     StrokeWidth: Single;                    // 開いたPathの線幅。
     Vertices: TArray<TScreenLayoutVertex>;  // 開いたPathを構成するアンカーと区間情報。
@@ -503,6 +517,7 @@ type
   TScreenLayoutShapeData = record
     Contours: TArray<TScreenLayoutContour>; // 外周、穴、分離領域を含む閉輪郭群。
     FillColor: TColor;                      // Even-Odd等の規則で塗る色。
+    PaintStyle: TScreenLayoutPaintStyle;    // 主となる塗りへ適用する描画スタイル。
     FillRule: TScreenLayoutFillRule;        // 複数輪郭の内外判定規則。
     Locked: Boolean;                        // 編集を禁止する状態。
     Name: string;                           // レイヤー一覧の表示名。
@@ -902,6 +917,7 @@ begin
   FLocked := False;
   FName := AName;
   FOpacity := 1.0;
+  FPaintStyle := TScreenLayoutPaintStyle.Solid(clBlack);
   FVisible := True;
 end;
 
@@ -1466,6 +1482,7 @@ begin
     Data.FillColor);
   RectangleLayer.Locked := Data.Locked;
   RectangleLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  RectangleLayer.PaintStyle := Data.PaintStyle;
   RectangleLayer.RotationDegrees := NormalizeAngleDegrees(
     Data.RotationDegrees);
   RectangleLayer.Visible := Data.Visible;
@@ -1489,6 +1506,7 @@ begin
     Data.Bounds, Data.FillColor, Data.CornerRadii);
   RoundedLayer.Locked := Data.Locked;
   RoundedLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  RoundedLayer.PaintStyle := Data.PaintStyle;
   RoundedLayer.RotationDegrees := NormalizeAngleDegrees(
     Data.RotationDegrees);
   RoundedLayer.Visible := Data.Visible;
@@ -1512,6 +1530,7 @@ begin
     Data.FillColor);
   EllipseLayer.Locked := Data.Locked;
   EllipseLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  EllipseLayer.PaintStyle := Data.PaintStyle;
   EllipseLayer.RotationDegrees := NormalizeAngleDegrees(
     Data.RotationDegrees);
   EllipseLayer.Visible := Data.Visible;
@@ -1535,6 +1554,7 @@ begin
   ArcLayer.LineCap := Data.LineCap;
   ArcLayer.Locked := Data.Locked;
   ArcLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  ArcLayer.PaintStyle := Data.PaintStyle;
   ArcLayer.RotationDegrees := NormalizeAngleDegrees(Data.RotationDegrees);
   ArcLayer.StartAngleDegrees := NormalizeScreenLayoutEllipseAngleDegrees(
     Data.StartAngleDegrees);
@@ -1564,6 +1584,7 @@ begin
     Data.Bounds, Data.FillColor);
   ShapeLayer.Locked := Data.Locked;
   ShapeLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  ShapeLayer.PaintStyle := Data.PaintStyle;
   ShapeLayer.RotationDegrees := NormalizeAngleDegrees(Data.RotationDegrees);
   ShapeLayer.StartAngleDegrees :=
     NormalizeScreenLayoutEllipseAngleDegrees(Data.StartAngleDegrees);
@@ -1589,6 +1610,7 @@ begin
   LineLayer := TScreenLayoutRectangleLineLayer.Create(Data.Name, Data.Bounds);
   LineLayer.Locked := Data.Locked;
   LineLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  LineLayer.PaintStyle := Data.PaintStyle;
   LineLayer.RotationDegrees := NormalizeAngleDegrees(Data.RotationDegrees);
   LineLayer.StrokeColor := Data.StrokeColor;
   LineLayer.StrokeStyle := Data.StrokeStyle;
@@ -1614,6 +1636,7 @@ begin
     Data.Bounds, Data.CornerRadii);
   LineLayer.Locked := Data.Locked;
   LineLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  LineLayer.PaintStyle := Data.PaintStyle;
   LineLayer.RotationDegrees := NormalizeAngleDegrees(Data.RotationDegrees);
   LineLayer.StrokeColor := Data.StrokeColor;
   LineLayer.StrokeStyle := Data.StrokeStyle;
@@ -1638,6 +1661,7 @@ begin
   LineLayer := TScreenLayoutEllipseLineLayer.Create(Data.Name, Data.Bounds);
   LineLayer.Locked := Data.Locked;
   LineLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  LineLayer.PaintStyle := Data.PaintStyle;
   LineLayer.RotationDegrees := NormalizeAngleDegrees(Data.RotationDegrees);
   LineLayer.StrokeColor := Data.StrokeColor;
   LineLayer.StrokeStyle := Data.StrokeStyle;
@@ -1663,6 +1687,7 @@ begin
   PathLayer.LineCap := Data.LineCap;
   PathLayer.Locked := Data.Locked;
   PathLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  PathLayer.PaintStyle := Data.PaintStyle;
   PathLayer.StrokeColor := Data.StrokeColor;
   PathLayer.MifStrokeStyle := Data.MifStrokeStyle;
   PathLayer.StrokeWidth := Max(Data.StrokeWidth, 0.0);
@@ -1688,6 +1713,7 @@ begin
   ShapeLayer.FillRule := Data.FillRule;
   ShapeLayer.Locked := Data.Locked;
   ShapeLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  ShapeLayer.PaintStyle := Data.PaintStyle;
   ShapeLayer.StrokeColor := Data.StrokeColor;
   ShapeLayer.StrokeStyle := Data.StrokeStyle;
   ShapeLayer.StrokeWidth := Max(Data.StrokeWidth, 0.0);
@@ -1739,6 +1765,7 @@ begin
   TextLayer.LineSpacingRatio := Data.LineSpacingRatio;
   TextLayer.Locked := Data.Locked;
   TextLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  TextLayer.PaintStyle := Data.PaintStyle;
   TextLayer.RotationDegrees := Data.RotationDegrees;
   TextLayer.TransformMode := Data.TransformMode;
   TextLayer.Visible := Data.Visible;

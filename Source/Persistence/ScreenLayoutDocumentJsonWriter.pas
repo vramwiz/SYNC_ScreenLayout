@@ -13,7 +13,8 @@ implementation
 
 uses
   System.Generics.Collections, System.IOUtils, System.JSON, System.Math,
-  System.SysUtils, System.Types, Vcl.Graphics, ScreenLayoutFilters;
+  System.SysUtils, System.Types, Vcl.Graphics, ScreenLayoutFilters,
+  ScreenLayoutPaintStyles;
 
 const
   DOCUMENT_FORMAT_VERSION = 15;
@@ -46,7 +47,38 @@ var
   I: Integer;
   Outline: TScreenLayoutOutlineFilter;
   Shadow: TScreenLayoutShadowFilter;
+  PaintJson: TJSONObject;
+  PaintStyle: TScreenLayoutPaintStyle;
+  Stop: TScreenLayoutGradientStop;
+  StopJson: TJSONObject;
+  StopsJson: TJSONArray;
 begin
+  PaintStyle := Layer.PaintStyle;
+  if PaintStyle.Kind = slpkGradient then
+  begin
+    PaintJson := TJSONObject.Create;
+    PaintJson.AddPair('type', 'linearGradient');
+    PaintJson.AddPair('startColor',
+      TJSONNumber.Create(Integer(PaintStyle.GradientStartColor)));
+    PaintJson.AddPair('endColor',
+      TJSONNumber.Create(Integer(PaintStyle.GradientEndColor)));
+    PaintJson.AddPair('startX', TJSONNumber.Create(PaintStyle.LinearStart.X));
+    PaintJson.AddPair('startY', TJSONNumber.Create(PaintStyle.LinearStart.Y));
+    PaintJson.AddPair('endX', TJSONNumber.Create(PaintStyle.LinearEnd.X));
+    PaintJson.AddPair('endY', TJSONNumber.Create(PaintStyle.LinearEnd.Y));
+    StopsJson := TJSONArray.Create;
+    for Stop in PaintStyle.GetGradientStops do
+    begin
+      StopJson := TJSONObject.Create;
+      StopJson.AddPair('id', TJSONNumber.Create(Stop.Id));
+      StopJson.AddPair('offset', TJSONNumber.Create(Stop.Offset));
+      StopJson.AddPair('color', TJSONNumber.Create(Integer(Stop.Color)));
+      StopJson.AddPair('opacity', TJSONNumber.Create(Stop.Opacity));
+      StopsJson.AddElement(StopJson);
+    end;
+    PaintJson.AddPair('stops', StopsJson);
+    LayerJson.AddPair('paint', PaintJson);
+  end;
   FiltersJson := TJSONArray.Create;
   LayerJson.AddPair('filters', FiltersJson);
   for I := 0 to Layer.FilterCount - 1 do

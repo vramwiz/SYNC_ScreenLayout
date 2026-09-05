@@ -1,4 +1,5 @@
-// Object Propertiesが直接参照するレイヤー属性をUndo／Redo可能にする。
+﻿// Object Propertiesが直接参照するレイヤー属性をUndo／Redo可能にする。
+// レイヤーの単色、不透明度、線属性、線端変更をUndo／Redo可能にする。
 unit ScreenLayoutObjectPropertyCommands;
 
 interface

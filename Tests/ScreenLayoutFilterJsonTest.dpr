@@ -11,6 +11,8 @@ uses
   Vcl.Graphics,
   ScreenLayoutDocument in '..\Source\Core\Model\ScreenLayoutDocument.pas',
   ScreenLayoutFilters in '..\Source\Core\Model\ScreenLayoutFilters.pas',
+  ScreenLayoutPaintStyles in
+    '..\Source\Core\Model\ScreenLayoutPaintStyles.pas',
   ScreenLayoutDocumentJson in '..\Source\Persistence\ScreenLayoutDocumentJson.pas';
 
 procedure Check(Condition: Boolean; const MessageText: string);
@@ -38,12 +40,14 @@ var
   Group: TScreenLayoutGroupLayer;
   Json: TJSONValue;
   Layer: TVectArtLayer;
+  LoadedStops: TArray<TScreenLayoutGradientStop>;
   LayersJson: TJSONArray;
   Loaded: TVectArtDocument;
   Outline: TScreenLayoutOutlineFilter;
   Root: TJSONObject;
   Serialized: string;
   Shadow: TScreenLayoutShadowFilter;
+  PaintStyle: TScreenLayoutPaintStyle;
   Source: TVectArtDocument;
 begin
   Source := TVectArtDocument.Create;
@@ -51,6 +55,14 @@ begin
   try
     Source.InsertRectangle(1, RectangleData('Filtered rectangle'));
     Layer := Source[1];
+    PaintStyle := TScreenLayoutPaintStyle.Solid(clRed);
+    PaintStyle.Kind := slpkGradient;
+    PaintStyle.GradientStartColor := clRed;
+    PaintStyle.GradientEndColor := clBlue;
+    PaintStyle.LinearStart := TPointF.Create(0.1, 0.2);
+    PaintStyle.LinearEnd := TPointF.Create(0.9, 0.8);
+    PaintStyle.AddGradientStop(0.35);
+    Layer.PaintStyle := PaintStyle;
     Outline := TScreenLayoutOutlineFilter.Create;
     Outline.Color := TColor($00112233);
     Outline.Width := 7.5;
@@ -86,6 +98,9 @@ begin
       Check(LayersJson.Count = 2, 'serialized layer count changed');
       Check(TJSONObject(LayersJson.Items[0]).GetValue<TJSONArray>(
         'filters').Count = 3, 'top-level filters were not serialized');
+      Check(TJSONObject(LayersJson.Items[0]).GetValue<TJSONObject>(
+        'paint').GetValue('type').Value = 'linearGradient',
+        'linear gradient paint was not serialized');
       Check(TJSONObject(LayersJson.Items[1]).GetValue<TJSONArray>(
         'filters').Count = 1, 'group filters were not serialized');
     finally
@@ -95,6 +110,17 @@ begin
     Check(TryDeserializeVectArtDocument(Serialized, Loaded, ErrorMessage),
       'filter JSON did not load: ' + ErrorMessage);
     Check(Loaded[1].FilterCount = 3, 'loaded filter count is incorrect');
+    LoadedStops := Loaded[1].PaintStyle.GetGradientStops;
+    Check((Loaded[1].PaintStyle.Kind = slpkGradient) and
+      (ColorToRGB(Loaded[1].PaintStyle.GradientStartColor) =
+       ColorToRGB(clRed)) and
+      (ColorToRGB(Loaded[1].PaintStyle.GradientEndColor) =
+       ColorToRGB(clBlue)) and
+      (Abs(Loaded[1].PaintStyle.LinearStart.X - 0.1) < 0.0001) and
+      (Abs(Loaded[1].PaintStyle.LinearEnd.Y - 0.8) < 0.0001) and
+      (Length(LoadedStops) = 1) and
+      (Abs(LoadedStops[0].Offset - 0.35) < 0.0001),
+      'linear gradient paint was not restored');
     Check(Loaded[1].Filters[0] is TScreenLayoutOutlineFilter,
       'outline order changed');
     Check(TScreenLayoutOutlineFilter(Loaded[1].Filters[0]).Width = 7.5,

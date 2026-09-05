@@ -1,4 +1,5 @@
 ﻿// 任意レイヤーとグループ子孫の外接範囲取得、平行移動を再帰的に提供する。
+// 描画属性が使うローカル範囲と回転も、描画・ガイド間で共通化する。
 unit ScreenLayoutLayerGeometry;
 
 interface
@@ -6,12 +7,22 @@ interface
 uses
   System.Types, ScreenLayoutDocument;
 
+// 表示内容を含むDocument座標の軸平行外接範囲を返す。
 function TryGetScreenLayoutLayerBounds(Layer: TVectArtLayer;
   out Bounds: TRectF): Boolean;
+// グラデーションなど、レイヤー固有のローカル座標と回転を使う描画属性の基準を返す。
+function TryGetScreenLayoutLayerPaintGeometry(Layer: TVectArtLayer;
+  out Bounds: TRectF; out RotationDegrees: Single): Boolean;
+// 正規化された描画属性座標を、レイヤー回転後のDocument座標へ変換する。
+function ScreenLayoutLayerPaintPoint(const Bounds: TRectF;
+  RotationDegrees: Single; const NormalizedPoint: TPointF): TPointF;
+// 指定中心を基準にレイヤーの実座標と回転属性を更新する。
 procedure RotateScreenLayoutLayer(Layer: TVectArtLayer;
   const Center: TPointF; Degrees: Single);
+// SourceBounds内の配置比率を維持してTargetBoundsへ拡縮する。
 procedure ScaleScreenLayoutLayer(Layer: TVectArtLayer;
   const SourceBounds, TargetBounds: TRectF);
+// レイヤーとグループ子孫をDocument座標上で平行移動する。
 procedure TranslateScreenLayoutLayer(Layer: TVectArtLayer; DX, DY: Single);
 
 implementation
@@ -114,6 +125,45 @@ begin
   else
     Exit;
   Result := True;
+end;
+
+function TryGetScreenLayoutLayerPaintGeometry(Layer: TVectArtLayer;
+  out Bounds: TRectF; out RotationDegrees: Single): Boolean;
+begin
+  RotationDegrees := 0.0;
+  if Layer is TScreenLayoutTextPathLayer then
+    Exit(TryGetScreenLayoutTextPathBounds(
+      TScreenLayoutTextPathLayer(Layer), Bounds));
+  if Layer is TScreenLayoutRectangleLineLayer then
+  begin
+    Bounds := TScreenLayoutRectangleLineLayer(Layer).Bounds;
+    RotationDegrees :=
+      TScreenLayoutRectangleLineLayer(Layer).RotationDegrees;
+    Exit(True);
+  end;
+  if Layer is TScreenLayoutArcLayer then
+  begin
+    Bounds := TScreenLayoutArcLayer(Layer).Bounds;
+    RotationDegrees := TScreenLayoutArcLayer(Layer).RotationDegrees;
+    Exit(True);
+  end;
+  if Layer is TVectArtRectangleLayer then
+  begin
+    Bounds := TVectArtRectangleLayer(Layer).Bounds;
+    RotationDegrees := TVectArtRectangleLayer(Layer).RotationDegrees;
+    Exit(True);
+  end;
+  Result := TryGetScreenLayoutLayerBounds(Layer, Bounds);
+end;
+
+function ScreenLayoutLayerPaintPoint(const Bounds: TRectF;
+  RotationDegrees: Single; const NormalizedPoint: TPointF): TPointF;
+begin
+  Result := TPointF.Create(
+    Bounds.Left + Bounds.Width * NormalizedPoint.X,
+    Bounds.Top + Bounds.Height * NormalizedPoint.Y);
+  if not SameValue(RotationDegrees, 0.0) then
+    Result := RotatePointAround(Result, Bounds.CenterPoint, RotationDegrees);
 end;
 
 procedure RotateScreenLayoutLayer(Layer: TVectArtLayer;

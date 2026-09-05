@@ -18,7 +18,8 @@ implementation
 
 uses
   System.Generics.Collections, System.IOUtils, System.JSON, System.Math,
-  System.SysUtils, System.Types, Vcl.Graphics, ScreenLayoutFilters;
+  System.SysUtils, System.Types, Vcl.Graphics, ScreenLayoutFilters,
+  ScreenLayoutPaintStyles;
 
 const
   DOCUMENT_FORMAT_VERSION = 15;
@@ -207,6 +208,12 @@ var
   Filter: TScreenLayoutFilter;
   FiltersJson: TJSONArray;
   I: Integer;
+  PaintJson: TJSONObject;
+  PaintStyle: TScreenLayoutPaintStyle;
+  PaintValue: TJSONValue;
+  StopJson: TJSONObject;
+  Stops: TArray<TScreenLayoutGradientStop>;
+  StopsJson: TJSONArray;
 begin
   FiltersJson := TJSONArray(RequireValue(LayerJson, 'filters', TJSONArray));
   Layer.ClearFilters;
@@ -219,6 +226,44 @@ begin
       Filter.Free;
       raise;
     end;
+  end;
+  PaintValue := LayerJson.GetValue('paint');
+  if PaintValue <> nil then
+  begin
+    if not (PaintValue is TJSONObject) then
+      raise EConvertError.Create('JSON field "paint" has an invalid type');
+    PaintJson := TJSONObject(PaintValue);
+    if ReadString(PaintJson, 'type') <> 'linearGradient' then
+      raise EConvertError.Create('Unsupported paint type');
+    PaintStyle := TScreenLayoutPaintStyle.Solid(
+      TColor(ReadInteger(PaintJson, 'startColor')));
+    PaintStyle.PrepareLinearGradient(PaintStyle.SolidColor);
+    PaintStyle.Kind := slpkGradient;
+    PaintStyle.GradientStartColor := TColor(ReadInteger(PaintJson,
+      'startColor'));
+    PaintStyle.GradientEndColor := TColor(ReadInteger(PaintJson,
+      'endColor'));
+    PaintStyle.LinearStart := TPointF.Create(
+      ReadSingle(PaintJson, 'startX'), ReadSingle(PaintJson, 'startY'));
+    PaintStyle.LinearEnd := TPointF.Create(
+      ReadSingle(PaintJson, 'endX'), ReadSingle(PaintJson, 'endY'));
+    if PaintJson.GetValue('stops') is TJSONArray then
+    begin
+      StopsJson := TJSONArray(PaintJson.GetValue('stops'));
+      SetLength(Stops, StopsJson.Count);
+      for I := 0 to StopsJson.Count - 1 do
+      begin
+        if not (StopsJson.Items[I] is TJSONObject) then
+          raise EConvertError.Create('Gradient stop is not a JSON object');
+        StopJson := TJSONObject(StopsJson.Items[I]);
+        Stops[I].Id := ReadInteger(StopJson, 'id');
+        Stops[I].Offset := ReadSingle(StopJson, 'offset');
+        Stops[I].Color := TColor(ReadInteger(StopJson, 'color'));
+        Stops[I].Opacity := ReadSingle(StopJson, 'opacity');
+      end;
+      PaintStyle.SetGradientStops(Stops);
+    end;
+    Layer.PaintStyle := PaintStyle;
   end;
 end;
 

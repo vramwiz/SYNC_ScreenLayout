@@ -16,7 +16,7 @@ uses
   ScreenLayoutEditHistory in
     '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutGroupCommands in
-    '..\Source\Core\Commands\ScreenLayoutGroupCommands.pas',
+    '..\Source\Core\Commands\Layer\ScreenLayoutGroupCommands.pas',
   ScreenLayoutLayerOperations in
     '..\Source\Layers\ScreenLayoutLayerOperations.pas';
 

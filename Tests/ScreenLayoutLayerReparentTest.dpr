@@ -12,7 +12,7 @@ uses
   ScreenLayoutEditorState in
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
   ScreenLayoutGroupChildCommands in
-    '..\Source\Core\Commands\ScreenLayoutGroupChildCommands.pas';
+    '..\Source\Core\Commands\Layer\ScreenLayoutGroupChildCommands.pas';
 
 procedure Check(Condition: Boolean; const MessageText: string);
 begin

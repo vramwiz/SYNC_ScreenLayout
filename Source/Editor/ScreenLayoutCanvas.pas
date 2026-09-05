@@ -10,7 +10,9 @@ uses
   ScreenLayoutCanvasInteraction,
   ScreenLayoutDocument, ScreenLayoutEditHistory,
   ScreenLayoutEditorState, ScreenLayoutFilterInteraction,
+  ScreenLayoutGradientInteraction,
   ScreenLayoutGroupInteraction,
+  ScreenLayoutPaintStyles,
   ScreenLayoutSelectionGeometry,
   ScreenLayoutShapeCreation, ScreenLayoutRenderer,
   ScreenLayoutTextEditing, ScreenLayoutTextEditOverlay,
@@ -28,6 +30,7 @@ type
     FDocument: TVectArtDocument;
     FEditorState: TVectArtEditorState;
     FFilterInteraction: TScreenLayoutFilterInteraction;
+    FGradientInteraction: TScreenLayoutGradientInteraction;
     FGroupDrag: TScreenLayoutGroupDrag;
     FInteraction: TVectArtCanvasInteraction;
     FImeState: TWindowsImeState;
@@ -226,6 +229,7 @@ begin
   DoubleBuffered := True;
   FDirect2DEnabled := TDirect2DCanvas.Supported;
   FFilterInteraction := TScreenLayoutFilterInteraction.Create;
+  FGradientInteraction := TScreenLayoutGradientInteraction.Create;
   FGroupDrag := TScreenLayoutGroupDrag.Create;
   FInteraction := TVectArtCanvasInteraction.Create;
   FReferenceBackground := Vcl.Graphics.TBitmap.Create;
@@ -265,6 +269,7 @@ begin
   FRenderedDocument.Free;
   FReferenceBackground.Free;
   FShapeCreation.Free;
+  FGradientInteraction.Free;
   FFilterInteraction.Free;
   FGroupDrag.Free;
   FInteraction.Free;
@@ -286,10 +291,20 @@ begin
   Data.FontSize := DEFAULT_TEXT_FONT_SIZE;
   Data.Locked := False;
   Data.Name := NextScreenLayoutLayerName(FDocument, 'Text');
-  Data.Opacity := 1.0;
+  if FEditorState <> nil then
+    Data.Opacity := FEditorState.RectangleOpacity
+  else
+    Data.Opacity := 1.0;
   Data.RotationDegrees := 0.0;
   Data.Text := DEFAULT_TEXT_VALUE;
-  Data.TextColor := clWhite;
+  if FEditorState <> nil then
+    Data.TextColor := FEditorState.CreationColor
+  else
+    Data.TextColor := clWhite;
+  if FEditorState <> nil then
+    Data.PaintStyle := FEditorState.CreationPaintStyle
+  else
+    Data.PaintStyle := TScreenLayoutPaintStyle.Solid(Data.TextColor);
   Data.Visible := True;
   Data.WrapWidth := Max(GuideBounds.Width, 1.0);
   FTextLayerIndex := FDocument.InsertText(FDocument.LayerCount, Data);
@@ -1441,6 +1456,19 @@ begin
     Invalidate;
     Exit;
   end;
+  CalculateCanvasBounds;
+  FGradientInteraction.Configure(FDocument, EditHistory, FEditorState,
+    FCanvasBounds, FZoom);
+  if FGradientInteraction.MouseDown(Button, X, Y) then
+  begin
+    if CanFocus then
+      SetFocus;
+    if Button = mbLeft then
+      MouseCapture := True;
+    Cursor := FGradientInteraction.CursorAt(X, Y);
+    Invalidate;
+    Exit;
+  end;
   if Button = mbRight then
   begin
     CalculateCanvasBounds;
@@ -1688,6 +1716,14 @@ var
   SelectionGeometry: TVectArtSelectionGeometry;
 begin
   CalculateCanvasBounds;
+  FGradientInteraction.Configure(FDocument, EditHistory, FEditorState,
+    FCanvasBounds, FZoom);
+  if FGradientInteraction.MouseMove(Shift, X, Y) then
+  begin
+    Cursor := FGradientInteraction.CursorAt(X, Y);
+    Invalidate;
+    Exit;
+  end;
   FFilterInteraction.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   if FFilterInteraction.MouseMove(X, Y) then
@@ -1817,6 +1853,19 @@ var
   Right: Single;
   Top: Single;
 begin
+  if Button = mbLeft then
+  begin
+    CalculateCanvasBounds;
+    FGradientInteraction.Configure(FDocument, EditHistory, FEditorState,
+      FCanvasBounds, FZoom);
+    if FGradientInteraction.MouseUp(X, Y) then
+    begin
+      MouseCapture := False;
+      Cursor := FGradientInteraction.CursorAt(X, Y);
+      Invalidate;
+      Exit;
+    end;
+  end;
   if (Button = mbLeft) and FFilterInteraction.MouseUp then
   begin
     MouseCapture := False;
@@ -2615,6 +2664,9 @@ begin
       FFilterInteraction.Configure(FDocument, EditHistory, FEditorState,
         FCanvasBounds, FZoom);
       FFilterInteraction.Draw(Direct2DCanvas);
+      FGradientInteraction.Configure(FDocument, EditHistory, FEditorState,
+        FCanvasBounds, FZoom);
+      FGradientInteraction.Draw(Direct2DCanvas);
       DrawTextEditingOverlayDirect2D(Direct2DCanvas);
     finally
       Direct2DCanvas.EndDraw;
@@ -3217,6 +3269,9 @@ begin
   FFilterInteraction.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   FFilterInteraction.Draw(Canvas);
+  FGradientInteraction.Configure(FDocument, EditHistory, FEditorState,
+    FCanvasBounds, FZoom);
+  FGradientInteraction.Draw(Canvas);
   DrawTextEditingOverlay(Canvas);
 end;
 

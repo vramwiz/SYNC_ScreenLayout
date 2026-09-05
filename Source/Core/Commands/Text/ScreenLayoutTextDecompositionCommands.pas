@@ -220,6 +220,7 @@ begin
     ShapeLayer.FillRule := Data.FillRule;
     ShapeLayer.Locked := Data.Locked;
     ShapeLayer.Opacity := Data.Opacity;
+    ShapeLayer.PaintStyle := Source.PaintStyle;
     ShapeLayer.StrokeColor := Data.StrokeColor;
     ShapeLayer.StrokeStyle := Data.StrokeStyle;
     ShapeLayer.StrokeWidth := Data.StrokeWidth;

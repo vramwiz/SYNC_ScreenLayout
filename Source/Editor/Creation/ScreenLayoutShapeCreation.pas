@@ -320,12 +320,14 @@ begin
       Data.Contours[0].Vertices[I].Kind := slvkSharp;
   end;
   ConfigureShapeContourSegments(Data.Contours[0]);
-  Data.FillColor := FEditorState.RectangleFillColor;
+  Data.FillColor := FEditorState.CreationColor;
+  Data.PaintStyle := FEditorState.CreationPaintStyle;
   Data.FillRule := slfrEvenOdd;
   Data.Locked := False;
   Data.Name := NextScreenLayoutLayerName(FDocument, 'Shape');
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.StrokeColor := FEditorState.LineStrokeColor;
+  Data.PaintStyle := FEditorState.CreationPaintStyle;
   Data.StrokeStyle := FEditorState.LineMifStrokeStyle;
   Data.StrokeWidth := FEditorState.LineStrokeWidth;
   Data.Visible := True;
@@ -369,6 +371,7 @@ begin
   Data.Name := NextScreenLayoutLayerName(FDocument, 'Line');
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.StrokeColor := FEditorState.LineStrokeColor;
+  Data.PaintStyle := FEditorState.CreationPaintStyle;
   Data.MifStrokeStyle := FEditorState.LineMifStrokeStyle;
   Data.StrokeWidth := FEditorState.LineStrokeWidth;
   Data.Visible := True;
@@ -403,6 +406,7 @@ begin
   Data.Name := NextScreenLayoutLayerName(FDocument, BaseName);
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.StrokeColor := FEditorState.LineStrokeColor;
+  Data.PaintStyle := FEditorState.CreationPaintStyle;
   Data.MifStrokeStyle := FEditorState.LineMifStrokeStyle;
   Data.StrokeWidth := FEditorState.LineStrokeWidth;
   Data.Visible := True;
@@ -459,8 +463,9 @@ begin
   Layer := TScreenLayoutTextPathLayer.Create(
     NextScreenLayoutLayerName(FDocument, 'Text Path'), Bounds,
     DEFAULT_TEXT, DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE,
-    Max(Bounds.Width, 1.0), clWhite, Vertices);
+    Max(Bounds.Width, 1.0), FEditorState.CreationColor, Vertices);
   Layer.Opacity := FEditorState.RectangleOpacity;
+  Layer.PaintStyle := FEditorState.CreationPaintStyle;
   BeforeSelection := FDocument.GetSelectedLayerIndices;
   Index := FDocument.InsertLayer(FDocument.LayerCount, Layer);
   FDocument.SetSelectedLayers([Index]);
@@ -542,6 +547,7 @@ begin
   Data.Bounds := TRectF.Create(LogicalLeft, LogicalTop, LogicalRight,
     LogicalBottom);
   Data.FillColor := FEditorState.RectangleFillColor;
+  Data.PaintStyle := FEditorState.CreationPaintStyle;
   Data.Locked := False;
   Data.Name := NextScreenLayoutLayerName(FDocument, 'Rectangle');
   Data.Opacity := FEditorState.RectangleOpacity;
@@ -582,6 +588,7 @@ begin
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.RotationDegrees := 0.0;
   Data.StrokeColor := FEditorState.LineStrokeColor;
+  Data.PaintStyle := FEditorState.CreationPaintStyle;
   Data.StrokeStyle := FEditorState.LineMifStrokeStyle;
   Data.StrokeWidth := FEditorState.LineStrokeWidth;
   Data.Visible := True;
@@ -622,6 +629,7 @@ begin
   Data.RotationDegrees := 0.0;
   Data.StartAngleDegrees := 180.0;
   Data.StrokeColor := FEditorState.LineStrokeColor;
+  Data.PaintStyle := FEditorState.CreationPaintStyle;
   Data.StrokeStyle := FEditorState.LineMifStrokeStyle;
   Data.StrokeWidth := FEditorState.LineStrokeWidth;
   Data.SweepAngleDegrees := 180.0;
@@ -657,6 +665,7 @@ begin
     ScreenToLogicalY(ScreenBounds.Bottom, FCanvasBounds, FZoom,
       FDocument.CanvasLayer.Height));
   Data.FillColor := FEditorState.RectangleFillColor;
+  Data.PaintStyle := FEditorState.CreationPaintStyle;
   Data.Locked := False;
   Data.Name := NextScreenLayoutLayerName(FDocument, 'Arc Shape');
   Data.Opacity := FEditorState.RectangleOpacity;
@@ -700,6 +709,7 @@ begin
   Data.Bounds := TRectF.Create(LogicalLeft, LogicalTop, LogicalRight,
     LogicalBottom);
   Data.FillColor := FEditorState.RectangleFillColor;
+  Data.PaintStyle := FEditorState.CreationPaintStyle;
   Data.Locked := False;
   Data.Name := NextScreenLayoutLayerName(FDocument, 'Ellipse');
   Data.Opacity := FEditorState.RectangleOpacity;
@@ -740,6 +750,7 @@ begin
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.RotationDegrees := 0.0;
   Data.StrokeColor := FEditorState.LineStrokeColor;
+  Data.PaintStyle := FEditorState.CreationPaintStyle;
   Data.StrokeStyle := FEditorState.LineMifStrokeStyle;
   Data.StrokeWidth := FEditorState.LineStrokeWidth;
   Data.Visible := True;
@@ -782,6 +793,7 @@ begin
   Radius := Min(Data.Bounds.Width, Data.Bounds.Height) * 0.2;
   Data.CornerRadii := UniformScreenLayoutCornerRadii(Radius);
   Data.FillColor := FEditorState.RectangleFillColor;
+  Data.PaintStyle := FEditorState.CreationPaintStyle;
   Data.Locked := False;
   Data.Name := NextScreenLayoutLayerName(FDocument, 'Rounded Rectangle');
   Data.Opacity := FEditorState.RectangleOpacity;
@@ -826,6 +838,7 @@ begin
   Data.Opacity := FEditorState.RectangleOpacity;
   Data.RotationDegrees := 0.0;
   Data.StrokeColor := FEditorState.LineStrokeColor;
+  Data.PaintStyle := FEditorState.CreationPaintStyle;
   Data.StrokeStyle := FEditorState.LineMifStrokeStyle;
   Data.StrokeWidth := FEditorState.LineStrokeWidth;
   Data.Visible := True;

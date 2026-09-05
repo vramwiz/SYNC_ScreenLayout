@@ -29,9 +29,9 @@ uses
   ScreenLayoutEditHistory in
     '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutGroupCommands in
-    '..\Source\Core\Commands\ScreenLayoutGroupCommands.pas',
+    '..\Source\Core\Commands\Layer\ScreenLayoutGroupCommands.pas',
   ScreenLayoutTextCommands in
-    '..\Source\Core\Commands\ScreenLayoutTextCommands.pas',
+    '..\Source\Core\Commands\Text\ScreenLayoutTextCommands.pas',
   ScreenLayoutEditorState in
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
   ScreenLayoutRenderer in '..\Source\Rendering\ScreenLayoutRenderer.pas',

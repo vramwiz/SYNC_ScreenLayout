@@ -20,7 +20,7 @@ uses
   ScreenLayoutLayerRenderer in
     '..\Source\Layers\ScreenLayoutLayerRenderer.pas',
   ScreenLayoutGroupChildCommands in
-    '..\Source\Core\Commands\ScreenLayoutGroupChildCommands.pas',
+    '..\Source\Core\Commands\Layer\ScreenLayoutGroupChildCommands.pas',
   ScreenLayoutLayerList in '..\Source\Layers\ScreenLayoutLayerList.pas',
   VerticalScrollBarControl in
     '..\Lib\VerticalScrollBar\VerticalScrollBarControl.pas';

@@ -1,4 +1,4 @@
-// フィルターUIの見出し、操作列、一覧、下端の補助設定を1つのFrameへまとめる。
+﻿// フィルターUIの見出し、操作列、一覧、下端の補助設定を1つのFrameへまとめる。
 // 一覧固有の描画と入力はScreenLayoutFilterListControlへ委譲する。
 unit ScreenLayoutFilterFrame;
 
@@ -133,7 +133,7 @@ begin
   FCaptionLabel.Align := alTop;
   FCaptionLabel.AutoSize := False;
   FCaptionLabel.Height := MulDiv(CAPTION_HEIGHT, CurrentPPI, 96);
-  FCaptionLabel.Caption := 'Filters';
+  FCaptionLabel.Caption := 'フィルター';
   FCaptionLabel.Font.Name := 'Segoe UI';
   FCaptionLabel.Font.Height := -12;
   FCaptionLabel.Font.Style := [fsBold];
@@ -155,6 +155,8 @@ begin
     MulDiv(26, CurrentPPI, 96), MulDiv(24, CurrentPPI, 96));
   FAddButton.BevelOuter := bvNone;
   FAddButton.Caption := '+';
+  FAddButton.Hint := 'フィルターを追加';
+  FAddButton.ShowHint := True;
   FAddButton.Color := COLOR_BUTTON;
   FAddButton.Font.Color := COLOR_TEXT_PRIMARY;
   FAddButton.ParentBackground := False;
@@ -166,15 +168,17 @@ begin
     MulDiv(26, CurrentPPI, 96), MulDiv(24, CurrentPPI, 96));
   FDeleteButton.BevelOuter := bvNone;
   FDeleteButton.Caption := 'x';
+  FDeleteButton.Hint := '選択したフィルターを削除';
+  FDeleteButton.ShowHint := True;
   FDeleteButton.Color := COLOR_BUTTON;
   FDeleteButton.Font.Color := COLOR_TEXT_PRIMARY;
   FDeleteButton.ParentBackground := False;
   FDeleteButton.OnClick := DeleteButtonClick;
 
   FAddMenu := TPopupMenu.Create(Self);
-  AddMenuItem('Outline', slfkOutline);
-  AddMenuItem('Shadow', slfkShadow);
-  AddMenuItem('Blur', slfkBlur);
+  AddMenuItem('縁取り', slfkOutline);
+  AddMenuItem('影', slfkShadow);
+  AddMenuItem('ぼかし', slfkBlur);
 
   FDetailsFrame := TScreenLayoutFilterDetailsFrame.Create(Self);
   FDetailsFrame.Parent := Self;

@@ -1,4 +1,4 @@
-// フィルター一覧の描画、選択、並べ替え、主要値の直接操作を担当する。
+﻿// フィルター一覧の描画、選択、並べ替え、主要値の直接操作を担当する。
 unit ScreenLayoutFilterListControl;
 
 interface
@@ -272,7 +272,7 @@ begin
     Canvas.Font.Color := COLOR_TEXT_SECONDARY;
     Canvas.Brush.Style := bsClear;
     TextRect := ClientRect;
-    DrawText(Canvas.Handle, 'No filters', -1, TextRect,
+    DrawText(Canvas.Handle, 'フィルターなし', -1, TextRect,
       DT_CENTER or DT_VCENTER or DT_SINGLELINE or DT_NOPREFIX);
     Exit;
   end;

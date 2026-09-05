@@ -19,7 +19,7 @@ uses
   ScreenLayoutEditHistory in
     '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutTextCommands in
-    '..\Source\Core\Commands\ScreenLayoutTextCommands.pas',
+    '..\Source\Core\Commands\Text\ScreenLayoutTextCommands.pas',
   TextRendererSkiaRuntime in
     '..\Lib\TextRenderer\TextRendererSkiaRuntime.pas';
 
