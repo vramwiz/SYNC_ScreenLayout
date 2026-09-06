@@ -157,7 +157,7 @@ begin
   Color := COLOR_BACKGROUND;
   ParentBackground := False;
   DoubleBuffered := True;
-  Height := 207;
+  Height := MulDiv(207, CurrentPPI, 96);
 
   FTitleLabel := TLabel.Create(Self);
   FTitleLabel.Parent := Self;
@@ -166,7 +166,7 @@ begin
     $30BA]);
   FTitleLabel.Color := COLOR_HEADER;
   FTitleLabel.Font.Name := 'Segoe UI';
-  FTitleLabel.Font.Height := -13;
+  FTitleLabel.Font.Height := -MulDiv(13, CurrentPPI, 96);
   FTitleLabel.Font.Style := [fsBold];
   FTitleLabel.Font.Color := COLOR_TEXT;
   FTitleLabel.ParentColor := False;
@@ -189,7 +189,7 @@ begin
   FPresetCombo.Style := csDropDownList;
   FPresetCombo.Color := COLOR_EDIT;
   FPresetCombo.Font.Name := 'Segoe UI';
-  FPresetCombo.Font.Height := -12;
+  FPresetCombo.Font.Height := -MulDiv(12, CurrentPPI, 96);
   FPresetCombo.Font.Color := COLOR_TEXT;
   FPresetCombo.ParentFont := False;
   FPresetCombo.SetPendingItemIndex(Ord(slgpCenter));
@@ -385,10 +385,10 @@ begin
   Result := TEdit.Create(Self);
   Result.Parent := Self;
   Result.AutoSize := False;
-  Result.Height := EDIT_HEIGHT;
+  Result.Height := MulDiv(EDIT_HEIGHT, CurrentPPI, 96);
   Result.Color := COLOR_EDIT;
   Result.Font.Name := 'Segoe UI';
-  Result.Font.Height := -12;
+  Result.Font.Height := -MulDiv(12, CurrentPPI, 96);
   Result.Font.Color := COLOR_TEXT;
   Result.ParentColor := False;
   Result.ParentFont := False;
@@ -403,7 +403,7 @@ begin
   Result.Parent := Self;
   Result.Caption := Caption;
   Result.Font.Name := 'Segoe UI';
-  Result.Font.Height := -12;
+  Result.Font.Height := -MulDiv(12, CurrentPPI, 96);
   Result.Font.Color := COLOR_LABEL;
   Result.ParentFont := False;
 end;
@@ -462,25 +462,52 @@ end;
 procedure TScreenLayoutGeometryPropertiesFrame.Resize;
 var
   ColumnWidth: Integer;
+  EditHeight: Integer;
+  Margin: Integer;
   RightColumn: Integer;
 begin
   inherited Resize;
-  FTitleLabel.SetBounds(0, 0, ClientWidth, 32);
-  ColumnWidth := Max((ClientWidth - 36) div 2, 48);
-  RightColumn := (ClientWidth div 2) + 4;
-  FXLabel.SetBounds(12, 42, ColumnWidth, 17);
-  FYLabel.SetBounds(RightColumn, 42, ColumnWidth, 17);
-  FXEdit.SetBounds(12, 59, ColumnWidth, EDIT_HEIGHT);
-  FYEdit.SetBounds(RightColumn, 59, ColumnWidth, EDIT_HEIGHT);
-  FWidthLabel.SetBounds(12, 91, ColumnWidth, 17);
-  FHeightLabel.SetBounds(RightColumn, 91, ColumnWidth, 17);
-  FWidthEdit.SetBounds(12, 108, ColumnWidth, EDIT_HEIGHT);
-  FHeightEdit.SetBounds(RightColumn, 108, ColumnWidth, EDIT_HEIGHT);
-  FPresetLabel.SetBounds(12, 142, ColumnWidth, 17);
-  FPresetCombo.SetBounds(12, 159,
-    Max(ClientWidth - 106, 80), EDIT_HEIGHT);
-  FApplyPresetButton.SetBounds(Max(ClientWidth - 86, 12), 158,
-    74, 27);
+  Margin := MulDiv(12, CurrentPPI, 96);
+  EditHeight := MulDiv(EDIT_HEIGHT, CurrentPPI, 96);
+  FTitleLabel.Font.Height := -MulDiv(13, CurrentPPI, 96);
+  FPresetCombo.Font.Height := -MulDiv(12, CurrentPPI, 96);
+  FXLabel.Font.Height := -MulDiv(12, CurrentPPI, 96);
+  FYLabel.Font.Height := FXLabel.Font.Height;
+  FWidthLabel.Font.Height := FXLabel.Font.Height;
+  FHeightLabel.Font.Height := FXLabel.Font.Height;
+  FPresetLabel.Font.Height := FXLabel.Font.Height;
+  FXEdit.Font.Height := -MulDiv(12, CurrentPPI, 96);
+  FYEdit.Font.Height := FXEdit.Font.Height;
+  FWidthEdit.Font.Height := FXEdit.Font.Height;
+  FHeightEdit.Font.Height := FXEdit.Font.Height;
+  FTitleLabel.SetBounds(0, 0, ClientWidth, MulDiv(32, CurrentPPI, 96));
+  ColumnWidth := Max((ClientWidth - MulDiv(36, CurrentPPI, 96)) div 2,
+    MulDiv(48, CurrentPPI, 96));
+  RightColumn := (ClientWidth div 2) + MulDiv(4, CurrentPPI, 96);
+  FXLabel.SetBounds(Margin, MulDiv(42, CurrentPPI, 96), ColumnWidth,
+    MulDiv(17, CurrentPPI, 96));
+  FYLabel.SetBounds(RightColumn, MulDiv(42, CurrentPPI, 96), ColumnWidth,
+    MulDiv(17, CurrentPPI, 96));
+  FXEdit.SetBounds(Margin, MulDiv(59, CurrentPPI, 96), ColumnWidth, EditHeight);
+  FYEdit.SetBounds(RightColumn, MulDiv(59, CurrentPPI, 96), ColumnWidth,
+    EditHeight);
+  FWidthLabel.SetBounds(Margin, MulDiv(91, CurrentPPI, 96), ColumnWidth,
+    MulDiv(17, CurrentPPI, 96));
+  FHeightLabel.SetBounds(RightColumn, MulDiv(91, CurrentPPI, 96), ColumnWidth,
+    MulDiv(17, CurrentPPI, 96));
+  FWidthEdit.SetBounds(Margin, MulDiv(108, CurrentPPI, 96), ColumnWidth,
+    EditHeight);
+  FHeightEdit.SetBounds(RightColumn, MulDiv(108, CurrentPPI, 96), ColumnWidth,
+    EditHeight);
+  FPresetLabel.SetBounds(Margin, MulDiv(142, CurrentPPI, 96), ColumnWidth,
+    MulDiv(17, CurrentPPI, 96));
+  FPresetCombo.SetBounds(Margin, MulDiv(159, CurrentPPI, 96),
+    Max(ClientWidth - MulDiv(106, CurrentPPI, 96),
+      MulDiv(80, CurrentPPI, 96)), EditHeight);
+  FApplyPresetButton.SetBounds(
+    Max(ClientWidth - MulDiv(86, CurrentPPI, 96), Margin),
+    MulDiv(158, CurrentPPI, 96), MulDiv(74, CurrentPPI, 96),
+    MulDiv(27, CurrentPPI, 96));
 end;
 
 function TScreenLayoutGeometryPropertiesFrame.SelectedGeometry(

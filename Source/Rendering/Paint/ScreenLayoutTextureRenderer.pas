@@ -69,6 +69,7 @@ end;
 function ScreenLayoutTextureMatrix(const Texture: TScreenLayoutTextureStyle;
   const Bounds: TRectF; Width, Height: Integer; Rotation: Single): TMatrix;
 var
+  FlipX, FlipY: Single;
   SX, SY: Single;
   Center: TPointF;
 begin
@@ -80,10 +81,13 @@ begin
     sltfOriginal: begin SX := 1; SY := 1; end;
   end;
   Center := Bounds.CenterPoint;
+  if Texture.FlipHorizontal then FlipX := -1 else FlipX := 1;
+  if Texture.FlipVertical then FlipY := -1 else FlipY := 1;
   Result := TMatrix.CreateTranslation(-Width / 2, -Height / 2) *
     TMatrix.CreateScaling(SX * Max(Texture.Scale, 0.01), SY * Max(Texture.Scale, 0.01)) *
     TMatrix.CreateRotation(DegToRad(Texture.Angle)) *
     TMatrix.CreateTranslation(Texture.OffsetX * Max(Bounds.Width, 1), Texture.OffsetY * Max(Bounds.Height, 1)) *
+    TMatrix.CreateScaling(FlipX, FlipY) *
     TMatrix.CreateRotation(DegToRad(Rotation)) * TMatrix.CreateTranslation(Center.X, Center.Y);
 end;
 

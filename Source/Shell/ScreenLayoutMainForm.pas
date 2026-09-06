@@ -19,7 +19,8 @@ uses
   ScreenLayoutGeometryPropertiesFrame,
   ScreenLayoutObjectPropertiesFrame, ScreenLayoutToolFrames,
   ScreenLayoutToolPaletteFrame, ScreenLayoutObjectContextMenu,
-  ScreenLayoutTextContextMenu;
+  ScreenLayoutTextContextMenu, ScreenLayoutTransformContextMenu,
+  ScreenLayoutArrangementContextMenu;
 
 type
   TMainForm = class(TForm)
@@ -128,7 +129,7 @@ uses
   TextRendererSkiaBootstrap, TextRendererSkiaRuntime,
   ScreenLayoutCanvasSettingsDialog,
   ScreenLayoutDocumentJson, ScreenLayoutImageImport,
-  ScreenLayoutKeyboardMovement,
+  ScreenLayoutKeyboardMovement, ScreenLayoutLayerFlipOperations,
   Vcl.Dialogs, Winapi.Dwmapi;
 
 {$R *.dfm}
@@ -189,7 +190,7 @@ begin
   Result.Caption := Caption;
   Result.Color := pnlViewMenuPopup.Color;
   Result.Font.Assign(pnlLayoutEditMenuItem.Font);
-  Result.Height := 32;
+  Result.Height := MulDiv(32, CurrentPPI, 96);
   Result.ParentBackground := False;
   Result.OnClick := ToolMenuItemClick;
 end;
@@ -219,9 +220,10 @@ begin
     pnlMenuBar, pnlShortcutBar);
   FEditActionsUI.Document := FDocument;
   FEditActionsUI.History := FEditHistory;
+  FEditActionsUI.EditorState := FEditorState;
   FEditActionsUI.OnCanvasSettingsRequest := CanvasSettingsRequest;
   FEditActionsUI.OnGeometrySettingsRequest := GeometrySettingsRequest;
-  pnlViewMenuButton.Left := 36;
+  pnlViewMenuButton.Left := MulDiv(36, CurrentPPI, 96);
   FLineToolbar := TVectArtLineToolbarControl.CreateForHost(Self,
     pnlShortcutBar);
   FLineToolbar.Document := FDocument;
@@ -234,8 +236,8 @@ begin
   FGeometryPopup.BorderIcons := [];
   FGeometryPopup.BorderStyle := bsNone;
   FGeometryPopup.Caption := '配置とサイズ';
-  FGeometryPopup.ClientWidth := 360;
-  FGeometryPopup.ClientHeight := 207;
+  FGeometryPopup.ClientWidth := MulDiv(360, CurrentPPI, 96);
+  FGeometryPopup.ClientHeight := MulDiv(207, CurrentPPI, 96);
   FGeometryPopup.Color := $00212121;
   FGeometryPopup.KeyPreview := True;
   FGeometryPopup.OnDeactivate := GeometryPopupDeactivate;
@@ -256,6 +258,12 @@ begin
   FMenuGroup.RegisterMenu(FViewMenu);
   FObjectContextMenu := TScreenLayoutObjectContextMenu.Create(Self, Self,
     FMenuGroup, FDocument, FEditorState);
+  FObjectContextMenu.RegisterContributor(
+    TScreenLayoutArrangementMenuContributor.Create(FObjectContextMenu,
+      FDocument, FEditHistory, FEditorState));
+  FObjectContextMenu.RegisterContributor(
+    TScreenLayoutTransformMenuContributor.Create(FObjectContextMenu,
+      FDocument, FEditHistory, FEditorState));
   FObjectContextMenu.RegisterContributor(
     TScreenLayoutTextMenuContributor.Create(FObjectContextMenu,
       FEditHistory));
@@ -280,7 +288,7 @@ begin
   FObjectPropertiesFrame.Context := FDesignerContext;
   FDockManager.OnToolVisibilityChanged := ToolVisibilityChanged;
 
-  pnlViewMenuPopup.Height := 128;
+  pnlViewMenuPopup.Height := MulDiv(128, CurrentPPI, 96);
   pnlLayoutEditMenuItem.Align := alTop;
   FObjectPropertiesMenuItem := CreateViewMenuItem('Object Properties');
   FToolPaletteMenuItem := CreateViewMenuItem('Tools');
@@ -389,8 +397,8 @@ begin
   SetFileDropCaptionEnabled(True);
   if FFileMenu <> nil then
     Exit;
-  FEditActionsUI.Menu.Button.Left := 56;
-  pnlViewMenuButton.Left := 92;
+  FEditActionsUI.Menu.Button.Left := MulDiv(56, CurrentPPI, 96);
+  pnlViewMenuButton.Left := MulDiv(92, CurrentPPI, 96);
   FFileMenu := TVectArtDarkPopupMenu.CreateForHosts(Self, Self, pnlMenuBar,
     'ファイル', 0, 56, 220, 64);
   FFileMenu.AddItem('JSONを開く...    Ctrl+O', 0, FileOpenClick);
@@ -432,6 +440,8 @@ var
   VertexMode: string;
 begin
   UpdateGeometrySettingsAvailability;
+  if FEditActionsUI <> nil then
+    FEditActionsUI.RefreshState;
   if (FGeometryPopup <> nil) and FGeometryPopup.Visible and
     (FGeometryPopupFrame <> nil) then
     FGeometryPopupFrame.RefreshFromDocument;
@@ -528,6 +538,12 @@ end;
 procedure TMainForm.FormKeyDown(Sender: TObject; var Key: Word;
   Shift: TShiftState);
 begin
+  if (FEditorFrame <> nil) and FEditorFrame.CanvasControl.TransformDragging then
+  begin
+    if Key = VK_ESCAPE then FEditorFrame.CanvasControl.CancelTransformDrag;
+    Key := 0;
+    Exit;
+  end;
   if (FFileMenu <> nil) and (Key = Ord('O')) and (Shift = [ssCtrl]) then
   begin
     LoadDocument;
@@ -790,6 +806,28 @@ begin
       ActivateToolShortcut(vetText);
     end,
     ToolShortcutEnabled);
+  FShortcuts.Add(Ord('H'), [ssShift],
+    procedure
+    begin
+      FlipScreenLayoutSelection(FDocument, FEditHistory, FEditorState,
+        slfdHorizontal);
+    end,
+    function: Boolean
+    begin
+      Result := IsEditingSurfaceFocused and not IsTextInputFocused and
+        CanFlipScreenLayoutSelection(FDocument, FEditorState);
+    end);
+  FShortcuts.Add(Ord('V'), [ssShift],
+    procedure
+    begin
+      FlipScreenLayoutSelection(FDocument, FEditHistory, FEditorState,
+        slfdVertical);
+    end,
+    function: Boolean
+    begin
+      Result := IsEditingSurfaceFocused and not IsTextInputFocused and
+        CanFlipScreenLayoutSelection(FDocument, FEditorState);
+    end);
   FShortcuts.Add(Ord('Z'), [ssCtrl],
     procedure
     begin
@@ -955,6 +993,7 @@ procedure TMainForm.LoadLayoutSettings;
 var
   Bounds: TRect;
   Ini: TMemIniFile;
+  LayoutVersion: Integer;
   SavedHeight: Integer;
   SavedWidth: Integer;
 begin
@@ -964,11 +1003,14 @@ begin
   try
     try
       Ini := TMemIniFile.Create(FLayoutFileName, TEncoding.UTF8);
-      if Ini.ReadInteger('File', 'Version', 0) <> 1 then
+      LayoutVersion := Ini.ReadInteger('File', 'Version', 0);
+      if not (LayoutVersion in [1, 2]) then
         Exit;
-      SavedWidth := Max(Ini.ReadInteger('MainForm', 'Width', Width),
+      SavedWidth := Max(MulDiv(Ini.ReadInteger('MainForm', 'Width',
+        MulDiv(Width, 96, CurrentPPI)), CurrentPPI, 96),
         Constraints.MinWidth);
-      SavedHeight := Max(Ini.ReadInteger('MainForm', 'Height', Height),
+      SavedHeight := Max(MulDiv(Ini.ReadInteger('MainForm', 'Height',
+        MulDiv(Height, 96, CurrentPPI)), CurrentPPI, 96),
         Constraints.MinHeight);
       Bounds := Rect(
         Ini.ReadInteger('MainForm', 'Left', Left),
@@ -1010,11 +1052,13 @@ begin
         SavedBounds := Placement.rcNormalPosition
       else
         SavedBounds := BoundsRect;
-      Ini.WriteInteger('File', 'Version', 1);
+      Ini.WriteInteger('File', 'Version', 2);
       Ini.WriteInteger('MainForm', 'Left', SavedBounds.Left);
       Ini.WriteInteger('MainForm', 'Top', SavedBounds.Top);
-      Ini.WriteInteger('MainForm', 'Width', SavedBounds.Width);
-      Ini.WriteInteger('MainForm', 'Height', SavedBounds.Height);
+      Ini.WriteInteger('MainForm', 'Width',
+        MulDiv(SavedBounds.Width, 96, CurrentPPI));
+      Ini.WriteInteger('MainForm', 'Height',
+        MulDiv(SavedBounds.Height, 96, CurrentPPI));
       if WindowState = wsMaximized then
         Ini.WriteString('MainForm', 'WindowState', 'Maximized')
       else

@@ -48,7 +48,10 @@ type
     destructor Destroy; override;
     // ポップアップへ高さ32pxの項目を追加し、返したPanelから表示状態などを個別調整できる。
     function AddItem(const ACaption: string; Top: Integer;
-      ClickHandler: TNotifyEvent): TPanel;
+      ClickHandler: TNotifyEvent): TPanel; overload;
+    // 名称とショートカットを別列として追加し、各項目の文字位置を揃える。
+    function AddItem(const ACaption, AShortcut: string; Top: Integer;
+      ClickHandler: TNotifyEvent): TPanel; overload;
     // 子メニューを持つ項目を追加する。子は別Ownerが所有し、このメニューは参照だけを保持する。
     function AddSubMenu(const ACaption: string; Top: Integer;
       SubMenu: TVectArtDarkPopupMenu): TPanel;
@@ -85,7 +88,21 @@ type
 implementation
 
 uses
-  System.Math, System.Types, Vcl.Forms, Vcl.Graphics;
+  System.Math, System.SysUtils, System.Types, Vcl.Forms, Vcl.Graphics;
+
+type
+  // 標準メニューに近い左寄せ名称、右寄せショートカット、右端矢印を描く。
+  TVectArtDarkMenuItem = class(TPanel)
+  private
+    FDisplayCaption: string;
+    FHasSubMenu: Boolean;
+    FShortcut: string;
+  protected
+    procedure Paint; override;
+  public
+    procedure SetMenuContent(const ACaption, AShortcut: string;
+      HasSubMenu: Boolean);
+  end;
 
 const
   COLOR_BUTTON = TColor($00222222);
@@ -93,28 +110,130 @@ const
   COLOR_POPUP = TColor($00303030);
   COLOR_TEXT = TColor($00E6E6E6);
   MENU_ITEM_HEIGHT = 32;
+  MENU_ITEM_LEFT_PADDING = 12;
+  MENU_ITEM_RIGHT_PADDING = 12;
+  MENU_SHORTCUT_COLUMN_WIDTH = 76;
+
+procedure SplitLegacyMenuCaption(const Value: string;
+  out DisplayCaption, Shortcut: string);
+var
+  I: Integer;
+  SeparatorStart: Integer;
+begin
+  DisplayCaption := Value;
+  Shortcut := '';
+  SeparatorStart := 0;
+  I := 1;
+  while I < Length(Value) do
+  begin
+    if (Value[I] = ' ') and (Value[I + 1] = ' ') then
+    begin
+      SeparatorStart := I;
+      Break;
+    end;
+    Inc(I);
+  end;
+  if SeparatorStart = 0 then
+    Exit;
+  DisplayCaption := Trim(Copy(Value, 1, SeparatorStart - 1));
+  Shortcut := Trim(Copy(Value, SeparatorStart, MaxInt));
+end;
+
+{ TVectArtDarkMenuItem }
+
+procedure TVectArtDarkMenuItem.Paint;
+var
+  ArrowRect: TRect;
+  CaptionRect: TRect;
+  ItemLeftPadding: Integer;
+  ItemRightPadding: Integer;
+  ShortcutColumnWidth: Integer;
+  ShortcutRect: TRect;
+begin
+  Canvas.Brush.Color := Color;
+  Canvas.FillRect(ClientRect);
+  Canvas.Brush.Style := bsClear;
+  Canvas.Font.Assign(Font);
+
+  ItemLeftPadding := MulDiv(MENU_ITEM_LEFT_PADDING, CurrentPPI, 96);
+  ItemRightPadding := MulDiv(MENU_ITEM_RIGHT_PADDING, CurrentPPI, 96);
+  ShortcutColumnWidth := MulDiv(MENU_SHORTCUT_COLUMN_WIDTH, CurrentPPI, 96);
+  CaptionRect := Rect(ItemLeftPadding, 0,
+    ClientWidth - ItemRightPadding, ClientHeight);
+  if FShortcut <> '' then
+    CaptionRect.Right := Max(CaptionRect.Left,
+      ClientWidth - ItemRightPadding - ShortcutColumnWidth);
+  if FHasSubMenu then
+    CaptionRect.Right := Max(CaptionRect.Left,
+      ClientWidth - MulDiv(30, CurrentPPI, 96));
+  DrawText(Canvas.Handle, PChar(FDisplayCaption), Length(FDisplayCaption),
+    CaptionRect, DT_LEFT or DT_VCENTER or DT_SINGLELINE or DT_END_ELLIPSIS or
+    DT_NOPREFIX);
+
+  if FShortcut <> '' then
+  begin
+    ShortcutRect := Rect(ClientWidth - ItemRightPadding -
+      ShortcutColumnWidth, 0, ClientWidth - ItemRightPadding,
+      ClientHeight);
+    DrawText(Canvas.Handle, PChar(FShortcut), Length(FShortcut), ShortcutRect,
+      DT_RIGHT or DT_VCENTER or DT_SINGLELINE or DT_NOPREFIX);
+  end;
+  if FHasSubMenu then
+  begin
+    ArrowRect := Rect(ClientWidth - MulDiv(28, CurrentPPI, 96), 0,
+      ClientWidth - ItemRightPadding, ClientHeight);
+    DrawText(Canvas.Handle, PChar(#8250), 1, ArrowRect,
+      DT_RIGHT or DT_VCENTER or DT_SINGLELINE or DT_NOPREFIX);
+  end;
+end;
+
+procedure TVectArtDarkMenuItem.SetMenuContent(const ACaption,
+  AShortcut: string; HasSubMenu: Boolean);
+begin
+  FDisplayCaption := ACaption;
+  FShortcut := AShortcut;
+  FHasSubMenu := HasSubMenu;
+  Invalidate;
+end;
 
 function TVectArtDarkPopupMenu.AddItem(const ACaption: string; Top: Integer;
   ClickHandler: TNotifyEvent): TPanel;
+var
+  DisplayCaption: string;
+  Shortcut: string;
 begin
-  Result := TPanel.Create(Self);
+  SplitLegacyMenuCaption(ACaption, DisplayCaption, Shortcut);
+  Result := AddItem(DisplayCaption, Shortcut, Top, ClickHandler);
+  Result.Caption := ACaption;
+end;
+
+function TVectArtDarkPopupMenu.AddItem(const ACaption, AShortcut: string;
+  Top: Integer; ClickHandler: TNotifyEvent): TPanel;
+begin
+  Result := TVectArtDarkMenuItem.Create(Self);
   Result.Parent := FPopup;
-  Result.SetBounds(0, Top, FPopup.Width, MENU_ITEM_HEIGHT);
+  Result.SetBounds(0, MulDiv(Top, FPopup.CurrentPPI, 96), FPopup.Width,
+    MulDiv(MENU_ITEM_HEIGHT, FPopup.CurrentPPI, 96));
   Result.BevelOuter := bvNone;
   Result.Caption := ACaption;
+  if AShortcut <> '' then
+    Result.Caption := Result.Caption + '    ' + AShortcut;
   Result.Color := COLOR_POPUP;
   Result.Font.Name := 'Segoe UI';
-  Result.Font.Height := -12;
+  Result.Font.Height := -MulDiv(12, Result.CurrentPPI, 96);
   Result.Font.Color := COLOR_TEXT;
   Result.ParentBackground := False;
   Result.OnClick := ClickHandler;
   Result.OnMouseEnter := ItemMouseEnter;
+  TVectArtDarkMenuItem(Result).SetMenuContent(ACaption, AShortcut, False);
 end;
 
 function TVectArtDarkPopupMenu.AddSubMenu(const ACaption: string;
   Top: Integer; SubMenu: TVectArtDarkPopupMenu): TPanel;
 begin
-  Result := AddItem(ACaption + '  >', Top, SubMenuItemClick);
+  Result := AddItem(ACaption, '', Top, SubMenuItemClick);
+  Result.Caption := ACaption + '  >';
+  TVectArtDarkMenuItem(Result).SetMenuContent(ACaption, '', True);
   if SubMenu = nil then
     Exit;
   if (SubMenu.FParentMenu <> nil) and
@@ -130,7 +249,8 @@ function TVectArtDarkPopupMenu.AddSeparator(Top, Height: Integer): TPanel;
 begin
   Result := TPanel.Create(Self);
   Result.Parent := FPopup;
-  Result.SetBounds(0, Top, FPopup.Width, Height);
+  Result.SetBounds(0, MulDiv(Top, FPopup.CurrentPPI, 96), FPopup.Width,
+    MulDiv(Height, FPopup.CurrentPPI, 96));
   Result.BevelOuter := bvNone;
   Result.Caption := '';
   Result.Color := COLOR_POPUP;
@@ -202,18 +322,21 @@ begin
 
   ButtonControl := TPanel.Create(Self);
   ButtonControl.Parent := AMenuBar;
-  ButtonControl.SetBounds(ButtonLeft, 0, ButtonWidth, AMenuBar.Height);
+  ButtonControl.SetBounds(MulDiv(ButtonLeft, ButtonControl.CurrentPPI, 96),
+    0, MulDiv(ButtonWidth, ButtonControl.CurrentPPI, 96), AMenuBar.Height);
   ButtonControl.BevelOuter := bvNone;
   ButtonControl.Caption := ACaption;
   ButtonControl.Color := COLOR_BUTTON;
   ButtonControl.Font.Name := 'Segoe UI';
-  ButtonControl.Font.Height := -12;
+  ButtonControl.Font.Height := -MulDiv(12, ButtonControl.CurrentPPI, 96);
   ButtonControl.Font.Color := COLOR_TEXT;
   ButtonControl.ParentBackground := False;
 
   PopupControl := TPanel.Create(Self);
   PopupControl.Parent := AMainForm;
-  PopupControl.SetBounds(ButtonLeft, AMenuBar.Height, PopupWidth, PopupHeight);
+  PopupControl.SetBounds(MulDiv(ButtonLeft, PopupControl.CurrentPPI, 96),
+    AMenuBar.Height, MulDiv(PopupWidth, PopupControl.CurrentPPI, 96),
+    MulDiv(PopupHeight, PopupControl.CurrentPPI, 96));
   PopupControl.BevelOuter := bvNone;
   PopupControl.Color := COLOR_POPUP;
   PopupControl.ParentBackground := False;
@@ -232,7 +355,9 @@ begin
   FSubMenus := TDictionary<TPanel, TVectArtDarkPopupMenu>.Create;
   PopupControl := TPanel.Create(Self);
   PopupControl.Parent := AMainForm;
-  PopupControl.SetBounds(0, 0, PopupWidth, PopupHeight);
+  PopupControl.SetBounds(0, 0,
+    MulDiv(PopupWidth, PopupControl.CurrentPPI, 96),
+    MulDiv(PopupHeight, PopupControl.CurrentPPI, 96));
   PopupControl.BevelOuter := bvNone;
   PopupControl.Color := COLOR_POPUP;
   PopupControl.ParentBackground := False;
@@ -256,7 +381,7 @@ end;
 
 function TVectArtDarkPopupMenu.GetPopupHeight: Integer;
 begin
-  Result := FPopup.Height;
+  Result := MulDiv(FPopup.Height, 96, FPopup.CurrentPPI);
 end;
 
 function TVectArtDarkPopupMenu.GetVisible: Boolean;
@@ -405,7 +530,7 @@ end;
 
 procedure TVectArtDarkPopupMenu.SetPopupHeight(const Value: Integer);
 begin
-  FPopup.Height := Value;
+  FPopup.Height := MulDiv(Value, FPopup.CurrentPPI, 96);
 end;
 
 procedure TVectArtDarkPopupMenu.Toggle;

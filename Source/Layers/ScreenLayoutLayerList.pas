@@ -138,7 +138,7 @@ begin
     Exit;
   end;
   NewOffset := FRenderer.ScrollOffset +
-    FDragScrollDirection * DRAG_SCROLL_PIXELS;
+    FDragScrollDirection * MulDiv(DRAG_SCROLL_PIXELS, CurrentPPI, 96);
   FRenderer.ScrollOffset := NewOffset;
   UpdateScrollBar;
   if FRenderer.ScrollOffset = NewOffset then
@@ -430,8 +430,10 @@ begin
   if (FDragCandidateIndex > 0) and (ssLeft in Shift) then
   begin
     if not FDraggingLayer and
-      ((Abs(X - FDragStartPoint.X) >= LAYER_DRAG_THRESHOLD) or
-       (Abs(Y - FDragStartPoint.Y) >= LAYER_DRAG_THRESHOLD)) then
+      ((Abs(X - FDragStartPoint.X) >=
+        MulDiv(LAYER_DRAG_THRESHOLD, CurrentPPI, 96)) or
+       (Abs(Y - FDragStartPoint.Y) >=
+        MulDiv(LAYER_DRAG_THRESHOLD, CurrentPPI, 96))) then
       FDraggingLayer := True;
     if FDraggingLayer then
     begin
@@ -656,6 +658,7 @@ end;
 procedure TVectArtLayerListControl.SyncRendererContext;
 begin
   FRenderer.EditorState := FEditorState;
+  FRenderer.PPI := CurrentPPI;
 end;
 
 procedure TVectArtLayerListControl.PaintDirect2D;
@@ -676,7 +679,7 @@ begin
           FDragTargetIndex);
         Direct2DCanvas.Brush.Style := bsClear;
         Direct2DCanvas.Pen.Color := COLOR_DROP_TARGET;
-        Direct2DCanvas.Pen.Width := 3;
+        Direct2DCanvas.Pen.Width := MulDiv(3, CurrentPPI, 96);
         Direct2DCanvas.Rectangle(TargetRect);
         Direct2DCanvas.Pen.Width := 1;
       end
@@ -688,7 +691,7 @@ begin
           FDragTargetIndex);
         IndicatorY := FDragIndicatorY;
         Direct2DCanvas.Pen.Color := COLOR_DROP_TARGET;
-        Direct2DCanvas.Pen.Width := 3;
+        Direct2DCanvas.Pen.Width := MulDiv(3, CurrentPPI, 96);
         Direct2DCanvas.MoveTo(TargetRect.Left, IndicatorY);
         Direct2DCanvas.LineTo(TargetRect.Right, IndicatorY);
         Direct2DCanvas.Pen.Width := 1;
@@ -713,7 +716,7 @@ begin
     TargetRect := FRenderer.LayerItemRect(LayerBounds, FDragTargetIndex);
     Canvas.Brush.Style := bsClear;
     Canvas.Pen.Color := COLOR_DROP_TARGET;
-    Canvas.Pen.Width := 3;
+    Canvas.Pen.Width := MulDiv(3, CurrentPPI, 96);
     Canvas.Rectangle(TargetRect);
     Canvas.Pen.Width := 1;
   end
@@ -724,7 +727,7 @@ begin
     TargetRect := FRenderer.LayerItemRect(LayerBounds, FDragTargetIndex);
     IndicatorY := FDragIndicatorY;
     Canvas.Pen.Color := COLOR_DROP_TARGET;
-    Canvas.Pen.Width := 3;
+    Canvas.Pen.Width := MulDiv(3, CurrentPPI, 96);
     Canvas.MoveTo(TargetRect.Left, IndicatorY);
     Canvas.LineTo(TargetRect.Right, IndicatorY);
     Canvas.Pen.Width := 1;

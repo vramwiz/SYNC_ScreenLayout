@@ -43,17 +43,26 @@ procedure RenderVectArtDocument(Document: TVectArtDocument;
   MinimumStrokeWidth: Single = 0.0;
   InputTextLayer: TScreenLayoutTextLayer = nil;
   InputTextOutlineColor: TColor = clNone);
+// Document直下の指定範囲だけを、元の重なり順とグループ合成を保って描画する。
+// 移動プレビューでは下層・選択層・上層を一度ずつ保持するために使用する。
+procedure RenderVectArtDocumentRange(Document: TVectArtDocument;
+  Target: TVectArtRenderBuffer; Width, Height, FirstLayerIndex,
+  LastLayerIndex: Integer; MinimumStrokeWidth: Single = 0.0);
 // 単体レイヤーまたはグループ子孫を、通常描画と同じ処理でサムネイルへ収める。
 procedure RenderVectArtLayerThumbnail(Layer: TVectArtLayer;
   Target: TVectArtRenderBuffer; Width, Height: Integer);
 // ストレートアルファRGBA8同士をSource-overで合成する。
 procedure CompositeVectArtRgba(const Source: TVectArtRenderBuffer;
   Destination: PVectArtRgbaPixel; Width, Height: Integer);
+// Sourceを整数ピクセルだけ移動してSource-over合成する。領域外は切り捨てる。
+procedure CompositeVectArtRgbaOffset(const Source: TVectArtRenderBuffer;
+  Destination: PVectArtRgbaPixel; Width, Height, OffsetX,
+  OffsetY: Integer);
 
 implementation
 
 uses
-  System.Generics.Collections, System.Math, System.Skia,
+  System.Generics.Collections, System.Math, System.Math.Vectors, System.Skia,
   TextRendererSkiaRuntime, Winapi.Windows,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
   ScreenLayoutFilters, ScreenLayoutLayerGeometry, ScreenLayoutPathOperations,
@@ -113,6 +122,82 @@ begin
   end;
 end;
 
+procedure RenderVectArtLayerTree(Layer: TVectArtLayer;
+  Target: TVectArtRenderBuffer; Width, Height: Integer;
+  const LogicalBounds: TRectF; MinimumStrokeWidth,
+  OpacityMultiplier: Single; InputTextLayer: TScreenLayoutTextLayer;
+  InputTextOutlineColor: TColor); forward;
+procedure RenderVectArtLayers(const RenderLayers: TArray<TVectArtLayer>;
+  Target: TVectArtRenderBuffer; Width, Height: Integer;
+  const LogicalBounds: TRectF; MinimumStrokeWidth,
+  OpacityMultiplier: Single; InputTextLayer: TScreenLayoutTextLayer;
+  InputTextOutlineColor: TColor); forward;
+
+procedure RenderVectArtDocumentRange(Document: TVectArtDocument;
+  Target: TVectArtRenderBuffer; Width, Height, FirstLayerIndex,
+  LastLayerIndex: Integer; MinimumStrokeWidth: Single);
+var
+  CanvasLayer: TVectArtCanvasLayer;
+  FlatLayers: TList<TVectArtLayer>;
+  HasVisibleGroup: Boolean;
+  I: Integer;
+  LayerBuffer: TVectArtRenderBuffer;
+  LogicalBounds: TRectF;
+  PatternScope: IInterface;
+begin
+  if Document = nil then
+    raise EArgumentNilException.Create('Document');
+  if Target = nil then
+    raise EArgumentNilException.Create('Target');
+  CanvasLayer := Document.CanvasLayer;
+  if CanvasLayer = nil then
+    raise EInvalidOp.Create('Document canvas is missing');
+  LogicalBounds := TRectF.Create(-CanvasLayer.Width * 0.5,
+    -CanvasLayer.Height * 0.5, CanvasLayer.Width * 0.5,
+    CanvasLayer.Height * 0.5);
+  Target.SetSize(Width, Height);
+  Target.Clear;
+  FirstLayerIndex := Max(FirstLayerIndex, 1);
+  LastLayerIndex := Min(LastLayerIndex, Document.LayerCount - 1);
+  if FirstLayerIndex > LastLayerIndex then
+    Exit;
+
+  PatternScope := BeginScreenLayoutPatternRender(Max(
+    Width / Max(LogicalBounds.Width, 1),
+    Height / Max(LogicalBounds.Height, 1)));
+  HasVisibleGroup := False;
+  FlatLayers := TList<TVectArtLayer>.Create;
+  try
+    for I := FirstLayerIndex to LastLayerIndex do
+      if Document[I].Visible then
+      begin
+        FlatLayers.Add(Document[I]);
+        HasVisibleGroup := HasVisibleGroup or
+          (Document[I] is TScreenLayoutGroupLayer);
+      end;
+    if not HasVisibleGroup then
+    begin
+      RenderVectArtLayers(FlatLayers.ToArray, Target, Width, Height,
+        LogicalBounds, MinimumStrokeWidth, 1.0, nil, clNone);
+      Exit;
+    end;
+  finally
+    FlatLayers.Free;
+  end;
+  LayerBuffer := TVectArtRenderBuffer.Create;
+  try
+    for I := FirstLayerIndex to LastLayerIndex do
+      if Document[I].Visible then
+      begin
+        RenderVectArtLayerTree(Document[I], LayerBuffer, Width, Height,
+          LogicalBounds, MinimumStrokeWidth, 1.0, nil, clNone);
+        CompositeVectArtRgba(LayerBuffer, Target.Data, Width, Height);
+      end;
+  finally
+    LayerBuffer.Free;
+  end;
+end;
+
 procedure InflateScreenLayoutBounds(var Bounds: TRectF; X, Y: Single);
 begin
   Bounds.Left := Bounds.Left - Max(X, 0.0);
@@ -162,12 +247,13 @@ begin
 end;
 
 function TryGetScreenLayoutPaintBounds(Layer: TVectArtLayer;
-  MinimumStrokeWidth: Single; out Bounds: TRectF): Boolean;
+  MinimumStrokeWidth: Single; out Bounds: TRectF; SourceSpace: Boolean = False): Boolean;
 var
   StrokeMargin: Single;
   StrokeWidth: Single;
 begin
-  Result := TryGetScreenLayoutLayerBounds(Layer, Bounds);
+  if SourceSpace then Result := TryGetScreenLayoutLayerSourceBounds(Layer, Bounds)
+  else Result := TryGetScreenLayoutLayerBounds(Layer, Bounds);
   if not Result then
     Exit;
   StrokeMargin := 0.0;
@@ -390,6 +476,7 @@ procedure DrawScreenLayoutTextOnPath(const Canvas: ISkCanvas;
   const Paint: ISkPaint);
 var
   I: Integer;
+  ScaleY: Single;
   Placements: TArray<TScreenLayoutTextPathPlacement>;
 begin
   Placements := BuildScreenLayoutTextPathPlacements(Layer, Font);
@@ -399,7 +486,11 @@ begin
     try
       Canvas.Translate(Placements[I].Anchor.X, Placements[I].Anchor.Y);
       Canvas.Rotate(Placements[I].AngleDegrees);
-      Canvas.Scale(Placements[I].Scale, Placements[I].Scale);
+      if Layer.FlipHorizontal xor Layer.FlipVertical then
+        ScaleY := -Placements[I].Scale
+      else
+        ScaleY := Placements[I].Scale;
+      Canvas.Scale(Placements[I].Scale, ScaleY);
       Canvas.DrawSimpleText(Placements[I].TextUnit,
         Placements[I].TextOrigin.X, Placements[I].TextOrigin.Y, Font, Paint);
     finally
@@ -407,20 +498,6 @@ begin
     end;
   end;
 end;
-
-procedure RenderVectArtLayers(const RenderLayers: TArray<TVectArtLayer>;
-  Target: TVectArtRenderBuffer; Width, Height: Integer;
-  const LogicalBounds: TRectF; MinimumStrokeWidth,
-  OpacityMultiplier: Single;
-  InputTextLayer: TScreenLayoutTextLayer;
-  InputTextOutlineColor: TColor); forward;
-
-procedure RenderVectArtLayerTree(Layer: TVectArtLayer;
-  Target: TVectArtRenderBuffer; Width, Height: Integer;
-  const LogicalBounds: TRectF; MinimumStrokeWidth,
-  OpacityMultiplier: Single;
-  InputTextLayer: TScreenLayoutTextLayer;
-  InputTextOutlineColor: TColor); forward;
 
 procedure ApplyScreenLayoutLayerFilters(Layer: TVectArtLayer;
   Target: TVectArtRenderBuffer; ScaleX, ScaleY: Single);
@@ -680,6 +757,7 @@ var
   TextX: Single;
   LetterSpacing: Single;
   IndividualLetterSpacingRatios: TArray<Single>;
+  TransformMatrix: TMatrix;
 
 begin
   if Target = nil then
@@ -720,11 +798,14 @@ begin
   for I := 0 to High(RenderLayers) do
   begin
     Layer := RenderLayers[I];
+    Canvas.Save;
+    TransformMatrix := Layer.Transform.Matrix;
+    Canvas.Concat(TransformMatrix);
     Paint.Shader := nil;
     StrokePaint.Shader := nil;
     FilterSaveCount := 0;
     if not TryGetScreenLayoutPaintBounds(Layer, MinimumStrokeWidth,
-      FilterBounds) then
+      FilterBounds, True) then
       FilterBounds := LogicalBounds;
     // Save in reverse so Restore applies the stack in list order.
     for J := Layer.FilterCount - 1 downto 0 do
@@ -841,9 +922,13 @@ begin
       end;
       Canvas.Save;
       try
-        Canvas.Rotate(TextLayer.RotationDegrees,
-          (TextLayer.Bounds.Left + TextLayer.Bounds.Right) * 0.5,
-          (TextLayer.Bounds.Top + TextLayer.Bounds.Bottom) * 0.5);
+        Canvas.Translate(TextLayer.Bounds.CenterPoint.X,
+          TextLayer.Bounds.CenterPoint.Y);
+        Canvas.Rotate(TextLayer.RotationDegrees);
+        Canvas.Scale(IfThen(TextLayer.FlipHorizontal, -1.0, 1.0),
+          IfThen(TextLayer.FlipVertical, -1.0, 1.0));
+        Canvas.Translate(-TextLayer.Bounds.CenterPoint.X,
+          -TextLayer.Bounds.CenterPoint.Y);
         Canvas.Translate(TextLayer.Bounds.Left, TextLayer.Bounds.Top);
         Canvas.Scale(TextRenderScaleX, TextRenderScaleY);
         if not ((Layer = InputTextLayer) and
@@ -1153,6 +1238,7 @@ begin
         Canvas.Restore;
         Dec(FilterSaveCount);
       end;
+      Canvas.Restore;
     end;
   end;
   Surface.Flush;
@@ -1250,6 +1336,74 @@ begin
     end;
     Inc(SourcePixel);
     Inc(DestinationPixel);
+  end;
+end;
+
+procedure CompositeVectArtRgbaOffset(const Source: TVectArtRenderBuffer;
+  Destination: PVectArtRgbaPixel; Width, Height, OffsetX,
+  OffsetY: Integer);
+var
+  AlphaDenominator: Cardinal;
+  DestinationAlpha: Cardinal;
+  DestinationPixel: PVectArtRgbaPixel;
+  DestinationY: Integer;
+  EndX: Integer;
+  SourceAlpha: Cardinal;
+  SourcePixel: PVectArtRgbaPixel;
+  SourceX: Integer;
+  SourceY: Integer;
+  StartX: Integer;
+begin
+  if (Source = nil) or (Destination = nil) or
+    (Source.Width <> Width) or (Source.Height <> Height) then
+    Exit;
+  StartX := Max(0, -OffsetX);
+  EndX := Min(Width - 1, Width - 1 - OffsetX);
+  if StartX > EndX then
+    Exit;
+  for SourceY := 0 to Height - 1 do
+  begin
+    DestinationY := SourceY + OffsetY;
+    if (DestinationY < 0) or (DestinationY >= Height) then
+      Continue;
+    SourcePixel := Source.Data;
+    Inc(SourcePixel, NativeInt(SourceY) * Width + StartX);
+    DestinationPixel := Destination;
+    Inc(DestinationPixel, NativeInt(DestinationY) * Width +
+      StartX + OffsetX);
+    for SourceX := StartX to EndX do
+    begin
+      SourceAlpha := SourcePixel^.A;
+      if SourceAlpha = 255 then
+        DestinationPixel^ := SourcePixel^
+      else if SourceAlpha <> 0 then
+      begin
+        DestinationAlpha := DestinationPixel^.A;
+        AlphaDenominator := SourceAlpha * 255 +
+          DestinationAlpha * (255 - SourceAlpha);
+        if AlphaDenominator <> 0 then
+        begin
+          DestinationPixel^.R :=
+            (Cardinal(SourcePixel^.R) * SourceAlpha * 255 +
+             Cardinal(DestinationPixel^.R) * DestinationAlpha *
+               (255 - SourceAlpha) + AlphaDenominator div 2) div
+            AlphaDenominator;
+          DestinationPixel^.G :=
+            (Cardinal(SourcePixel^.G) * SourceAlpha * 255 +
+             Cardinal(DestinationPixel^.G) * DestinationAlpha *
+               (255 - SourceAlpha) + AlphaDenominator div 2) div
+            AlphaDenominator;
+          DestinationPixel^.B :=
+            (Cardinal(SourcePixel^.B) * SourceAlpha * 255 +
+             Cardinal(DestinationPixel^.B) * DestinationAlpha *
+               (255 - SourceAlpha) + AlphaDenominator div 2) div
+            AlphaDenominator;
+          DestinationPixel^.A := (AlphaDenominator + 127) div 255;
+        end;
+      end;
+      Inc(SourcePixel);
+      Inc(DestinationPixel);
+    end;
   end;
 end;
 

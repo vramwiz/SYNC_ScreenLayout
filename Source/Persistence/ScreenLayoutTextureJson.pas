@@ -36,6 +36,19 @@ begin
   Result := Value.Value;
 end;
 
+function TextureBoolean(Json: TJSONObject; const Name: string;
+  DefaultValue: Boolean): Boolean;
+var
+  Value: TJSONValue;
+begin
+  Value := Json.GetValue(Name);
+  if Value = nil then
+    Exit(DefaultValue);
+  if not (Value is TJSONBool) then
+    raise EConvertError.Create('Invalid texture field: ' + Name);
+  Result := TJSONBool(Value).AsBoolean;
+end;
+
 function WriteScreenLayoutTexture(const Texture: TScreenLayoutTextureStyle): TJSONObject;
 begin
   Result := TJSONObject.Create;
@@ -48,6 +61,8 @@ begin
   Result.AddPair('offsetX', TJSONNumber.Create(Texture.OffsetX));
   Result.AddPair('offsetY', TJSONNumber.Create(Texture.OffsetY));
   Result.AddPair('angle', TJSONNumber.Create(Texture.Angle));
+  Result.AddPair('flipHorizontal', TJSONBool.Create(Texture.FlipHorizontal));
+  Result.AddPair('flipVertical', TJSONBool.Create(Texture.FlipVertical));
 end;
 
 function ReadScreenLayoutTexture(Json: TJSONObject): TScreenLayoutTextureStyle;
@@ -69,6 +84,8 @@ begin
   Result.OffsetX := TextureNumber(Json, 'offsetX', -1000, 1000);
   Result.OffsetY := TextureNumber(Json, 'offsetY', -1000, 1000);
   Result.Angle := TextureNumber(Json, 'angle', -360, 360);
+  Result.FlipHorizontal := TextureBoolean(Json, 'flipHorizontal', False);
+  Result.FlipVertical := TextureBoolean(Json, 'flipVertical', False);
   DecodeScreenLayoutTexture(Result.Data);
 end;
 

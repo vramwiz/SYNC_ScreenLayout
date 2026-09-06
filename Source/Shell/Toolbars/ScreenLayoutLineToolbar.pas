@@ -161,7 +161,7 @@ begin
   inherited Create(AOwner);
   Parent := AHost;
   Align := alRight;
-  Width := LINE_TOOLBAR_WIDTH;
+  Width := MulDiv(LINE_TOOLBAR_WIDTH, CurrentPPI, 96);
   Color := COLOR_BACKGROUND;
   ParentBackground := False;
   DoubleBuffered := True;
@@ -235,6 +235,10 @@ var
   ParentForm: TCustomForm;
   Style: TFontStyle;
   TextAlignment: TScreenLayoutTextAlignment;
+  function Logical(Value: Integer): Integer;
+  begin
+    Result := MulDiv(Value, CurrentPPI, 96);
+  end;
 begin
   FFontFamilyCombo := TComboBox.Create(Self);
   FFontFamilyCombo.Parent := Self;
@@ -243,7 +247,7 @@ begin
   FFontFamilyCombo.Color := COLOR_EDIT;
   FFontFamilyCombo.Font.Color := COLOR_TEXT;
   FFontFamilyCombo.Font.Name := 'Segoe UI';
-  FFontFamilyCombo.Font.Height := -12;
+  FFontFamilyCombo.Font.Height := -Logical(12);
   FFontFamilyCombo.Items.Assign(Screen.Fonts);
   FFontFamilyCombo.Sorted := True;
   FFontFamilyCombo.OnChange := FontFamilyChanged;
@@ -299,19 +303,19 @@ begin
   FStrokeWidthEdit.Color := COLOR_EDIT;
   FStrokeWidthEdit.Font.Color := COLOR_TEXT;
   FStrokeWidthEdit.Font.Name := 'Segoe UI';
-  FStrokeWidthEdit.Font.Height := -12;
+  FStrokeWidthEdit.Font.Height := -Logical(12);
   FStrokeWidthEdit.OnExit := EditExit;
   FStrokeWidthEdit.OnKeyDown := EditKeyDown;
 
   FMifStrokeStyleCombo := TVectArtMifStrokeStyleCombo.Create(Self);
   FMifStrokeStyleCombo.Parent := Self;
   FMifStrokeStyleCombo.Style := csOwnerDrawFixed;
-  FMifStrokeStyleCombo.ItemHeight := 22;
+  FMifStrokeStyleCombo.ItemHeight := Logical(22);
   FMifStrokeStyleCombo.DropDownCount := 9;
   FMifStrokeStyleCombo.Color := COLOR_EDIT;
   FMifStrokeStyleCombo.Font.Color := COLOR_TEXT;
   FMifStrokeStyleCombo.Font.Name := 'Segoe UI';
-  FMifStrokeStyleCombo.Font.Height := -12;
+  FMifStrokeStyleCombo.Font.Height := -Logical(12);
   FMifStrokeStyleCombo.OnChange := StyleChanged;
 
   FDetailsButton := TVectArtDarkButton.Create(Self);
@@ -325,7 +329,7 @@ begin
   FDetailsPanel.BevelOuter := bvRaised;
   FDetailsPanel.Color := COLOR_BACKGROUND;
   FDetailsPanel.ParentBackground := False;
-  FDetailsPanel.SetBounds(0, 0, 420, 96);
+  FDetailsPanel.SetBounds(0, 0, Logical(420), Logical(96));
   FDetailsPanel.Visible := False;
 
   FTextAlignmentPanel := TPanel.Create(Self);
@@ -333,7 +337,7 @@ begin
   FTextAlignmentPanel.BevelOuter := bvRaised;
   FTextAlignmentPanel.Color := COLOR_BACKGROUND;
   FTextAlignmentPanel.ParentBackground := False;
-  FTextAlignmentPanel.SetBounds(0, 0, 112, 106);
+  FTextAlignmentPanel.SetBounds(0, 0, Logical(112), Logical(106));
   FTextAlignmentPanel.Visible := False;
   for TextAlignment := Low(TScreenLayoutTextAlignment) to
     High(TScreenLayoutTextAlignment) do
@@ -343,8 +347,8 @@ begin
     FTextAlignmentButtons[TextAlignment].Parent := FTextAlignmentPanel;
     FTextAlignmentButtons[TextAlignment].Alignment := TextAlignment;
     FTextAlignmentButtons[TextAlignment].SetBounds(
-      5 + (Ord(TextAlignment) mod 3) * 35,
-      5 + (Ord(TextAlignment) div 3) * 32, 32, 29);
+      Logical(5 + (Ord(TextAlignment) mod 3) * 35),
+      Logical(5 + (Ord(TextAlignment) div 3) * 32), Logical(32), Logical(29));
     FTextAlignmentButtons[TextAlignment].OnClick := TextAlignmentClick;
     // 全体枠フィット中は上下方向の余白がないため、中段の左右配置だけを操作可能にする。
     FTextAlignmentButtons[TextAlignment].Enabled :=
@@ -356,7 +360,7 @@ begin
   FTextPathAttachmentPanel.BevelOuter := bvRaised;
   FTextPathAttachmentPanel.Color := COLOR_BACKGROUND;
   FTextPathAttachmentPanel.ParentBackground := False;
-  FTextPathAttachmentPanel.SetBounds(0, 0, 77, 69);
+  FTextPathAttachmentPanel.SetBounds(0, 0, Logical(77), Logical(69));
   FTextPathAttachmentPanel.Visible := False;
   for Attachment := Low(TScreenLayoutTextPathAttachment) to
     High(TScreenLayoutTextPathAttachment) do
@@ -367,38 +371,40 @@ begin
       FTextPathAttachmentPanel;
     FTextPathAttachmentButtons[Attachment].Attachment := Attachment;
     FTextPathAttachmentButtons[Attachment].SetBounds(
-      5 + (Ord(Attachment) mod 2) * 35,
-      5 + (Ord(Attachment) div 2) * 32, 32, 29);
+      Logical(5 + (Ord(Attachment) mod 2) * 35),
+      Logical(5 + (Ord(Attachment) div 2) * 32), Logical(32), Logical(29));
     FTextPathAttachmentButtons[Attachment].OnClick :=
       TextPathAttachmentClick;
   end;
 
   // 線幅は即時操作用にツールバーへ残し、低頻度項目だけを詳細へ収容する。
   FMifStrokeStyleCombo.Parent := FDetailsPanel;
-  FMifStrokeStyleCombo.SetBounds(78, 8, 260, 25);
+  FMifStrokeStyleCombo.SetBounds(Logical(78), Logical(8), Logical(260),
+    Logical(25));
 
   CaptionLabel := TLabel.Create(Self);
   CaptionLabel.Parent := FDetailsPanel;
   CaptionLabel.Caption := UnicodeText([$7A2E, $985E]);
   CaptionLabel.Font.Name := 'Segoe UI';
-  CaptionLabel.Font.Height := -12;
+  CaptionLabel.Font.Height := -Logical(12);
   CaptionLabel.Font.Color := COLOR_LABEL;
-  CaptionLabel.SetBounds(12, 13, 40, 20);
+  CaptionLabel.SetBounds(Logical(12), Logical(13), Logical(40), Logical(20));
 
   CaptionLabel := TLabel.Create(Self);
   CaptionLabel.Parent := FDetailsPanel;
   CaptionLabel.Caption := UnicodeText([$5148, $7AEF, $5F62, $72B6]);
   CaptionLabel.Font.Name := 'Segoe UI';
-  CaptionLabel.Font.Height := -12;
+  CaptionLabel.Font.Height := -Logical(12);
   CaptionLabel.Font.Color := COLOR_LABEL;
-  CaptionLabel.SetBounds(12, 60, 60, 20);
+  CaptionLabel.SetBounds(Logical(12), Logical(60), Logical(60), Logical(20));
 
   for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
   begin
     FLineCapButtons[Cap] := TVectArtLineCapButton.Create(Self);
     FLineCapButtons[Cap].Parent := FDetailsPanel;
     FLineCapButtons[Cap].LineCap := Cap;
-    FLineCapButtons[Cap].SetBounds(78 + Ord(Cap) * 46, 51, 40, 34);
+    FLineCapButtons[Cap].SetBounds(Logical(78 + Ord(Cap) * 46), Logical(51),
+      Logical(40), Logical(34));
     FLineCapButtons[Cap].OnClick := LineCapClick;
     FLineCapButtons[Cap].ShowHint := True;
   end;
@@ -843,12 +849,14 @@ begin
   Canvas.FillRect(ClientRect);
   Canvas.Brush.Style := bsClear;
   Canvas.Font.Name := 'Segoe UI';
-  Canvas.Font.Height := -12;
+  Canvas.Font.Height := -MulDiv(12, CurrentPPI, 96);
   Canvas.Font.Color := COLOR_TEXT;
   if (FFontFamilyCombo <> nil) and FFontFamilyCombo.Visible then
-    Canvas.TextOut(8, 13, UnicodeText([$30D5, $30A9, $30F3, $30C8]))
+    Canvas.TextOut(MulDiv(8, CurrentPPI, 96), MulDiv(13, CurrentPPI, 96),
+      UnicodeText([$30D5, $30A9, $30F3, $30C8]))
   else
-    Canvas.TextOut(8, 13, UnicodeText([$592A, $3055]));
+    Canvas.TextOut(MulDiv(8, CurrentPPI, 96), MulDiv(13, CurrentPPI, 96),
+      UnicodeText([$592A, $3055]));
 end;
 
 procedure TVectArtLineToolbarControl.RefreshState;
@@ -904,7 +912,7 @@ begin
       for I := 0 to High(TextIndices) do
         AllRegularTexts := AllRegularTexts and
           not (FDocument[TextIndices[I]] is TScreenLayoutTextPathLayer);
-      Width := TEXT_TOOLBAR_WIDTH;
+      Width := MulDiv(TEXT_TOOLBAR_WIDTH, CurrentPPI, 96);
       Visible := True;
       FDetailsPanel.Visible := False;
       FFontFamilyCombo.Visible := True;
@@ -991,7 +999,7 @@ begin
     end
     else
     begin
-      Width := LINE_TOOLBAR_WIDTH;
+      Width := MulDiv(LINE_TOOLBAR_WIDTH, CurrentPPI, 96);
       FFontFamilyCombo.Visible := False;
       FTextAlignmentButton.Visible := False;
       FTextAlignmentPanel.Visible := False;
@@ -1095,26 +1103,36 @@ var
   Style: TFontStyle;
   StyleLeft: Integer;
   TrackWidth: Integer;
+  function Logical(Value: Integer): Integer;
+  begin
+    Result := MulDiv(Value, CurrentPPI, 96);
+  end;
 begin
   inherited Resize;
   if FFontFamilyCombo <> nil then
-    FFontFamilyCombo.SetBounds(60, 8, 180, 25);
-  StyleLeft := 246;
+    FFontFamilyCombo.SetBounds(Logical(60), Logical(8), Logical(180),
+      Logical(25));
+  StyleLeft := Logical(246);
   for Style := Low(TFontStyle) to High(TFontStyle) do
     if FFontStyleButtons[Style] <> nil then
-      FFontStyleButtons[Style].SetBounds(StyleLeft + Ord(Style) * 32,
-        6, 28, 29);
+      FFontStyleButtons[Style].SetBounds(StyleLeft + Ord(Style) * Logical(32),
+        Logical(6), Logical(28), Logical(29));
   if FTextAlignmentButton <> nil then
-    FTextAlignmentButton.SetBounds(374, 6, 34, 29);
+    FTextAlignmentButton.SetBounds(Logical(374), Logical(6), Logical(34),
+      Logical(29));
   if FTextPathAttachmentButton <> nil then
-    FTextPathAttachmentButton.SetBounds(374, 6, 34, 29);
-  TrackWidth := Max(Width - 176, 60);
+    FTextPathAttachmentButton.SetBounds(Logical(374), Logical(6), Logical(34),
+      Logical(29));
+  TrackWidth := Max(Width - Logical(176), Logical(60));
   if FStrokeWidthTrackBar <> nil then
-    FStrokeWidthTrackBar.SetBounds(40, 4, TrackWidth, 34);
+    FStrokeWidthTrackBar.SetBounds(Logical(40), Logical(4), TrackWidth,
+      Logical(34));
   if FStrokeWidthEdit <> nil then
-    FStrokeWidthEdit.SetBounds(Width - 128, 8, 48, 25);
+    FStrokeWidthEdit.SetBounds(Width - Logical(128), Logical(8), Logical(48),
+      Logical(25));
   if FDetailsButton <> nil then
-    FDetailsButton.SetBounds(Width - 70, 8, 60, 25);
+    FDetailsButton.SetBounds(Width - Logical(70), Logical(8), Logical(60),
+      Logical(25));
 end;
 
 function TVectArtLineToolbarControl.SelectedTextIndices: TArray<Integer>;

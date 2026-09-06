@@ -12,10 +12,16 @@ uses
     '..\Source\Core\Model\ScreenLayoutDocument.pas',
   ScreenLayoutEditorState in
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
+  ScreenLayoutEditHistory in
+    '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutObjectContextMenu in
-    '..\Source\Shell\ScreenLayoutObjectContextMenu.pas',
+    '..\Source\Shell\Menus\ScreenLayoutObjectContextMenu.pas',
   ScreenLayoutTextContextMenu in
-    '..\Source\Shell\ScreenLayoutTextContextMenu.pas',
+    '..\Source\Shell\Menus\ScreenLayoutTextContextMenu.pas',
+  ScreenLayoutTransformContextMenu in
+    '..\Source\Shell\Menus\ScreenLayoutTransformContextMenu.pas',
+  ScreenLayoutArrangementContextMenu in
+    '..\Source\Shell\Menus\ScreenLayoutArrangementContextMenu.pas',
   VectArtDarkMenuGroup in
     '..\Lib\DarkMenu\VectArtDarkMenuGroup.pas',
   VectArtDarkPopupMenu in
@@ -45,6 +51,7 @@ var
   Document: TVectArtDocument;
   Form: TForm;
   Group: TScreenLayoutGroupLayer;
+  History: TVectArtEditHistory;
   MenuGroup: TVectArtDarkMenuGroup;
   RectangleData: TVectArtRectangleData;
   State: TVectArtEditorState;
@@ -53,12 +60,19 @@ begin
   Form := TForm.Create(nil);
   Document := TVectArtDocument.Create;
   State := TVectArtEditorState.Create;
+  History := TVectArtEditHistory.Create;
   try
     MenuGroup := TVectArtDarkMenuGroup.Create(Form);
     ContextMenu := TScreenLayoutObjectContextMenu.Create(Form, Form,
       MenuGroup, Document, State);
     ContextMenu.RegisterContributor(TScreenLayoutTextMenuContributor.Create(
       ContextMenu, nil));
+    ContextMenu.RegisterContributor(
+      TScreenLayoutArrangementMenuContributor.Create(ContextMenu, Document,
+        History, State));
+    ContextMenu.RegisterContributor(
+      TScreenLayoutTransformMenuContributor.Create(ContextMenu, Document,
+        History, State));
 
     RectangleData := Default(TVectArtRectangleData);
     RectangleData.Bounds := TRectF.Create(-50, -50, 50, 50);
@@ -68,6 +82,12 @@ begin
     Document.InsertRectangle(1, RectangleData);
     Document.SelectedIndex := 1;
     ContextMenu.ShowForObject(nil, Point(0, 0));
+    Check(FindMenuItem(ContextMenu.Menu, '切り取り    Ctrl+X'),
+      'name and shortcut item caption compatibility was lost');
+    Check(FindMenuItem(ContextMenu.Menu, '変形  >'),
+      'common transform submenu was not added');
+    Check(not FindMenuItem(ContextMenu.Menu, '整列と均等配置  >'),
+      'arrangement submenu was added for a single selection');
     Check(not FindMenuItem(ContextMenu.Menu, 'テキストの分解  >'),
       'text-only item was added for a rectangle');
 
@@ -90,6 +110,8 @@ begin
       'overlapping layer selection submenu was not added');
     Document.SetSelectedLayers([1, 2]);
     ContextMenu.ShowForObject(nil, Point(0, 0));
+    Check(FindMenuItem(ContextMenu.Menu, '整列と均等配置  >'),
+      'arrangement submenu was not added for a multiple selection');
     Check(not FindMenuItem(ContextMenu.Menu, 'テキストの分解  >'),
       'single-text item was added for a mixed multiple selection');
 
@@ -104,6 +126,7 @@ begin
     Check(FindMenuItem(ContextMenu.Menu, 'テキストの分解  >'),
       'registered text item was not added for an open-group text layer');
   finally
+    History.Free;
     State.Free;
     Document.Free;
     Form.Free;

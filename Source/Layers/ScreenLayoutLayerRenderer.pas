@@ -28,6 +28,9 @@ type
     FThumbnailBitmap: TBitmap;
     FThumbnailBuffer: TVectArtRenderBuffer;
     FThumbnailRevision: Int64;
+    FPPI: Integer;
+    function Scale(Value: Integer): Integer;
+    procedure SetPPI(const Value: Integer);
     procedure EnsureSelectionVisible(const Bounds: TRect);
     procedure ClampScrollOffset(const Bounds: TRect);
     function DisplayedLayerCount: Integer;
@@ -94,6 +97,8 @@ type
       write FEditorState;
     // 現在の先頭側へのスクロール量。
     property ScrollOffset: Integer read FScrollOffset write SetScrollOffset;
+    // 行、サムネイル、状態アイコン、当たり判定へ適用する画面DPI。
+    property PPI: Integer read FPPI write SetPPI;
   end;
 
 implementation
@@ -129,6 +134,30 @@ begin
   FThumbnailBitmap := Vcl.Graphics.TBitmap.Create;
   FThumbnailBuffer := TVectArtRenderBuffer.Create;
   FThumbnailRevision := -1;
+  FLastSelectedIndex := -2;
+  FPPI := 96;
+end;
+
+function TVectArtLayerRenderer.Scale(Value: Integer): Integer;
+begin
+  Result := MulDiv(Value, FPPI, 96);
+end;
+
+procedure TVectArtLayerRenderer.SetPPI(const Value: Integer);
+var
+  NewPPI: Integer;
+  OldPPI: Integer;
+begin
+  NewPPI := Value;
+  if NewPPI <= 0 then
+    NewPPI := 96;
+  if FPPI = NewPPI then
+    Exit;
+  OldPPI := FPPI;
+  FPPI := NewPPI;
+  if OldPPI > 0 then
+    FScrollOffset := MulDiv(FScrollOffset, NewPPI, OldPPI);
+  FRenderedThumbnails.Clear;
   FLastSelectedIndex := -2;
 end;
 
@@ -253,7 +282,7 @@ begin
   if (OldIndex >= 0) and (NewIndex >= 0) then
   begin
     Inc(FScrollOffset, (NewIndex - OldIndex) *
-      (LAYER_ROW_HEIGHT + LAYER_GAP));
+      Scale(LAYER_ROW_HEIGHT + LAYER_GAP));
     FLastSelectedIndex := -2;
   end;
 end;
@@ -274,7 +303,7 @@ begin
       GroupRect := LayerItemRect(Bounds, I);
       RangeRect := LayerItemRect(Bounds,
         FEntries[I - 1].GroupRangeStart);
-      X := Bounds.Left + 3 + FEntries[I - 1].Depth * 3;
+      X := Bounds.Left + Scale(3 + FEntries[I - 1].Depth * 3);
       ACanvas.MoveTo(GroupRect.Left, GroupRect.Top);
       ACanvas.LineTo(X, GroupRect.Top);
       ACanvas.LineTo(X, RangeRect.Bottom);
@@ -298,7 +327,7 @@ begin
       GroupRect := LayerItemRect(Bounds, I);
       RangeRect := LayerItemRect(Bounds,
         FEntries[I - 1].GroupRangeStart);
-      X := Bounds.Left + 3 + FEntries[I - 1].Depth * 3;
+      X := Bounds.Left + Scale(3 + FEntries[I - 1].Depth * 3);
       ACanvas.MoveTo(GroupRect.Left, GroupRect.Top);
       ACanvas.LineTo(X, GroupRect.Top);
       ACanvas.LineTo(X, RangeRect.Bottom);
@@ -320,8 +349,8 @@ begin
     FScrollOffset := 0;
     Exit;
   end;
-  ContentTop := Bounds.Top + LAYER_LIST_PADDING;
-  ContentBottom := Bounds.Bottom - LAYER_LIST_PADDING;
+  ContentTop := Bounds.Top + Scale(LAYER_LIST_PADDING);
+  ContentBottom := Bounds.Bottom - Scale(LAYER_LIST_PADDING);
   MaximumOffset := MaximumScrollOffset(Bounds);
   FScrollOffset := EnsureRange(FScrollOffset, 0, MaximumOffset);
   SelectedIndex := DisplayedSelectedIndex;
@@ -375,8 +404,8 @@ begin
     Destination := FThumbnailBitmap.ScanLine[Y];
     for X := 0 to ThumbnailRect.Width - 1 do
     begin
-      if Odd((X div THUMBNAIL_CHECKER_SIZE) +
-        (Y div THUMBNAIL_CHECKER_SIZE)) then
+      if Odd((X div Scale(THUMBNAIL_CHECKER_SIZE)) +
+        (Y div Scale(THUMBNAIL_CHECKER_SIZE))) then
         BackgroundColor := TColor($00B8B8B8)
       else
         BackgroundColor := clWhite;
@@ -427,14 +456,15 @@ begin
     ACanvas.Brush.Style := bsSolid;
     ACanvas.Brush.Color := COLOR_ROW_ACTIVE;
     ACanvas.FillRect(Rect(ItemRect.Left, ItemRect.Top,
-      ItemRect.Left + 3, ItemRect.Bottom));
+      ItemRect.Left + Scale(3), ItemRect.Bottom));
     ACanvas.Brush.Style := bsClear;
   end;
 
-  ThumbnailArea := Rect(ItemRect.Left + 30,
-    ItemRect.Top + (ItemRect.Height - THUMBNAIL_HEIGHT) div 2,
-    Min(ItemRect.Left + 30 + THUMBNAIL_WIDTH, ItemRect.Right - 8),
-    ItemRect.Top + (ItemRect.Height + THUMBNAIL_HEIGHT) div 2);
+  ThumbnailArea := Rect(ItemRect.Left + Scale(30),
+    ItemRect.Top + (ItemRect.Height - Scale(THUMBNAIL_HEIGHT)) div 2,
+    Min(ItemRect.Left + Scale(30 + THUMBNAIL_WIDTH),
+      ItemRect.Right - Scale(8)),
+    ItemRect.Top + (ItemRect.Height + Scale(THUMBNAIL_HEIGHT)) div 2);
   CanvasLayer := nil;
   if FDocument <> nil then
     CanvasLayer := FDocument.CanvasLayer;
@@ -454,19 +484,21 @@ begin
   else
   begin
     Row := 0;
-    while ThumbnailRect.Top + Row * THUMBNAIL_CHECKER_SIZE <
+    while ThumbnailRect.Top + Row * Scale(THUMBNAIL_CHECKER_SIZE) <
       ThumbnailRect.Bottom do
     begin
       Column := 0;
-      while ThumbnailRect.Left + Column * THUMBNAIL_CHECKER_SIZE <
+      while ThumbnailRect.Left + Column * Scale(THUMBNAIL_CHECKER_SIZE) <
         ThumbnailRect.Right do
       begin
         CellRect := Rect(
-          ThumbnailRect.Left + Column * THUMBNAIL_CHECKER_SIZE,
-          ThumbnailRect.Top + Row * THUMBNAIL_CHECKER_SIZE,
-          Min(ThumbnailRect.Left + (Column + 1) * THUMBNAIL_CHECKER_SIZE,
+          ThumbnailRect.Left + Column * Scale(THUMBNAIL_CHECKER_SIZE),
+          ThumbnailRect.Top + Row * Scale(THUMBNAIL_CHECKER_SIZE),
+          Min(ThumbnailRect.Left + (Column + 1) *
+            Scale(THUMBNAIL_CHECKER_SIZE),
             ThumbnailRect.Right),
-          Min(ThumbnailRect.Top + (Row + 1) * THUMBNAIL_CHECKER_SIZE,
+          Min(ThumbnailRect.Top + (Row + 1) *
+            Scale(THUMBNAIL_CHECKER_SIZE),
             ThumbnailRect.Bottom));
         if Odd(Row + Column) then
           ACanvas.Brush.Color := TColor($00B8B8B8)
@@ -491,16 +523,20 @@ begin
     if (FEditorState <> nil) and FEditorState.IsGroupInOpenPath(
       TScreenLayoutGroupLayer(Layer)) then
     begin
-      ExpandPoints[0] := Point(ExpandRect.Left + 5, ExpandRect.Top + 4);
-      ExpandPoints[1] := Point(ExpandRect.Right - 5, ExpandRect.Top + 4);
+      ExpandPoints[0] := Point(ExpandRect.Left + Scale(5),
+        ExpandRect.Top + Scale(4));
+      ExpandPoints[1] := Point(ExpandRect.Right - Scale(5),
+        ExpandRect.Top + Scale(4));
       ExpandPoints[2] := Point((ExpandRect.Left + ExpandRect.Right) div 2,
-        ExpandRect.Bottom - 3);
+        ExpandRect.Bottom - Scale(3));
     end
     else
     begin
-      ExpandPoints[0] := Point(ExpandRect.Left + 6, ExpandRect.Top + 2);
-      ExpandPoints[1] := Point(ExpandRect.Left + 6, ExpandRect.Bottom - 2);
-      ExpandPoints[2] := Point(ExpandRect.Right - 4,
+      ExpandPoints[0] := Point(ExpandRect.Left + Scale(6),
+        ExpandRect.Top + Scale(2));
+      ExpandPoints[1] := Point(ExpandRect.Left + Scale(6),
+        ExpandRect.Bottom - Scale(2));
+      ExpandPoints[2] := Point(ExpandRect.Right - Scale(4),
         (ExpandRect.Top + ExpandRect.Bottom) div 2);
     end;
     ACanvas.Brush.Style := bsSolid;
@@ -512,23 +548,25 @@ begin
   LockRect := LockButtonRect(ItemRect);
   ACanvas.Pen.Color := COLOR_TEXT_SECONDARY;
   ACanvas.Brush.Style := bsClear;
-  ACanvas.Ellipse(VisibilityRect.Left + 2, VisibilityRect.Top + 5,
-    VisibilityRect.Right - 2, VisibilityRect.Bottom - 5);
+  ACanvas.Ellipse(VisibilityRect.Left + Scale(2),
+    VisibilityRect.Top + Scale(5), VisibilityRect.Right - Scale(2),
+    VisibilityRect.Bottom - Scale(5));
   if Layer.Visible then
   begin
     ACanvas.Brush.Style := bsSolid;
     ACanvas.Brush.Color := COLOR_TEXT_PRIMARY;
-    ACanvas.Ellipse(VisibilityRect.Left + 8, VisibilityRect.Top + 8,
-      VisibilityRect.Left + 12, VisibilityRect.Top + 12);
+    ACanvas.Ellipse(VisibilityRect.Left + Scale(8),
+      VisibilityRect.Top + Scale(8), VisibilityRect.Left + Scale(12),
+      VisibilityRect.Top + Scale(12));
   end;
   ACanvas.Brush.Style := bsClear;
-  ACanvas.Rectangle(LockRect.Left + 3, LockRect.Top + 8,
-    LockRect.Right - 3, LockRect.Bottom - 2);
-  ACanvas.MoveTo(LockRect.Left + 6, LockRect.Top + 8);
-  ACanvas.LineTo(LockRect.Left + 6, LockRect.Top + 3);
-  ACanvas.LineTo(LockRect.Right - 6, LockRect.Top + 3);
+  ACanvas.Rectangle(LockRect.Left + Scale(3), LockRect.Top + Scale(8),
+    LockRect.Right - Scale(3), LockRect.Bottom - Scale(2));
+  ACanvas.MoveTo(LockRect.Left + Scale(6), LockRect.Top + Scale(8));
+  ACanvas.LineTo(LockRect.Left + Scale(6), LockRect.Top + Scale(3));
+  ACanvas.LineTo(LockRect.Right - Scale(6), LockRect.Top + Scale(3));
   if Layer.Locked then
-    ACanvas.LineTo(LockRect.Right - 6, LockRect.Top + 8);
+    ACanvas.LineTo(LockRect.Right - Scale(6), LockRect.Top + Scale(8));
 end;
 
 procedure TVectArtLayerRenderer.DrawLayerItem(ACanvas: TDirect2DCanvas;
@@ -559,14 +597,15 @@ begin
     ACanvas.Brush.Style := bsSolid;
     ACanvas.Brush.Color := COLOR_ROW_ACTIVE;
     ACanvas.FillRect(Rect(ItemRect.Left, ItemRect.Top,
-      ItemRect.Left + 3, ItemRect.Bottom));
+      ItemRect.Left + Scale(3), ItemRect.Bottom));
     ACanvas.Brush.Style := bsClear;
   end;
 
-  ThumbnailArea := Rect(ItemRect.Left + 30,
-    ItemRect.Top + (ItemRect.Height - THUMBNAIL_HEIGHT) div 2,
-    Min(ItemRect.Left + 30 + THUMBNAIL_WIDTH, ItemRect.Right - 8),
-    ItemRect.Top + (ItemRect.Height + THUMBNAIL_HEIGHT) div 2);
+  ThumbnailArea := Rect(ItemRect.Left + Scale(30),
+    ItemRect.Top + (ItemRect.Height - Scale(THUMBNAIL_HEIGHT)) div 2,
+    Min(ItemRect.Left + Scale(30 + THUMBNAIL_WIDTH),
+      ItemRect.Right - Scale(8)),
+    ItemRect.Top + (ItemRect.Height + Scale(THUMBNAIL_HEIGHT)) div 2);
   CanvasLayer := nil;
   if FDocument <> nil then
     CanvasLayer := FDocument.CanvasLayer;
@@ -586,19 +625,21 @@ begin
   else
   begin
     Row := 0;
-    while ThumbnailRect.Top + Row * THUMBNAIL_CHECKER_SIZE <
+    while ThumbnailRect.Top + Row * Scale(THUMBNAIL_CHECKER_SIZE) <
       ThumbnailRect.Bottom do
     begin
       Column := 0;
-      while ThumbnailRect.Left + Column * THUMBNAIL_CHECKER_SIZE <
+      while ThumbnailRect.Left + Column * Scale(THUMBNAIL_CHECKER_SIZE) <
         ThumbnailRect.Right do
       begin
         CellRect := Rect(
-          ThumbnailRect.Left + Column * THUMBNAIL_CHECKER_SIZE,
-          ThumbnailRect.Top + Row * THUMBNAIL_CHECKER_SIZE,
-          Min(ThumbnailRect.Left + (Column + 1) * THUMBNAIL_CHECKER_SIZE,
+          ThumbnailRect.Left + Column * Scale(THUMBNAIL_CHECKER_SIZE),
+          ThumbnailRect.Top + Row * Scale(THUMBNAIL_CHECKER_SIZE),
+          Min(ThumbnailRect.Left + (Column + 1) *
+            Scale(THUMBNAIL_CHECKER_SIZE),
             ThumbnailRect.Right),
-          Min(ThumbnailRect.Top + (Row + 1) * THUMBNAIL_CHECKER_SIZE,
+          Min(ThumbnailRect.Top + (Row + 1) *
+            Scale(THUMBNAIL_CHECKER_SIZE),
             ThumbnailRect.Bottom));
         if Odd(Row + Column) then
           ACanvas.Brush.Color := TColor($00B8B8B8)
@@ -623,16 +664,20 @@ begin
     if (FEditorState <> nil) and FEditorState.IsGroupInOpenPath(
       TScreenLayoutGroupLayer(Layer)) then
     begin
-      ExpandPoints[0] := Point(ExpandRect.Left + 5, ExpandRect.Top + 4);
-      ExpandPoints[1] := Point(ExpandRect.Right - 5, ExpandRect.Top + 4);
+      ExpandPoints[0] := Point(ExpandRect.Left + Scale(5),
+        ExpandRect.Top + Scale(4));
+      ExpandPoints[1] := Point(ExpandRect.Right - Scale(5),
+        ExpandRect.Top + Scale(4));
       ExpandPoints[2] := Point((ExpandRect.Left + ExpandRect.Right) div 2,
-        ExpandRect.Bottom - 3);
+        ExpandRect.Bottom - Scale(3));
     end
     else
     begin
-      ExpandPoints[0] := Point(ExpandRect.Left + 6, ExpandRect.Top + 2);
-      ExpandPoints[1] := Point(ExpandRect.Left + 6, ExpandRect.Bottom - 2);
-      ExpandPoints[2] := Point(ExpandRect.Right - 4,
+      ExpandPoints[0] := Point(ExpandRect.Left + Scale(6),
+        ExpandRect.Top + Scale(2));
+      ExpandPoints[1] := Point(ExpandRect.Left + Scale(6),
+        ExpandRect.Bottom - Scale(2));
+      ExpandPoints[2] := Point(ExpandRect.Right - Scale(4),
         (ExpandRect.Top + ExpandRect.Bottom) div 2);
     end;
     ACanvas.Brush.Style := bsSolid;
@@ -644,23 +689,25 @@ begin
   LockRect := LockButtonRect(ItemRect);
   ACanvas.Pen.Color := COLOR_TEXT_SECONDARY;
   ACanvas.Brush.Style := bsClear;
-  ACanvas.Ellipse(VisibilityRect.Left + 2, VisibilityRect.Top + 5,
-    VisibilityRect.Right - 2, VisibilityRect.Bottom - 5);
+  ACanvas.Ellipse(VisibilityRect.Left + Scale(2),
+    VisibilityRect.Top + Scale(5), VisibilityRect.Right - Scale(2),
+    VisibilityRect.Bottom - Scale(5));
   if Layer.Visible then
   begin
     ACanvas.Brush.Style := bsSolid;
     ACanvas.Brush.Color := COLOR_TEXT_PRIMARY;
-    ACanvas.Ellipse(VisibilityRect.Left + 8, VisibilityRect.Top + 8,
-      VisibilityRect.Left + 12, VisibilityRect.Top + 12);
+    ACanvas.Ellipse(VisibilityRect.Left + Scale(8),
+      VisibilityRect.Top + Scale(8), VisibilityRect.Left + Scale(12),
+      VisibilityRect.Top + Scale(12));
   end;
   ACanvas.Brush.Style := bsClear;
-  ACanvas.Rectangle(LockRect.Left + 3, LockRect.Top + 8,
-    LockRect.Right - 3, LockRect.Bottom - 2);
-  ACanvas.MoveTo(LockRect.Left + 6, LockRect.Top + 8);
-  ACanvas.LineTo(LockRect.Left + 6, LockRect.Top + 3);
-  ACanvas.LineTo(LockRect.Right - 6, LockRect.Top + 3);
+  ACanvas.Rectangle(LockRect.Left + Scale(3), LockRect.Top + Scale(8),
+    LockRect.Right - Scale(3), LockRect.Bottom - Scale(2));
+  ACanvas.MoveTo(LockRect.Left + Scale(6), LockRect.Top + Scale(8));
+  ACanvas.LineTo(LockRect.Left + Scale(6), LockRect.Top + Scale(3));
+  ACanvas.LineTo(LockRect.Right - Scale(6), LockRect.Top + Scale(3));
   if Layer.Locked then
-    ACanvas.LineTo(LockRect.Right - 6, LockRect.Top + 8);
+    ACanvas.LineTo(LockRect.Right - Scale(6), LockRect.Top + Scale(8));
 end;
 
 procedure TVectArtLayerRenderer.SetDocument(const Value: TVectArtDocument);
@@ -824,11 +871,11 @@ var
 begin
   if Index <= 0 then
     Exit(TRect.Empty);
-  ItemBottom := Bounds.Bottom - LAYER_LIST_PADDING -
-    (Index - 1) * (LAYER_ROW_HEIGHT + LAYER_GAP) + FScrollOffset;
-  Result := Rect(Bounds.Left + LAYER_LIST_PADDING,
-    ItemBottom - LAYER_ROW_HEIGHT,
-    Bounds.Right - LAYER_LIST_PADDING, ItemBottom);
+  ItemBottom := Bounds.Bottom - Scale(LAYER_LIST_PADDING) -
+    (Index - 1) * Scale(LAYER_ROW_HEIGHT + LAYER_GAP) + FScrollOffset;
+  Result := Rect(Bounds.Left + Scale(LAYER_LIST_PADDING),
+    ItemBottom - Scale(LAYER_ROW_HEIGHT),
+    Bounds.Right - Scale(LAYER_LIST_PADDING), ItemBottom);
 end;
 
 function TVectArtLayerRenderer.LayerAt(Index: Integer): TVectArtLayer;
@@ -871,14 +918,15 @@ begin
   ItemCount := DisplayedLayerCount;
   if ItemCount = 0 then
     Exit(0);
-  ContentHeight := ItemCount * LAYER_ROW_HEIGHT +
-    Max(ItemCount - 1, 0) * LAYER_GAP + 2 * LAYER_LIST_PADDING;
+  ContentHeight := ItemCount * Scale(LAYER_ROW_HEIGHT) +
+    Max(ItemCount - 1, 0) * Scale(LAYER_GAP) +
+    2 * Scale(LAYER_LIST_PADDING);
   Result := Max(ContentHeight - Bounds.Height, 0);
 end;
 
 function TVectArtLayerRenderer.ScrollStep: Integer;
 begin
-  Result := LAYER_ROW_HEIGHT + LAYER_GAP;
+  Result := Scale(LAYER_ROW_HEIGHT + LAYER_GAP);
 end;
 
 procedure TVectArtLayerRenderer.SetScrollOffset(Value: Integer);
@@ -889,27 +937,28 @@ end;
 function TVectArtLayerRenderer.LockButtonRect(
   const ItemRect: TRect): TRect;
 begin
-  Result := Rect(ItemRect.Left + STATE_COLUMN_LEFT,
-    ItemRect.Top + LOCK_BUTTON_TOP,
-    ItemRect.Left + STATE_COLUMN_LEFT + STATE_BUTTON_SIZE,
-    ItemRect.Top + LOCK_BUTTON_TOP + STATE_BUTTON_SIZE);
+  Result := Rect(ItemRect.Left + Scale(STATE_COLUMN_LEFT),
+    ItemRect.Top + Scale(LOCK_BUTTON_TOP),
+    ItemRect.Left + Scale(STATE_COLUMN_LEFT + STATE_BUTTON_SIZE),
+    ItemRect.Top + Scale(LOCK_BUTTON_TOP + STATE_BUTTON_SIZE));
 end;
 
 function TVectArtLayerRenderer.ExpandButtonRect(
   const ItemRect: TRect): TRect;
 begin
-  Result := Rect(ItemRect.Left + STATE_COLUMN_LEFT, ItemRect.Top + 1,
-    ItemRect.Left + STATE_COLUMN_LEFT + STATE_BUTTON_SIZE,
-    ItemRect.Top + 15);
+  Result := Rect(ItemRect.Left + Scale(STATE_COLUMN_LEFT),
+    ItemRect.Top + Scale(1),
+    ItemRect.Left + Scale(STATE_COLUMN_LEFT + STATE_BUTTON_SIZE),
+    ItemRect.Top + Scale(15));
 end;
 
 function TVectArtLayerRenderer.VisibilityButtonRect(
   const ItemRect: TRect): TRect;
 begin
-  Result := Rect(ItemRect.Left + STATE_COLUMN_LEFT,
-    ItemRect.Top + VISIBILITY_BUTTON_TOP,
-    ItemRect.Left + STATE_COLUMN_LEFT + STATE_BUTTON_SIZE,
-    ItemRect.Top + VISIBILITY_BUTTON_TOP + STATE_BUTTON_SIZE);
+  Result := Rect(ItemRect.Left + Scale(STATE_COLUMN_LEFT),
+    ItemRect.Top + Scale(VISIBILITY_BUTTON_TOP),
+    ItemRect.Left + Scale(STATE_COLUMN_LEFT + STATE_BUTTON_SIZE),
+    ItemRect.Top + Scale(VISIBILITY_BUTTON_TOP + STATE_BUTTON_SIZE));
 end;
 
 end.

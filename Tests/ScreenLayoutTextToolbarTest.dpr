@@ -18,7 +18,7 @@ uses
   ScreenLayoutDocumentJson in
     '..\Source\Persistence\ScreenLayoutDocumentJson.pas',
   ScreenLayoutLineToolbar in
-    '..\Source\Shell\ScreenLayoutLineToolbar.pas';
+    '..\Source\Shell\Toolbars\ScreenLayoutLineToolbar.pas';
 
 procedure Check(Condition: Boolean; const MessageText: string);
 begin

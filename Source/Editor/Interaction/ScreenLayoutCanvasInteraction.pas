@@ -5,7 +5,7 @@ interface
 
 uses
   System.Classes, System.Generics.Collections, System.Types, Vcl.Controls,
-  ScreenLayoutDocument, ScreenLayoutEditHistory,
+  ScreenLayoutDocument, ScreenLayoutEditHistory, ScreenLayoutProjectiveTransform,
   ScreenLayoutEditCommands,
   ScreenLayoutPathInteraction, ScreenLayoutSelectionGeometry,
   ScreenLayoutShapeInteraction, ScreenLayoutSnapGeometry,
@@ -111,6 +111,7 @@ type
     FDragStartMouse: TPoint;
     FAxisAlignedSelection: Boolean;
     FMoveOccurred: Boolean;
+    FDeferredMoveNotification: Boolean; // 移動中の外部UI通知を確定時までまとめる。
     FRotationSnapped: Boolean;
     FRotationStartMouseAngle: Single;
     FRotationStartValue: Single;
@@ -123,6 +124,8 @@ type
     FClickTopLayerIndex: Integer;
     FSelectBehindOnClick: Boolean;
     FZoom: Single;
+    function MapSelectedScreenPoint(const Point: TPoint; ToSource: Boolean = False): TPoint;
+    function MapSelectedScreenRect(const Bounds: TRect): TRect;
     procedure EndDrag;
     procedure AdjustResizeSnapPoint(Shift: TShiftState; var X, Y: Integer);
     procedure AdjustVertexSnapPoint(Shift: TShiftState; var X, Y: Integer);
@@ -144,6 +147,7 @@ type
     function AxisAlignedResizedBounds(X, Y: Integer;
       RotationDegrees: Single): TRectF;
     function GetDragging: Boolean;
+    function GetMoving: Boolean;
     function GetRangeSelecting: Boolean;
     function GetRangeSelectionRect: TRect;
     procedure SetEditHistory(Value: TVectArtEditHistory);
@@ -250,6 +254,8 @@ type
     // 回転角を独立して保持し、形状を変えずに0度へ戻せる単一選択かを返す。
     function CanResetSelectedRotation: Boolean;
     property Dragging: Boolean read GetDragging;
+    // 通常のオブジェクト移動ドラッグ中だけTrue。
+    property Moving: Boolean read GetMoving;
     property AxisAlignedSelection: Boolean read FAxisAlignedSelection;
     property EditHistory: TVectArtEditHistory read FEditHistory
       write SetEditHistory;
@@ -272,6 +278,19 @@ uses
   ScreenLayoutShapeOperations, ScreenLayoutShapePath,
   ScreenLayoutTextCommands, ScreenLayoutTextGeometry,
   ScreenLayoutTextPathGeometry;
+
+function SelectionHasDisplayTransform(Document: TVectArtDocument): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  if Document = nil then
+    Exit;
+  for I := 1 to Document.LayerCount - 1 do
+    if Document.IsLayerSelected(I) and
+      not Document[I].Transform.IsIdentity then
+      Exit(True);
+end;
 
 function NormalizeScreenLayoutRotationDelta(Value: Single): Single;
 begin
@@ -348,6 +367,8 @@ end;
 
 destructor TVectArtCanvasInteraction.Destroy;
 begin
+  if FDeferredMoveNotification and (FDocument <> nil) then
+    FDocument.EndDeferredNotification;
   FTextPathCharacterInteraction.Free;
   FPathInteraction.Free;
   FShapeInteraction.Free;
@@ -543,6 +564,7 @@ begin
   Result := False;
   if (FDocument = nil) or (FZoom <= 0) or
     (FDocument.SelectionCount = 0) or (FDocument.SelectedIndex <= 0) or
+    SelectionHasDisplayTransform(FDocument) or
     not (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextLayer) or
     (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextPathLayer) then
     Exit;
@@ -609,6 +631,7 @@ begin
   Result := nil;
   if (FDocument = nil) or (FZoom <= 0) or
     (FDocument.SelectionCount <> 1) or (FDocument.SelectedIndex <= 0) or
+    SelectionHasDisplayTransform(FDocument) or
     not (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextLayer) or
     (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextPathLayer) or
     FDocument[FDocument.SelectedIndex].Locked then
@@ -748,6 +771,7 @@ begin
   Handles.EndHandle := TRect.Empty;
   Result := (FDocument <> nil) and (FZoom > 0) and
     (FDocument.SelectionCount = 1) and (FDocument.SelectedIndex > 0) and
+    not SelectionHasDisplayTransform(FDocument) and
     ((FDocument[FDocument.SelectedIndex] is TScreenLayoutArcLayer) or
      (FDocument[FDocument.SelectedIndex] is
        TScreenLayoutEllipseArcShapeLayer));
@@ -805,6 +829,7 @@ begin
   HandleRect := TRect.Empty;
   Result := (FDocument <> nil) and (FZoom > 0) and
     (FDocument.SelectionCount = 1) and (FDocument.SelectedIndex > 0) and
+    not SelectionHasDisplayTransform(FDocument) and
     RoundedRectangleValues(FDocument[FDocument.SelectedIndex], Bounds,
       Radii, RotationDegrees);
   if not Result then
@@ -838,6 +863,7 @@ begin
   SetLength(Result, 0);
   if (FDocument = nil) or (FZoom <= 0) or
     (FDocument.SelectionCount <> 1) or (FDocument.SelectedIndex <= 0) or
+    SelectionHasDisplayTransform(FDocument) or
     not RoundedRectangleValues(FDocument[FDocument.SelectedIndex], Bounds,
       Radii, RotationDegrees) then
     Exit;
@@ -934,20 +960,22 @@ begin
     Exit;
   if FPathStructureEditingEnabled then
   begin
-    if FPathInteraction.CursorAt(X, Y, VertexCursor) then
+    if FPathInteraction.CursorAt(MapSelectedScreenPoint(Point(X,Y),True).X,
+      MapSelectedScreenPoint(Point(X,Y),True).Y, VertexCursor) then
       Exit(VertexCursor);
   end
   else
-    for VertexRect in FPathInteraction.SelectedVertexRects do
+    for VertexRect in SelectedPathVertexRects do
       if PtInRect(VertexRect, Point(X, Y)) then
         Exit(crCross);
   if FShapeStructureEditingEnabled then
   begin
-    if FShapeInteraction.CursorAt(X, Y, VertexCursor) then
+    if FShapeInteraction.CursorAt(MapSelectedScreenPoint(Point(X,Y),True).X,
+      MapSelectedScreenPoint(Point(X,Y),True).Y, VertexCursor) then
       Exit(VertexCursor);
   end
   else
-    for VertexRect in FShapeInteraction.SelectedVertexRects do
+    for VertexRect in SelectedShapeVertexRects do
       if PtInRect(VertexRect, Point(X, Y)) then
         Exit(crCross);
   if SelectedArcAngleHandlesCore(ArcHandles) and
@@ -1333,7 +1361,7 @@ begin
     (FDocument.SelectedIndex <= 0) then
     Exit;
   Layer := FDocument[FDocument.SelectedIndex];
-  if Layer.Locked or (Layer is TScreenLayoutTextPathLayer) then
+  if Layer.Locked or not Layer.Transform.IsIdentity or (Layer is TScreenLayoutTextPathLayer) then
     Exit;
   Result := (Layer is TScreenLayoutRectangleLineLayer) or
     (Layer is TScreenLayoutArcLayer) or
@@ -1788,6 +1816,12 @@ end;
 
 procedure TVectArtCanvasInteraction.EndDrag;
 begin
+  if FDeferredMoveNotification then
+  begin
+    FDeferredMoveNotification := False;
+    if FDocument <> nil then
+      FDocument.EndDeferredNotification;
+  end;
   FDragMode := vcdmNone;
   FDragHandle := vshNone;
   FDragLayerIndex := -1;
@@ -1831,6 +1865,11 @@ begin
   Result := FDragMode <> vcdmNone;
 end;
 
+function TVectArtCanvasInteraction.GetMoving: Boolean;
+begin
+  Result := FDragMode = vcdmMove;
+end;
+
 function TVectArtCanvasInteraction.GetRangeSelectionRect: TRect;
 begin
   Result := Rect(Min(FRangeStart.X, FRangeCurrent.X),
@@ -1847,6 +1886,7 @@ end;
 function TVectArtCanvasInteraction.HitTestLayer(X, Y: Integer;
   StartIndex: Integer; SelectedOnly: Boolean): Integer;
 var
+  InverseTransform: TScreenLayoutTransform; HitPoint: TPointF;
   ArcLayer: TScreenLayoutArcLayer;
   Bounds: TRectF;
   I: Integer;
@@ -1872,8 +1912,6 @@ begin
   if (FDocument = nil) or (FZoom <= 0) or
     not PtInRect(FCanvasBounds, Point(X, Y)) then
     Exit;
-  LogicalX := ToLogicalX(X);
-  LogicalY := ToLogicalY(Y);
   if StartIndex < 1 then
     TopIndex := FDocument.LayerCount - 1
   else
@@ -1881,6 +1919,9 @@ begin
   for I := TopIndex downto 1 do
   begin
     Layer := FDocument[I];
+    HitPoint := TPointF.Create(ToLogicalX(X),ToLogicalY(Y));
+    if Layer.Transform.Inverse(InverseTransform) then HitPoint := InverseTransform.Map(HitPoint);
+    LogicalX := HitPoint.X; LogicalY := HitPoint.Y;
     if not Layer.Visible or
       (SelectedOnly and not FDocument.IsLayerSelected(I)) then
       Continue;
@@ -2067,7 +2108,7 @@ begin
   if (FDocument = nil) or (Index <= 0) or
     (Index >= FDocument.LayerCount) then
     Exit;
-  if (FDocument[Index] is TScreenLayoutGroupLayer) and
+  if ((FDocument[Index] is TScreenLayoutGroupLayer) or not FDocument[Index].Transform.IsIdentity) and
     TryGetScreenLayoutLayerBounds(FDocument[Index], Bounds) then
   begin
     Result := Rect(ToScreenX(Bounds.Left), ToScreenY(Bounds.Top),
@@ -2173,7 +2214,7 @@ begin
        (FDocument[I] is TScreenLayoutShapeLayer) or
        (FDocument[I] is TVectArtImageLayer)) then
     begin
-      if FDocument[I] is TScreenLayoutGroupLayer then
+      if (FDocument[I] is TScreenLayoutGroupLayer) or not FDocument[I].Transform.IsIdentity then
       begin
         if not TryGetScreenLayoutLayerBounds(FDocument[I], Bounds) then
           Continue;
@@ -2290,6 +2331,7 @@ end;
 function TVectArtCanvasInteraction.SelectedLayerSelectionGeometry(
   out Geometry: TVectArtSelectionGeometry): Boolean;
 var
+  TransformQuad: TScreenLayoutQuad;
   ArcLayer: TScreenLayoutArcLayer;
   I: Integer;
   ImageLayer: TVectArtImageLayer;
@@ -2300,6 +2342,13 @@ var
   RectangleLayer: TVectArtRectangleLayer;
   ScreenQuad: TVectArtScreenQuad;
 begin
+  if (FDocument <> nil) and (FDocument.SelectionCount = 1) and (FDocument.SelectedIndex > 0) and
+    not FDocument[FDocument.SelectedIndex].Transform.IsIdentity and
+    TryGetScreenLayoutLayerQuad(FDocument[FDocument.SelectedIndex], TransformQuad) then
+  begin
+    for I := 0 to 3 do ScreenQuad[I] := Point(ToScreenX(TransformQuad[I].X),ToScreenY(TransformQuad[I].Y));
+    Geometry := BuildRotatedSelectionGeometry(ScreenQuad,8); Exit(True);
+  end;
   if (FDocument <> nil) and (FDocument.SelectionCount = 1) and
     (FDocument.SelectedIndex > 0) and
     (FDocument[FDocument.SelectedIndex] is TScreenLayoutTextPathLayer) then
@@ -2922,20 +2971,53 @@ begin
           TScreenLayoutShapeLayer(FDocument[FDragLayerIndex]).Contours)
       else
         CaptureMoveSelection;
+      FDocument.BeginDeferredNotification;
+      FDeferredMoveNotification := True;
     end;
   end;
   FDragStartMouse := Point(X, Y);
   Result := True;
 end;
 
+function TVectArtCanvasInteraction.MapSelectedScreenPoint(const Point: TPoint;
+  ToSource: Boolean): TPoint;
+var Transform, Inverse: TScreenLayoutTransform; P: TPointF;
+begin
+  Result := Point;
+  if (FDocument = nil) or (FDocument.SelectionCount <> 1) or
+    (FDocument.SelectedIndex <= 0) or (FZoom <= 0) then Exit;
+  Transform := FDocument[FDocument.SelectedIndex].Transform;
+  if Transform.IsIdentity then Exit;
+  if ToSource then
+  begin
+    if not Transform.Inverse(Inverse) then Exit;
+    Transform := Inverse;
+  end;
+  P := Transform.Map(TPointF.Create(ToLogicalX(Point.X),ToLogicalY(Point.Y)));
+  Result := System.Types.Point(ToScreenX(P.X),ToScreenY(P.Y));
+end;
+
+function TVectArtCanvasInteraction.MapSelectedScreenRect(const Bounds: TRect): TRect;
+var P: TPoint;
+begin
+  Result := Bounds;
+  if Bounds.IsEmpty then Exit;
+  P := MapSelectedScreenPoint(Bounds.CenterPoint)-Bounds.CenterPoint;
+  OffsetRect(Result,P.X,P.Y);
+end;
+
 function TVectArtCanvasInteraction.MouseDownSelectedVertex(
   Button: TMouseButton; Shift: TShiftState; X, Y: Integer;
   out CaptureNeeded: Boolean): Boolean;
+var SourcePoint: TPoint;
 begin
   Result := False;
   CaptureNeeded := False;
   if (FDocument = nil) or (FZoom <= 0) then
     Exit;
+  SourcePoint := MapSelectedScreenPoint(Point(X,Y),True);
+  X := SourcePoint.X;
+  Y := SourcePoint.Y;
   if Button = mbRight then
   begin
     if FPathStructureEditingEnabled and
@@ -2994,6 +3076,7 @@ end;
 function TVectArtCanvasInteraction.MouseMove(Shift: TShiftState;
   X, Y: Integer): Boolean;
 var
+  SourcePoint: TPoint;
   ArcLayer: TScreenLayoutArcLayer;
   ArcShapeLayer: TScreenLayoutEllipseArcShapeLayer;
   CenterX: Single;
@@ -3041,6 +3124,9 @@ begin
   end;
   if FDragMode in [vcdmPathVertex, vcdmPathBezierHandle] then
   begin
+    SourcePoint := MapSelectedScreenPoint(Point(X,Y),True);
+    if SourcePoint <> Point(X,Y) then Shift := Shift + [ssAlt];
+    X := SourcePoint.X; Y := SourcePoint.Y;
     if FDragMode = vcdmPathVertex then
       AdjustVertexSnapPoint(Shift, X, Y)
     else
@@ -3050,6 +3136,9 @@ begin
   end;
   if FDragMode in [vcdmShapeVertex, vcdmShapeBezierHandle] then
   begin
+    SourcePoint := MapSelectedScreenPoint(Point(X,Y),True);
+    if SourcePoint <> Point(X,Y) then Shift := Shift + [ssAlt];
+    X := SourcePoint.X; Y := SourcePoint.Y;
     if FDragMode = vcdmShapeVertex then
       AdjustVertexSnapPoint(Shift, X, Y)
     else
@@ -3613,13 +3702,17 @@ begin
 end;
 
 function TVectArtCanvasInteraction.SelectedPathVertexRects: TArray<TRect>;
+var I: Integer;
 begin
   Result := FPathInteraction.SelectedVertexRects;
+  for I := 0 to High(Result) do Result[I] := MapSelectedScreenRect(Result[I]);
 end;
 
 function TVectArtCanvasInteraction.SelectedPathPoints: TArray<TPoint>;
+var I: Integer;
 begin
   Result := FPathInteraction.SelectedPathPoints;
+  for I := 0 to High(Result) do Result[I] := MapSelectedScreenPoint(Result[I]);
 end;
 
 function TVectArtCanvasInteraction.SelectedPathVertexKind(
@@ -3637,16 +3730,20 @@ begin
 end;
 
 function TVectArtCanvasInteraction.SelectedShapeVertexRects: TArray<TRect>;
+var I: Integer;
 begin
   Result := FShapeInteraction.SelectedVertexRects;
+  for I := 0 to High(Result) do Result[I] := MapSelectedScreenRect(Result[I]);
 end;
 
 function TVectArtCanvasInteraction.SelectedShapeVertexKindButtons:
   TArray<TScreenLayoutVertexKindButton>;
+var I: Integer;
 begin
   Result := nil;
   if FShapeStructureEditingEnabled then
     Result := FShapeInteraction.SelectedVertexKindButtons;
+  for I := 0 to High(Result) do Result[I].Bounds := MapSelectedScreenRect(Result[I].Bounds);
 end;
 
 function TVectArtCanvasInteraction.SelectedShapeVertexRect(
@@ -3655,6 +3752,7 @@ begin
   Result := FPathInteraction.SelectedVertexRect(VertexRect);
   if not Result then
     Result := FShapeInteraction.SelectedVertexRect(VertexRect);
+  if Result then VertexRect := MapSelectedScreenRect(VertexRect);
 end;
 
 function TVectArtCanvasInteraction.SelectedShapeBezierHandles(
@@ -3664,6 +3762,14 @@ begin
     FPathInteraction.SelectedBezierHandles(Handles);
   if not Result and FShapeStructureEditingEnabled then
     Result := FShapeInteraction.SelectedBezierHandles(Handles);
+  if Result then
+  begin
+    Handles.IncomingPoint := MapSelectedScreenPoint(Handles.IncomingPoint);
+    Handles.OutgoingPoint := MapSelectedScreenPoint(Handles.OutgoingPoint);
+    Handles.VertexPoint := MapSelectedScreenPoint(Handles.VertexPoint);
+    Handles.IncomingRect := MapSelectedScreenRect(Handles.IncomingRect);
+    Handles.OutgoingRect := MapSelectedScreenRect(Handles.OutgoingRect);
+  end;
 end;
 
 procedure TVectArtCanvasInteraction.SetVertexStructureEditing(

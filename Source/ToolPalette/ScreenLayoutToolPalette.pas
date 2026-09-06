@@ -111,9 +111,12 @@ begin
 end;
 
 function TVectArtToolPaletteControl.ButtonRect(Index: Integer): TRect;
+var
+  LogicalWidth: Integer;
 begin
+  LogicalWidth := MulDiv(ClientWidth, 96, CurrentPPI);
   Result := Rect(6, 6 + Index * (BUTTON_SIZE + 6),
-    ClientWidth - 6, 6 + Index * (BUTTON_SIZE + 6) + BUTTON_SIZE);
+    LogicalWidth - 6, 6 + Index * (BUTTON_SIZE + 6) + BUTTON_SIZE);
 end;
 
 function TVectArtToolPaletteControl.ButtonSelected(Index: Integer): Boolean;
@@ -300,10 +303,13 @@ procedure TVectArtToolPaletteControl.MouseDown(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
   I: Integer;
+  LogicalPoint: TPoint;
 begin
+  LogicalPoint := Point(MulDiv(X, 96, CurrentPPI),
+    MulDiv(Y, 96, CurrentPPI));
   if (Button = mbLeft) and (FEditorState <> nil) then
     for I := 0 to PALETTE_BUTTON_COUNT - 1 do
-      if PtInRect(ButtonRect(I), Point(X, Y)) then
+      if PtInRect(ButtonRect(I), LogicalPoint) then
       begin
         FEditorState.ActivateTool(ButtonTool(I));
         Break;
@@ -314,11 +320,23 @@ end;
 procedure TVectArtToolPaletteControl.Paint;
 var
   I: Integer;
+  LogicalBounds: TRect;
+  SavedDC: Integer;
 begin
-  Canvas.Brush.Color := COLOR_BACKGROUND;
-  Canvas.FillRect(ClientRect);
-  for I := 0 to PALETTE_BUTTON_COUNT - 1 do
-    DrawButton(I);
+  SavedDC := SaveDC(Canvas.Handle);
+  try
+    SetMapMode(Canvas.Handle, MM_ANISOTROPIC);
+    SetWindowExtEx(Canvas.Handle, 96, 96, nil);
+    SetViewportExtEx(Canvas.Handle, CurrentPPI, CurrentPPI, nil);
+    LogicalBounds := Rect(0, 0, MulDiv(ClientWidth, 96, CurrentPPI),
+      MulDiv(ClientHeight, 96, CurrentPPI));
+    Canvas.Brush.Color := COLOR_BACKGROUND;
+    Canvas.FillRect(LogicalBounds);
+    for I := 0 to PALETTE_BUTTON_COUNT - 1 do
+      DrawButton(I);
+  finally
+    RestoreDC(Canvas.Handle, SavedDC);
+  end;
 end;
 
 procedure TVectArtToolPaletteControl.RefreshState;

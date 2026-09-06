@@ -31,7 +31,9 @@ type
     constructor Create(Menu: TVectArtDarkPopupMenu; Host: TWinControl);
     destructor Destroy; override;
     function AddItem(const Caption: string; ClickHandler: TNotifyEvent;
-      Enabled: Boolean = True): TPanel;
+      Enabled: Boolean = True): TPanel; overload;
+    function AddItem(const Caption, Shortcut: string;
+      ClickHandler: TNotifyEvent; Enabled: Boolean = True): TPanel; overload;
     function AddSubMenu(const Caption: string;
       Width: Integer = 160): TScreenLayoutObjectMenuBuilder;
     procedure AddSeparator;
@@ -104,6 +106,15 @@ function TScreenLayoutObjectMenuBuilder.AddItem(const Caption: string;
   ClickHandler: TNotifyEvent; Enabled: Boolean): TPanel;
 begin
   Result := FMenu.AddItem(Caption, FNextTop, ClickHandler);
+  FMenu.SetItemEnabled(Result, Enabled);
+  Inc(FNextTop, MENU_ITEM_HEIGHT);
+  FMenu.PopupHeight := FNextTop;
+end;
+
+function TScreenLayoutObjectMenuBuilder.AddItem(const Caption,
+  Shortcut: string; ClickHandler: TNotifyEvent; Enabled: Boolean): TPanel;
+begin
+  Result := FMenu.AddItem(Caption, Shortcut, FNextTop, ClickHandler);
   FMenu.SetItemEnabled(Result, Enabled);
   Inc(FNextTop, MENU_ITEM_HEIGHT);
   FMenu.PopupHeight := FNextTop;
@@ -212,15 +223,15 @@ var
 begin
   FreeAndNil(FBuilder);
   FBuilder := TScreenLayoutObjectMenuBuilder.Create(FMenu, FHost);
-  FBuilder.AddItem('切り取り    Ctrl+X', nil);
-  FBuilder.AddItem('コピー      Ctrl+C', nil);
-  FBuilder.AddItem('複製        Ctrl+D', nil);
+  FBuilder.AddItem('切り取り', 'Ctrl+X', nil);
+  FBuilder.AddItem('コピー', 'Ctrl+C', nil);
+  FBuilder.AddItem('複製', 'Ctrl+D', nil);
   OrderBuilder := FBuilder.AddSubMenu('重なり順');
   OrderBuilder.AddItem('最前面へ', nil);
   OrderBuilder.AddItem('前面へ', nil);
   OrderBuilder.AddItem('背面へ', nil);
   OrderBuilder.AddItem('最背面へ', nil);
-  FBuilder.AddItem('削除        Delete', nil);
+  FBuilder.AddItem('削除', 'Delete', nil);
   if (Length(FHitLayerIndices) > 1) and
     ((FEditorState = nil) or (FEditorState.OpenGroup = nil)) then
   begin

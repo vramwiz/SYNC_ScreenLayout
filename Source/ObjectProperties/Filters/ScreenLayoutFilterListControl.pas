@@ -265,7 +265,7 @@ begin
   Canvas.Brush.Color := COLOR_BACKGROUND;
   Canvas.FillRect(ClientRect);
   Canvas.Font.Name := 'Segoe UI';
-  Canvas.Font.Height := -12;
+  Canvas.Font.Height := -MulDiv(12, CurrentPPI, 96);
   Canvas.Brush.Style := bsSolid;
   if (FLayer = nil) or (FLayer.FilterCount = 0) then
   begin

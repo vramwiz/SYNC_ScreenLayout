@@ -29,6 +29,8 @@ type
     FId: string;                                  // 選択した内蔵定義。
     FValues: TArray<TScreenLayoutPatternValue>;     // 安定IDで保存する数値。
     FColors: TArray<TScreenLayoutPatternColor>;     // 拡張可能な色スロット。
+    FFlipHorizontal: Boolean; // オブジェクトのローカル左右反転を模様の向きにも適用する。
+    FFlipVertical: Boolean;   // オブジェクトのローカル上下反転を模様の向きにも適用する。
   public
     // 定義の既定値を生成し、前景色にBaseColorを使用する。
     class function Create(Kind: TScreenLayoutPatternKind;
@@ -50,6 +52,8 @@ type
     // ID、全設定値、色が一致するときにTrueを返す。
     function SameAs(const Other: TScreenLayoutPatternStyle): Boolean;
     property Id: string read FId;
+    property FlipHorizontal: Boolean read FFlipHorizontal write FFlipHorizontal;
+    property FlipVertical: Boolean read FFlipVertical write FFlipVertical;
   end;
 
 const
@@ -218,7 +222,9 @@ function TScreenLayoutPatternStyle.SameAs(const Other: TScreenLayoutPatternStyle
 var I: Integer;
 begin
   Result := (FId = Other.FId) and (Length(FValues) = Length(Other.FValues)) and
-    (Length(FColors) = Length(Other.FColors));
+    (Length(FColors) = Length(Other.FColors)) and
+    (FFlipHorizontal = Other.FFlipHorizontal) and
+    (FFlipVertical = Other.FFlipVertical);
   if not Result then Exit;
   for I := 0 to High(FValues) do
     if (FValues[I].Id <> Other.FValues[I].Id) or (FValues[I].Value <> Other.FValues[I].Value) then Exit(False);

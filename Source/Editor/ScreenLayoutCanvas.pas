@@ -6,16 +6,18 @@ interface
 
 uses
   System.Classes, System.SysUtils, System.Types, Winapi.Windows, Vcl.Controls,
-  Vcl.Direct2D, Vcl.Forms, Vcl.Graphics,
+  Vcl.Direct2D, Vcl.ExtCtrls, Vcl.Forms, Vcl.Graphics,
   ScreenLayoutCanvasInteraction,
   ScreenLayoutDocument, ScreenLayoutEditHistory,
   ScreenLayoutEditorState, ScreenLayoutFilterInteraction,
   ScreenLayoutGradientInteraction,
   ScreenLayoutTextureInteraction,
   ScreenLayoutGroupInteraction,
+  ScreenLayoutTransformInteraction,
+  ScreenLayoutProjectiveTransform,
   ScreenLayoutPaintStyles,
   ScreenLayoutSelectionGeometry,
-  ScreenLayoutShapeCreation, ScreenLayoutRenderer,
+  ScreenLayoutShapeCreation, ScreenLayoutCanvasRenderCache,
   ScreenLayoutTextEditing, ScreenLayoutTextEditOverlay,
   WindowsImeController;
 
@@ -34,16 +36,12 @@ type
     FGradientInteraction: TScreenLayoutGradientInteraction;
     FTextureInteraction: TScreenLayoutTextureInteraction; // 画像の配置ハンドルとUndo操作。
     FGroupDrag: TScreenLayoutGroupDrag;
+    FTransformInteraction: TScreenLayoutTransformInteraction;
     FInteraction: TVectArtCanvasInteraction;
     FImeState: TWindowsImeState;
     FOnObjectContextMenu: TScreenLayoutObjectContextMenuEvent;
     FReferenceBackground: TBitmap;
-    FRenderedDocument: TBitmap;
-    FRenderBuffer: TVectArtRenderBuffer;
-    FRenderedInputTextLayer: TScreenLayoutTextLayer;
-    FRenderedPreviewStrokeWidth: Single;
-    FRenderedTextInputOutlineColor: TColor;
-    FRenderedRevision: Int64;
+    FRenderCache: TScreenLayoutCanvasRenderCache; // 文書画像、移動プレビュー、ズーム再利用を所有する。
     FShapeCreation: TVectArtShapeCreation;
     FSkipTextDblClick: Boolean;
     FTextBeforeSelection: TArray<Integer>;
@@ -63,6 +61,7 @@ type
     FTextGuideBounds: TRectF;
     FTextLayerIndex: Integer;
     FTextInputOutlineColor: TColor;
+    FTextAutoExpandWidth: Boolean;
     FTextNewLayer: Boolean;
     FTextNewPathLayer: Boolean;
     FTextOriginalData: TScreenLayoutTextData;
@@ -72,6 +71,8 @@ type
     FPanStartOffset: TPointF;
     FViewZoom: Single;
     FZoom: Single;
+    FZoomPreviewActive: Boolean;
+    FZoomRenderTimer: TTimer;
     procedure CalculateCanvasBounds;
     procedure ConfigureInteraction;
     function EditingTextPath: Boolean;
@@ -85,11 +86,14 @@ type
     function ToScreenY(Value: Single): Integer;
     function GetEditHistory: TVectArtEditHistory;
     function HasReferenceBackground: Boolean;
+    procedure BeginMovePreview;
+    procedure EndMovePreview;
     procedure UpdateRenderedDocument;
     procedure SetEditHistory(const Value: TVectArtEditHistory);
     procedure BeginExistingTextEdit(Index: Integer);
     procedure BeginCreatedTextPathEdit;
-    procedure BeginNewTextEdit(const GuideBounds: TRectF);
+    procedure BeginNewTextEdit(const GuideBounds: TRectF;
+      AutoExpandWidth: Boolean);
     procedure BeginNewTextPathEdit(Index: Integer;
       const BeforeSelection: TArray<Integer>);
     function TextEditOverlayState: TScreenLayoutTextEditOverlayState;
@@ -113,6 +117,7 @@ type
     procedure UpdateTextEditorBackground;
     procedure UpdateTextEditorBounds;
     procedure UpdateTextLayerFromBuffer;
+    procedure ZoomRenderTimerTick(Sender: TObject);
   protected
     procedure DblClick; override;
     function DoMouseWheel(Shift: TShiftState; WheelDelta: Integer;
@@ -136,6 +141,10 @@ type
       out LogicalPoint: TPointF): Boolean;
     // パス編集モードの現在種別を、選択中アンカーへ適用する。
     function ApplyPathVertexModeToSelection: Boolean;
+    // 変形ドラッグ中はホスト側ショートカットによる対象の変更を抑止する。
+    function TransformDragging: Boolean;
+    // 変形前の状態へ戻してマウスキャプチャを解放する。
+    procedure CancelTransformDrag;
     property CanvasBounds: TRect read FCanvasBounds;
     property Document: TVectArtDocument read FDocument write SetDocument;
     property EditHistory: TVectArtEditHistory read GetEditHistory
@@ -234,15 +243,15 @@ begin
   FGradientInteraction := TScreenLayoutGradientInteraction.Create;
   FTextureInteraction := TScreenLayoutTextureInteraction.Create;
   FGroupDrag := TScreenLayoutGroupDrag.Create;
+  FTransformInteraction := TScreenLayoutTransformInteraction.Create;
   FInteraction := TVectArtCanvasInteraction.Create;
   FReferenceBackground := Vcl.Graphics.TBitmap.Create;
   FReferenceBackground.PixelFormat := pf32bit;
-  FRenderedDocument := Vcl.Graphics.TBitmap.Create;
-  FRenderedDocument.PixelFormat := pf32bit;
-  FRenderBuffer := TVectArtRenderBuffer.Create;
-  FRenderedPreviewStrokeWidth := -1.0;
-  FRenderedTextInputOutlineColor := clNone;
-  FRenderedRevision := -1;
+  FRenderCache := TScreenLayoutCanvasRenderCache.Create;
+  FZoomRenderTimer := TTimer.Create(Self);
+  FZoomRenderTimer.Enabled := False;
+  FZoomRenderTimer.Interval := 140;
+  FZoomRenderTimer.OnTimer := ZoomRenderTimerTick;
   FShapeCreation := TVectArtShapeCreation.Create;
   FShapeCreation.DeferTextPathHistory := True;
   FTextEditor := TScreenLayoutImeEdit.Create(Self);
@@ -268,20 +277,21 @@ end;
 destructor TVectArtCanvasControl.Destroy;
 begin
   FTextEditor.Free;
-  FRenderBuffer.Free;
-  FRenderedDocument.Free;
+  FZoomRenderTimer.Free;
+  FRenderCache.Free;
   FReferenceBackground.Free;
   FShapeCreation.Free;
   FGradientInteraction.Free;
   FTextureInteraction.Free;
   FFilterInteraction.Free;
   FGroupDrag.Free;
+  FTransformInteraction.Free;
   FInteraction.Free;
   inherited Destroy;
 end;
 
 procedure TVectArtCanvasControl.BeginNewTextEdit(
-  const GuideBounds: TRectF);
+  const GuideBounds: TRectF; AutoExpandWidth: Boolean);
 var
   Data: TScreenLayoutTextData;
 begin
@@ -314,6 +324,7 @@ begin
   FTextLayerIndex := FDocument.InsertText(FDocument.LayerCount, Data);
   FDocument.SetSelectedLayers([FTextLayerIndex]);
   FTextGuideBounds := GuideBounds;
+  FTextAutoExpandWidth := AutoExpandWidth;
   FTextNewLayer := True;
   FTextNewPathLayer := False;
   FTextBuffer := DEFAULT_TEXT_VALUE;
@@ -357,6 +368,7 @@ begin
     Layer.Bounds.Left + Max(Layer.WrapWidth, Layer.Bounds.Width),
     Layer.Bounds.Top + Max(Layer.Bounds.Height, DEFAULT_TEXT_GUIDE_HEIGHT));
   FTextNewLayer := False;
+  FTextAutoExpandWidth := False;
   FTextNewPathLayer := False;
   FTextBuffer := Layer.Text;
   FTextCaretIndex := Length(FTextBuffer);
@@ -397,6 +409,7 @@ begin
     Layer.Bounds.Top + Max(Layer.Bounds.Height, DEFAULT_TEXT_GUIDE_HEIGHT));
   FTextNewLayer := True;
   FTextNewPathLayer := True;
+  FTextAutoExpandWidth := False;
   FTextBuffer := Layer.Text;
   FTextCaretIndex := Length(FTextBuffer);
   FTextSelectionAnchor := 0;
@@ -488,6 +501,36 @@ procedure TVectArtCanvasControl.DrawTextEditingOverlayDirect2D(
   ACanvas: TDirect2DCanvas);
 begin
   DrawScreenLayoutTextEditOverlay(ACanvas, TextEditOverlayState);
+end;
+
+procedure TVectArtCanvasControl.BeginMovePreview;
+var
+  Height: Integer;
+  LayerIndex: Integer;
+  PreviewStrokeWidth: Single;
+  Width: Integer;
+begin
+  EndMovePreview;
+  if (FDocument = nil) or (FDocument.CanvasLayer = nil) or
+    not (FInteraction.Moving or FTransformInteraction.Moving) then
+    Exit;
+  Width := Max(Min(FCanvasBounds.Width,
+    FDocument.CanvasLayer.Width), 1);
+  Height := Max(Min(FCanvasBounds.Height,
+    FDocument.CanvasLayer.Height), 1);
+  PreviewStrokeWidth := 0.0;
+  if ENABLE_THIN_STROKE_PREVIEW and (FZoom > 0) then
+    PreviewStrokeWidth := MIN_PREVIEW_STROKE_WIDTH_PIXELS / FZoom;
+  LayerIndex := -1;
+  if FDocument.SelectionCount = 1 then
+    LayerIndex := FDocument.SelectedIndex;
+  FRenderCache.BeginMove(FDocument, LayerIndex, Width, Height,
+    PreviewStrokeWidth);
+end;
+
+procedure TVectArtCanvasControl.EndMovePreview;
+begin
+  FRenderCache.EndMove;
 end;
 
 procedure TVectArtCanvasControl.DrawSnapGuides(ACanvas: TCanvas);
@@ -666,6 +709,7 @@ begin
     FTextLayerIndex := -1;
     FTextNewLayer := False;
     FTextNewPathLayer := False;
+    FTextAutoExpandWidth := False;
     FTextBuffer := '';
     FTextCaretIndex := 0;
     FTextSelectionAnchor := 0;
@@ -779,6 +823,7 @@ end;
 procedure TVectArtCanvasControl.SetTextCaretFromClientPoint(X, Y: Integer;
   ExtendSelection: Boolean);
 var
+  InverseTransform: TScreenLayoutTransform;
   Center: TPointF;
   Font: ISkFont;
   Layout: TScreenLayoutTextLayout;
@@ -804,8 +849,14 @@ begin
       FDocument.CanvasLayer.Height));
   Center := TPointF.Create((Layer.Bounds.Left + Layer.Bounds.Right) * 0.5,
     (Layer.Bounds.Top + Layer.Bounds.Bottom) * 0.5);
+  if Layer.Transform.Inverse(InverseTransform) then
+    LogicalPoint := InverseTransform.Map(LogicalPoint);
   LocalPoint := RotatePointAround(LogicalPoint, Center,
     -Layer.RotationDegrees);
+  if Layer.FlipHorizontal then
+    LocalPoint.X := 2 * Center.X - LocalPoint.X;
+  if Layer.FlipVertical then
+    LocalPoint.Y := 2 * Center.Y - LocalPoint.Y;
   Layout := BuildScreenLayoutTextLayout(FTextBuffer, Layer.FontFamily,
     Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
     Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
@@ -862,6 +913,10 @@ begin
   if (FDocument = nil) or (FTextLayerIndex <= 0) or
     (FTextLayerIndex >= FDocument.LayerCount) or
     not (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
+    Exit;
+  // 変換確定のEnterなどはIME自身へ渡す。ここで編集キーとして扱うと、
+  // 漢字変換の確定と同時にDocumentへ改行が挿入される。
+  if FTextCompositionActive then
     Exit;
   Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
   ExtendSelection := ssShift in Shift;
@@ -1195,8 +1250,13 @@ begin
   end;
   Center := TPointF.Create((Layer.Bounds.Left + Layer.Bounds.Right) * 0.5,
     (Layer.Bounds.Top + Layer.Bounds.Bottom) * 0.5);
+  if Layer.FlipHorizontal then
+    CaretPoint.X := 2 * Center.X - CaretPoint.X;
+  if Layer.FlipVertical then
+    CaretPoint.Y := 2 * Center.Y - CaretPoint.Y;
   CaretPoint := RotatePointAround(CaretPoint, Center,
     Layer.RotationDegrees);
+  CaretPoint := Layer.Transform.Map(CaretPoint);
   ScreenPoint := Point(ToScreenX(CaretPoint.X), ToScreenY(CaretPoint.Y));
   ScreenPoint.X := EnsureRange(ScreenPoint.X, FCanvasBounds.Left,
     Max(FCanvasBounds.Right - TEXT_INPUT_EDIT_WIDTH, FCanvasBounds.Left));
@@ -1223,7 +1283,16 @@ begin
   Data.Text := FTextBuffer;
   if FTextNewLayer and not FTextNewPathLayer then
   begin
-    Data.WrapWidth := Max(FTextGuideBounds.Width, 1.0);
+    if FTextAutoExpandWidth then
+    begin
+      Layout := BuildScreenLayoutTextLayout(Data.Text, Data.FontFamily,
+        Data.FontSize, 0, Data.FontStyle, Data.LetterSpacingRatio,
+        Data.LineSpacingRatio);
+      Data.WrapWidth := Max(FTextGuideBounds.Width, Layout.Width);
+      FTextGuideBounds.Right := FTextGuideBounds.Left + Data.WrapWidth;
+    end
+    else
+      Data.WrapWidth := Max(FTextGuideBounds.Width, 1.0);
     Layout := BuildScreenLayoutTextLayout(Data.Text, Data.FontFamily,
       Data.FontSize, Data.WrapWidth, Data.FontStyle, Data.LetterSpacingRatio,
       Data.LineSpacingRatio);
@@ -1402,6 +1471,20 @@ begin
   FPanOffset.X := ClientPoint.X - CanvasX * FZoom - FCanvasBounds.Left;
   FPanOffset.Y := ClientPoint.Y - CanvasY * FZoom - FCanvasBounds.Top;
   CalculateCanvasBounds;
+  EndMovePreview;
+  FZoomPreviewActive := (FRenderCache.Bitmap.Width > 0) and
+    (FRenderCache.Bitmap.Height > 0);
+  FZoomRenderTimer.Enabled := False;
+  FZoomRenderTimer.Enabled := True;
+  Invalidate;
+end;
+
+procedure TVectArtCanvasControl.ZoomRenderTimerTick(Sender: TObject);
+begin
+  FZoomRenderTimer.Enabled := False;
+  if not FZoomPreviewActive then
+    Exit;
+  FZoomPreviewActive := False;
   Invalidate;
 end;
 
@@ -1417,6 +1500,14 @@ end;
 procedure TVectArtCanvasControl.KeyDown(var Key: Word;
   Shift: TShiftState);
 begin
+  if (Key = VK_ESCAPE) and FTransformInteraction.Finish(True) then
+  begin
+    EndMovePreview;
+    Key := 0;
+    MouseCapture := False;
+    Invalidate;
+    Exit;
+  end;
   if (Key = VK_ESCAPE) and FInteraction.CancelTextSpacingDrag then
   begin
     Key := 0;
@@ -1425,6 +1516,20 @@ begin
     Exit;
   end;
   inherited KeyDown(Key, Shift);
+end;
+
+function TVectArtCanvasControl.TransformDragging: Boolean;
+begin
+  Result := FTransformInteraction.Active;
+end;
+
+procedure TVectArtCanvasControl.CancelTransformDrag;
+begin
+  FTransformInteraction.Finish(True);
+  EndMovePreview;
+  MouseCapture := False;
+  Cursor := crDefault;
+  Invalidate;
 end;
 
 function TVectArtCanvasControl.GetEditHistory: TVectArtEditHistory;
@@ -1548,6 +1653,23 @@ begin
       SetFocus;
     CalculateCanvasBounds;
     ConfigureInteraction;
+    FTransformInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
+    if FTransformInteraction.HasTransformedSelection and
+      FInteraction.MouseDownSelectedVertex(Button, Shift, X, Y, VertexCaptureNeeded) then
+    begin
+      if VertexCaptureNeeded then MouseCapture := True;
+      Cursor := crCross;
+      Invalidate;
+      Exit;
+    end;
+    if FTransformInteraction.MouseDown(Shift, X, Y) then
+    begin
+      EndMovePreview;
+      MouseCapture := True;
+      Cursor := crCross;
+      Invalidate;
+      Exit;
+    end;
     // Creation tools take precedence over existing layer frames and open
     // group hit-testing. Only an explicit vertex/control-point hit keeps
     // the structural editing behavior of line, path, and shape tools.
@@ -1714,6 +1836,7 @@ begin
     ConfigureInteraction;
     if FInteraction.MouseDown(Button, Shift, X, Y) then
     begin
+      EndMovePreview;
       MouseCapture := True;
       Cursor := FInteraction.CursorAt(X, Y);
     end;
@@ -1733,6 +1856,13 @@ var
   Handle: TVectArtSelectionHandle;
   SelectionGeometry: TVectArtSelectionGeometry;
 begin
+  if FTransformInteraction.Active and FTransformInteraction.Moving and
+    not FRenderCache.MoveAttempted then
+    BeginMovePreview;
+  if FTransformInteraction.MouseMove(Shift, X, Y) then
+  begin
+    Cursor := crCross; Invalidate; Exit;
+  end;
   CalculateCanvasBounds;
   FTextureInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
   if FTextureInteraction.MouseMove(Shift, X, Y) then
@@ -1819,10 +1949,16 @@ begin
     end;
   end;
   ConfigureInteraction;
+  if FInteraction.Dragging and FInteraction.Moving and
+    not FRenderCache.MoveAttempted then
+    BeginMovePreview;
   if FInteraction.Dragging and FInteraction.MouseMove(Shift, X, Y) then
   begin
     if not FInteraction.Dragging then
+    begin
       MouseCapture := False;
+      EndMovePreview;
+    end;
     Cursor := FInteraction.CursorAt(X, Y);
     Invalidate;
     Exit;
@@ -1872,12 +2008,18 @@ end;
 procedure TVectArtCanvasControl.MouseUp(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
+  AutoExpandWidth: Boolean;
   Bottom: Single;
   GuideRect: TRect;
   Left: Single;
   Right: Single;
   Top: Single;
 begin
+  if (Button = mbLeft) and FTransformInteraction.Finish then
+  begin
+    EndMovePreview;
+    MouseCapture := False; Cursor := crDefault; Invalidate; Exit;
+  end;
   if Button = mbLeft then
   begin
     CalculateCanvasBounds;
@@ -1921,7 +2063,8 @@ begin
     GuideRect := TRect.Create(Min(FTextDragStart.X, X),
       Min(FTextDragStart.Y, Y), Max(FTextDragStart.X, X),
       Max(FTextDragStart.Y, Y));
-    if (GuideRect.Width < 4) or (GuideRect.Height < 4) then
+    AutoExpandWidth := (GuideRect.Width < 4) or (GuideRect.Height < 4);
+    if AutoExpandWidth then
       GuideRect := TRect.Create(FTextDragStart.X, FTextDragStart.Y,
         FTextDragStart.X + Round(DEFAULT_TEXT_GUIDE_WIDTH * FZoom),
         FTextDragStart.Y + Round(DEFAULT_TEXT_GUIDE_HEIGHT * FZoom));
@@ -1934,7 +2077,8 @@ begin
       FDocument.CanvasLayer.Width);
     Bottom := ScreenToLogicalY(GuideRect.Bottom, FCanvasBounds, FZoom,
       FDocument.CanvasLayer.Height);
-    BeginNewTextEdit(TRectF.Create(Left, Top, Right, Bottom));
+    BeginNewTextEdit(TRectF.Create(Left, Top, Right, Bottom),
+      AutoExpandWidth);
     Cursor := crIBeam;
     Invalidate;
     Exit;
@@ -1955,6 +2099,7 @@ begin
   end;
   if FInteraction.MouseUp(Button) then
   begin
+    EndMovePreview;
     MouseCapture := False;
     ConfigureInteraction;
     Cursor := FInteraction.CursorAt(X, Y);
@@ -1983,21 +2128,14 @@ end;
 
 procedure TVectArtCanvasControl.UpdateRenderedDocument;
 var
-  Alpha: Integer;
-  Destination: PByte;
   Height: Integer;
-  Source: PVectArtRgbaPixel;
   InputTextLayer: TScreenLayoutTextLayer;
   PreviewStrokeWidth: Single;
   Width: Integer;
-  X: Integer;
-  Y: Integer;
 begin
   if (FDocument = nil) or (FDocument.CanvasLayer = nil) then
   begin
-    FRenderedDocument.SetSize(0, 0);
-    FRenderedRevision := -1;
-    FRenderedInputTextLayer := nil;
+    FRenderCache.Reset;
     Exit;
   end;
   // The editor only needs as many pixels as are currently visible. Keeping
@@ -2015,38 +2153,9 @@ begin
     (FTextLayerIndex < FDocument.LayerCount) and
     (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
     InputTextLayer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
-  if (FRenderedRevision = FDocument.Revision) and
-    (FRenderedInputTextLayer = InputTextLayer) and
-    (FRenderedTextInputOutlineColor = FTextInputOutlineColor) and
-    SameValue(FRenderedPreviewStrokeWidth, PreviewStrokeWidth) and
-    (FRenderedDocument.Width = Width) and
-    (FRenderedDocument.Height = Height) then
-    Exit;
-
-  RenderVectArtDocument(FDocument, FRenderBuffer, Width, Height,
-    PreviewStrokeWidth, InputTextLayer, FTextInputOutlineColor);
-  FRenderedDocument.PixelFormat := pf32bit;
-  FRenderedDocument.SetSize(Width, Height);
-  FRenderedDocument.AlphaFormat := afPremultiplied;
-  Source := FRenderBuffer.Data;
-  for Y := 0 to Height - 1 do
-  begin
-    Destination := FRenderedDocument.ScanLine[Y];
-    for X := 0 to Width - 1 do
-    begin
-      Alpha := Source^.A;
-      Destination[0] := (Integer(Source^.B) * Alpha + 127) div 255;
-      Destination[1] := (Integer(Source^.G) * Alpha + 127) div 255;
-      Destination[2] := (Integer(Source^.R) * Alpha + 127) div 255;
-      Destination[3] := Alpha;
-      Inc(Destination, 4);
-      Inc(Source);
-    end;
-  end;
-  FRenderedRevision := FDocument.Revision;
-  FRenderedInputTextLayer := InputTextLayer;
-  FRenderedTextInputOutlineColor := FTextInputOutlineColor;
-  FRenderedPreviewStrokeWidth := PreviewStrokeWidth;
+  FRenderCache.Update(FDocument, Width, Height, PreviewStrokeWidth,
+    InputTextLayer, FTextInputOutlineColor, FZoomPreviewActive,
+    FInteraction.Moving or FTransformInteraction.Moving);
 end;
 
 procedure TVectArtCanvasControl.PaintDirect2D;
@@ -2179,10 +2288,10 @@ begin
         end;
       end;
 
-      if (FRenderedDocument.Width > 0) and
-        (FRenderedDocument.Height > 0) then
+      if (FRenderCache.Bitmap.Width > 0) and
+        (FRenderCache.Bitmap.Height > 0) then
       begin
-        DocumentBitmap := Direct2DCanvas.CreateBitmap(FRenderedDocument);
+        DocumentBitmap := Direct2DCanvas.CreateBitmap(FRenderCache.Bitmap);
         if DocumentBitmap = nil then
           raise EInvalidOp.Create('Direct2D document bitmap creation failed');
         ReferenceRect := D2D1RectF(FCanvasBounds.Left, FCanvasBounds.Top,
@@ -2214,6 +2323,9 @@ begin
           ToScreenY(RotatedBounds.Bottom));
         SelectionGeometry := BuildSelectionGeometry(LayerRect,
           SelectionFrameOffset(0, FZoom));
+        FTransformInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
+        if FTransformInteraction.Active or FTransformInteraction.HasTransformedSelection then
+          FTransformInteraction.Geometry(SelectionGeometry);
         DrawOverlayPolyline(Direct2DCanvas,
           SelectionGeometry.FramePoints);
         if OpenGroupSelectionEditable(FEditorState) then
@@ -2433,6 +2545,9 @@ begin
         else
           SelectionGeometry := BuildSelectionGeometry(SelectionLayerRect,
             SelectionFrameOffsetPixels);
+        FTransformInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
+        if FTransformInteraction.Active or FTransformInteraction.HasTransformedSelection then
+          FTransformInteraction.Geometry(SelectionGeometry);
         if SelectionGeometry.DrawFrame then
           DrawOverlayPolyline(Direct2DCanvas,
             SelectionGeometry.FramePoints);
@@ -2826,7 +2941,7 @@ begin
     end;
   end;
 
-  DrawPremultipliedBitmap(Canvas, FCanvasBounds, FRenderedDocument);
+  DrawPremultipliedBitmap(Canvas, FCanvasBounds, FRenderCache.Bitmap);
   DrawCanvasCropMarks(Canvas, FCanvasBounds);
   if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
     TryGetScreenLayoutLayerBounds(FEditorState.OpenGroup,
@@ -2847,6 +2962,9 @@ begin
       ToScreenY(RotatedBounds.Bottom));
     SelectionGeometry := BuildSelectionGeometry(LayerRect,
       SelectionFrameOffset(0, FZoom));
+    FTransformInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
+    if FTransformInteraction.Active or FTransformInteraction.HasTransformedSelection then
+      FTransformInteraction.Geometry(SelectionGeometry);
     DrawOverlayPolyline(Canvas, SelectionGeometry.FramePoints);
     if OpenGroupSelectionEditable(FEditorState) then
     begin
@@ -3058,6 +3176,9 @@ begin
     else
       SelectionGeometry := BuildSelectionGeometry(SelectionLayerRect,
         SelectionFrameOffsetPixels);
+    FTransformInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
+    if FTransformInteraction.Active or FTransformInteraction.HasTransformedSelection then
+      FTransformInteraction.Geometry(SelectionGeometry);
     if SelectionGeometry.DrawFrame then
       DrawOverlayPolyline(Canvas, SelectionGeometry.FramePoints);
     if not SelectionLocked then
@@ -3359,9 +3480,11 @@ begin
     Exit;
   if FTextEditing then
     FinishTextEdit(True, False);
+  EndMovePreview;
+  FZoomRenderTimer.Enabled := False;
+  FZoomPreviewActive := False;
   FDocument := Value;
-  FRenderedRevision := -1;
-  FRenderedPreviewStrokeWidth := -1.0;
+  FRenderCache.Reset;
   FPanOffset := TPointF.Zero;
   FViewZoom := 1.0;
   CalculateCanvasBounds;

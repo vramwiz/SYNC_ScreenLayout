@@ -369,6 +369,7 @@ end;
 
 function BuildScreenLayoutBooleanPath(Layer: TVectArtLayer): ISkPath;
 begin
+  try
   if Layer is TScreenLayoutShapeLayer then
     Exit(BuildScreenLayoutShapePath(TScreenLayoutShapeLayer(Layer)));
   // 楕円弧図形はRectangle系の基底クラスなので、四角形より先に判定する。
@@ -383,6 +384,10 @@ begin
   if Layer is TVectArtRectangleLayer then
     Exit(BuildScreenLayoutRectanglePath(TVectArtRectangleLayer(Layer)));
   Result := nil;
+  finally
+    if (Result <> nil) and not Layer.Transform.IsIdentity then
+      Result := Result.Transform(Layer.Transform.Matrix);
+  end;
 end;
 
 end.

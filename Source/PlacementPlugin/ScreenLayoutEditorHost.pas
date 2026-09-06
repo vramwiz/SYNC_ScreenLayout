@@ -21,7 +21,7 @@ uses
 function EnterEditorDpiContext: DPI_AWARENESS_CONTEXT;
 begin
   try
-    // 単独アプリと同じ96 DPI座標でForm全体をWindowsに拡大させ、固定描画部品も同じ寸法にする。
+    // 編集Formを96 DPI座標でWindowsに拡大させ、固定描画部品の寸法差を防ぐ。
     Result := SetThreadDpiAwarenessContext(
       DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED);
     if not IsValidDpiAwarenessContext(Result) then

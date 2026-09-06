@@ -35,12 +35,13 @@ implementation
 
 uses
   System.Math, System.Skia, ScreenLayoutGeometry, ScreenLayoutTextEditing,
-  ScreenLayoutOverlayShapes, ScreenLayoutTextGeometry;
+  ScreenLayoutOverlayShapes, ScreenLayoutTextGeometry, ScreenLayoutProjectiveTransform;
 
 type
   TScreenLayoutTextSelectionRun = record
     Bounds: TRect; // 選択された行内範囲の画面座標矩形。
     Text: string;  // 選択色の矩形上へ描画する文字列。
+    Points: array[0..3] of TPoint; // 変形後の文字選択範囲。
   end;
 
 function HorizontalTextAlignmentOffset(
@@ -76,6 +77,10 @@ var
   Font: ISkFont;
   I: Integer;
   Layout: TScreenLayoutTextLayout;
+  LogicalBottom: Single;
+  LogicalLeft: Single;
+  LogicalRight: Single;
+  LogicalTop: Single;
   LineHeight: Single;
   LineOffset: Single;
   LineWidth: Single;
@@ -88,6 +93,9 @@ var
   SelectedText: string;
   SpanEnd: Integer;
   SpanStart: Integer;
+  Q: TScreenLayoutQuad;
+  P: TPointF;
+  J: Integer;
 begin
   Result := nil;
   FontHeight := 0;
@@ -136,19 +144,42 @@ begin
       Layout.Width, LineWidth);
     RunIndex := Length(Result);
     SetLength(Result, RunIndex + 1);
+    LogicalLeft := State.Layer.Bounds.Left + (LineOffset +
+      MeasureScreenLayoutText(PrefixText, Font,
+        State.Layer.FontSize * State.Layer.LetterSpacingRatio)) * ScaleX;
+    LogicalRight := State.Layer.Bounds.Left + (LineOffset +
+      MeasureScreenLayoutText(PrefixText + SelectedText, Font,
+        State.Layer.FontSize * State.Layer.LetterSpacingRatio)) * ScaleX;
+    LogicalTop := State.Layer.Bounds.Top + I * LineHeight * ScaleY;
+    LogicalBottom := State.Layer.Bounds.Top + (I + 1) * LineHeight * ScaleY;
+    if State.Layer.FlipHorizontal then
+    begin
+      LogicalLeft := State.Layer.Bounds.Left + State.Layer.Bounds.Right -
+        LogicalLeft;
+      LogicalRight := State.Layer.Bounds.Left + State.Layer.Bounds.Right -
+        LogicalRight;
+    end;
+    if State.Layer.FlipVertical then
+    begin
+      LogicalTop := State.Layer.Bounds.Top + State.Layer.Bounds.Bottom -
+        LogicalTop;
+      LogicalBottom := State.Layer.Bounds.Top + State.Layer.Bounds.Bottom -
+        LogicalBottom;
+    end;
     Result[RunIndex].Bounds := Rect(
-      ToScreenX(State.Layer.Bounds.Left + (LineOffset +
-        MeasureScreenLayoutText(PrefixText, Font,
-          State.Layer.FontSize * State.Layer.LetterSpacingRatio)) * ScaleX,
-        State),
-      ToScreenY(State.Layer.Bounds.Top + I * LineHeight * ScaleY, State),
-      ToScreenX(State.Layer.Bounds.Left + (LineOffset +
-        MeasureScreenLayoutText(PrefixText + SelectedText, Font,
-          State.Layer.FontSize * State.Layer.LetterSpacingRatio)) * ScaleX,
-        State),
-      ToScreenY(State.Layer.Bounds.Top + (I + 1) * LineHeight * ScaleY,
-        State));
+      ToScreenX(Min(LogicalLeft, LogicalRight), State),
+      ToScreenY(Min(LogicalTop, LogicalBottom), State),
+      ToScreenX(Max(LogicalLeft, LogicalRight), State),
+      ToScreenY(Max(LogicalTop, LogicalBottom), State));
     Result[RunIndex].Text := SelectedText;
+    Q := ScreenLayoutRectQuad(TRectF.Create(Min(LogicalLeft,LogicalRight),
+      Min(LogicalTop,LogicalBottom),Max(LogicalLeft,LogicalRight),Max(LogicalTop,LogicalBottom)));
+    for J := 0 to 3 do
+    begin
+      P := RotatePointAround(Q[J],State.Layer.Bounds.CenterPoint,State.Layer.RotationDegrees);
+      P := State.Layer.Transform.Map(P);
+      Result[RunIndex].Points[J] := Point(ToScreenX(P.X,State),ToScreenY(P.Y,State));
+    end;
   end;
 end;
 
@@ -224,6 +255,14 @@ begin
     Target.Font.Color := clHighlightText;
     for Run in Runs do
     begin
+      if not State.Layer.Transform.IsIdentity then
+      begin
+        // 射影後の文字を元の矩形文字で覆わず、選択範囲の輪郭を示す。
+        Target.Brush.Style := bsClear;
+        Target.Pen.Color := clHighlight;
+        Target.Polygon(Run.Points);
+        Continue;
+      end;
       Target.Brush.Style := bsSolid;
       Target.Brush.Color := clHighlight;
       Target.FillRect(Run.Bounds);
@@ -256,6 +295,13 @@ begin
     Target.Font.Color := clHighlightText;
     for Run in Runs do
     begin
+      if not State.Layer.Transform.IsIdentity then
+      begin
+        Target.Brush.Style := bsClear;
+        Target.Pen.Color := clHighlight;
+        Target.Polygon(Run.Points);
+        Continue;
+      end;
       Target.Brush.Style := bsSolid;
       Target.Brush.Color := clHighlight;
       Target.FillRect(Run.Bounds);

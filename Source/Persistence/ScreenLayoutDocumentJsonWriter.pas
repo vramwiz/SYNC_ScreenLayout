@@ -52,7 +52,17 @@ var
   Stop: TScreenLayoutGradientStop;
   StopJson: TJSONObject;
   StopsJson: TJSONArray;
+  TransformJson: TJSONArray;
 begin
+  if not Layer.Transform.IsIdentity then
+  begin
+    TransformJson := TJSONArray.Create;
+    for I := 0 to 8 do TransformJson.Add(Layer.Transform.Values[I]);
+    LayerJson.AddPair('transform', TransformJson);
+  end;
+  LayerJson.AddPair('flipHorizontal',
+    TJSONBool.Create(Layer.FlipHorizontal));
+  LayerJson.AddPair('flipVertical', TJSONBool.Create(Layer.FlipVertical));
   PaintStyle := Layer.PaintStyle;
   if PaintStyle.Kind = slpkPattern then
     LayerJson.AddPair('paint', WriteScreenLayoutPattern(PaintStyle.Pattern));

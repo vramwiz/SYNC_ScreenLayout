@@ -1,4 +1,4 @@
-program ScreenLayoutCanvasCreationOverlapTest;
+﻿program ScreenLayoutCanvasCreationOverlapTest;
 
 {$APPTYPE CONSOLE}
 
@@ -19,6 +19,8 @@ uses
     '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutEditorState in
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
+  ScreenLayoutTextGeometry in
+    '..\Source\Core\Geometry\Text\ScreenLayoutTextGeometry.pas',
   ScreenLayoutObjectPropertiesFrame in
     '..\Source\ObjectProperties\ScreenLayoutObjectPropertiesFrame.pas',
   TextRendererSkiaRuntime in
@@ -99,6 +101,9 @@ var
   Group: TScreenLayoutGroupLayer;
   Harness: TDocumentRefreshHarness;
   History: TVectArtEditHistory;
+  I: Integer;
+  Layout: TScreenLayoutTextLayout;
+  NewTextIndex: Integer;
   PropertiesFrame: TObjectPropertiesFrame;
   ResizedBounds: TRectF;
   ResizedWrapWidth: Single;
@@ -168,6 +173,12 @@ begin
     Application.ProcessMessages;
     Check(TScreenLayoutTextLayer(Document[3]).Text = 'A',
       'test text was not committed through the input control');
+    SendMessage(Form.ActiveControl.Handle, WM_IME_STARTCOMPOSITION, 0, 0);
+    SendMessage(Form.ActiveControl.Handle, WM_KEYDOWN, VK_RETURN, 0);
+    Application.ProcessMessages;
+    Check(TScreenLayoutTextLayer(Document[3]).Text = 'A',
+      'IME conversion confirmation inserted a line break');
+    SendMessage(Form.ActiveControl.Handle, WM_IME_ENDCOMPOSITION, 0, 0);
     CanvasControl.ClickAt(Point(150, 150));
     Check(EditorState.CurrentTool = vetSelect,
       'clicking outside edited text did not activate selection mode');
@@ -210,6 +221,27 @@ begin
     Check((CanvasControl.CanvasBounds.Left = CanvasBoundsBeforePan.Left + 20) and
       (CanvasControl.CanvasBounds.Top = CanvasBoundsBeforePan.Top + 25),
       'middle-button drag did not move the canvas');
+
+    EditorState.CurrentTool := vetText;
+    CanvasControl.ClickAt(Point(CanvasControl.CanvasBounds.Left + 10,
+      CanvasControl.CanvasBounds.Top + 10));
+    NewTextIndex := Document.LayerCount - 1;
+    Check((NewTextIndex > 0) and
+      (Document[NewTextIndex] is TScreenLayoutTextLayer),
+      'click did not create auto-width text');
+    for I := 1 to 20 do
+      SendMessage(Form.ActiveControl.Handle, WM_CHAR, Ord('漢'), 0);
+    Application.ProcessMessages;
+    Layout := BuildScreenLayoutTextLayout(
+      TScreenLayoutTextLayer(Document[NewTextIndex]).Text,
+      TScreenLayoutTextLayer(Document[NewTextIndex]).FontFamily,
+      TScreenLayoutTextLayer(Document[NewTextIndex]).FontSize,
+      TScreenLayoutTextLayer(Document[NewTextIndex]).WrapWidth,
+      TScreenLayoutTextLayer(Document[NewTextIndex]).FontStyle,
+      TScreenLayoutTextLayer(Document[NewTextIndex]).LetterSpacingRatio,
+      TScreenLayoutTextLayer(Document[NewTextIndex]).LineSpacingRatio);
+    Check(Length(Layout.Lines) = 1,
+      'click-created text wrapped at its initial guide width');
   finally
     Document.OnChanged := nil;
     PropertiesFrame.Context := nil;

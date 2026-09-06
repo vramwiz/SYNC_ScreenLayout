@@ -5,7 +5,12 @@ unit ScreenLayoutLayerGeometry;
 interface
 
 uses
-  System.Types, ScreenLayoutDocument;
+  System.Types, ScreenLayoutDocument, ScreenLayoutProjectiveTransform;
+
+// 射影変換前の外接範囲を返す。
+function TryGetScreenLayoutLayerSourceBounds(Layer: TVectArtLayer; out Bounds: TRectF): Boolean;
+// 選択枠に使う変形後の四隅を返す。
+function TryGetScreenLayoutLayerQuad(Layer: TVectArtLayer; out Quad: TScreenLayoutQuad): Boolean;
 
 // 表示内容を含むDocument座標の軸平行外接範囲を返す。
 function TryGetScreenLayoutLayerBounds(Layer: TVectArtLayer;
@@ -57,7 +62,7 @@ begin
       Max(SourceBounds.Height, 0.0001) * TargetBounds.Height);
 end;
 
-function TryGetScreenLayoutLayerBounds(Layer: TVectArtLayer;
+function TryGetScreenLayoutLayerSourceBounds(Layer: TVectArtLayer;
   out Bounds: TRectF): Boolean;
 var
   ArcLayer: TScreenLayoutArcLayer;
@@ -127,6 +132,39 @@ begin
   Result := True;
 end;
 
+function TryGetScreenLayoutLayerQuad(Layer: TVectArtLayer; out Quad: TScreenLayoutQuad): Boolean;
+var Bounds: TRectF; Corners: TVectArtQuad; I: Integer;
+begin
+  Result := TryGetScreenLayoutLayerSourceBounds(Layer, Bounds);
+  if not Result then Exit;
+  Quad := ScreenLayoutRectQuad(Bounds);
+  if Layer is TVectArtRectangleLayer then
+    Corners := RectangleCorners(TVectArtRectangleLayer(Layer).Bounds,
+      TVectArtRectangleLayer(Layer).RotationDegrees)
+  else if Layer is TScreenLayoutRectangleLineLayer then
+    Corners := RectangleCorners(TScreenLayoutRectangleLineLayer(Layer).Bounds,
+      TScreenLayoutRectangleLineLayer(Layer).RotationDegrees)
+  else if Layer is TScreenLayoutArcLayer then
+    Corners := RectangleCorners(TScreenLayoutArcLayer(Layer).Bounds,
+      TScreenLayoutArcLayer(Layer).RotationDegrees)
+  else
+    for I := 0 to 3 do Corners[I] := Quad[I];
+  if Layer is TVectArtImageLayer then
+    for I := 0 to 3 do Corners[I] := TVectArtImageLayer(Layer).Points[I];
+  for I := 0 to 3 do Quad[I] := Layer.Transform.Map(Corners[I]);
+end;
+
+function TryGetScreenLayoutLayerBounds(Layer: TVectArtLayer; out Bounds: TRectF): Boolean;
+var Quad: TScreenLayoutQuad;
+begin
+  if (Layer <> nil) and not Layer.Transform.IsIdentity then
+  begin
+    Result := TryGetScreenLayoutLayerQuad(Layer, Quad);
+    if Result then Bounds := ScreenLayoutQuadBounds(Quad) else Bounds := TRectF.Empty;
+  end
+  else Result := TryGetScreenLayoutLayerSourceBounds(Layer, Bounds);
+end;
+
 function TryGetScreenLayoutLayerPaintGeometry(Layer: TVectArtLayer;
   out Bounds: TRectF; out RotationDegrees: Single): Boolean;
 begin
@@ -183,6 +221,7 @@ end;
 procedure RotateScreenLayoutLayer(Layer: TVectArtLayer;
   const Center: TPointF; Degrees: Single);
 var
+  Transform: TScreenLayoutTransform;
   Bounds: TRectF;
   BoundsCenter: TPointF;
   Contours: TArray<TScreenLayoutContour>;
@@ -194,6 +233,18 @@ var
   TextPathLayer: TScreenLayoutTextPathLayer;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
+  if not Layer.Transform.IsIdentity then
+  begin
+    Transform := TScreenLayoutTransform.Identity;
+    Transform.Values[0] := Cos(DegToRad(Degrees));
+    Transform.Values[1] := -Sin(DegToRad(Degrees));
+    Transform.Values[3] := -Transform.Values[1];
+    Transform.Values[4] := Transform.Values[0];
+    Transform.Values[2] := Center.X - Transform.Values[0] * Center.X - Transform.Values[1] * Center.Y;
+    Transform.Values[5] := Center.Y - Transform.Values[3] * Center.X - Transform.Values[4] * Center.Y;
+    Layer.Transform := Layer.Transform.ThenApply(Transform);
+    Exit;
+  end;
   if Layer is TScreenLayoutGroupLayer then
   begin
     GroupLayer := TScreenLayoutGroupLayer(Layer);
@@ -263,6 +314,7 @@ end;
 procedure ScaleScreenLayoutLayer(Layer: TVectArtLayer;
   const SourceBounds, TargetBounds: TRectF);
 var
+  Transform: TScreenLayoutTransform;
   Bounds: TRectF;
   Contours: TArray<TScreenLayoutContour>;
   GroupLayer: TScreenLayoutGroupLayer;
@@ -274,6 +326,13 @@ var
   TextPathLayer: TScreenLayoutTextPathLayer;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
+  if not Layer.Transform.IsIdentity then
+  begin
+    if not TryScreenLayoutQuadTransform(ScreenLayoutRectQuad(SourceBounds),
+      ScreenLayoutRectQuad(TargetBounds), Transform) then Exit;
+    Layer.Transform := Layer.Transform.ThenApply(Transform);
+    Exit;
+  end;
   if (SourceBounds.Width <= 0.0001) or
     (SourceBounds.Height <= 0.0001) then
     Exit;
@@ -364,6 +423,7 @@ end;
 
 procedure TranslateScreenLayoutLayer(Layer: TVectArtLayer; DX, DY: Single);
 var
+  Transform: TScreenLayoutTransform;
   Bounds: TRectF;
   Contours: TArray<TScreenLayoutContour>;
   GroupLayer: TScreenLayoutGroupLayer;
@@ -373,6 +433,14 @@ var
   TextPathLayer: TScreenLayoutTextPathLayer;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
+  if not Layer.Transform.IsIdentity then
+  begin
+    Transform := TScreenLayoutTransform.Identity;
+    Transform.Values[2] := DX;
+    Transform.Values[5] := DY;
+    Layer.Transform := Layer.Transform.ThenApply(Transform);
+    Exit;
+  end;
   if Layer is TScreenLayoutGroupLayer then
   begin
     GroupLayer := TScreenLayoutGroupLayer(Layer);

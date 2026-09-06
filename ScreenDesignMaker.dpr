@@ -13,15 +13,19 @@ uses
   HorizontalTrackBarRenderer in 'Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas',
   HorizontalTrackBarControl in 'Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas',
   ScreenLayoutMainForm in 'Source\Shell\ScreenLayoutMainForm.pas' {MainForm},
-  ScreenLayoutObjectContextMenu in 'Source\Shell\ScreenLayoutObjectContextMenu.pas',
-  ScreenLayoutTextContextMenu in 'Source\Shell\ScreenLayoutTextContextMenu.pas',
-  ScreenLayoutEditActionsUI in 'Source\Shell\ScreenLayoutEditActionsUI.pas',
+  ScreenLayoutObjectContextMenu in 'Source\Shell\Menus\ScreenLayoutObjectContextMenu.pas',
+  ScreenLayoutTextContextMenu in 'Source\Shell\Menus\ScreenLayoutTextContextMenu.pas',
+  ScreenLayoutTransformContextMenu in 'Source\Shell\Menus\ScreenLayoutTransformContextMenu.pas',
+  ScreenLayoutArrangementContextMenu in 'Source\Shell\Menus\ScreenLayoutArrangementContextMenu.pas',
+  ScreenLayoutEditActionsUI in 'Source\Shell\Toolbars\ScreenLayoutEditActionsUI.pas',
   ScreenLayoutStrokeStyleCombo in 'Source\ObjectProperties\Geometry\ScreenLayoutStrokeStyleCombo.pas',
-  ScreenLayoutLineToolbar in 'Source\Shell\ScreenLayoutLineToolbar.pas',
-  ScreenLayoutLineToolbarOperations in 'Source\Shell\ScreenLayoutLineToolbarOperations.pas',
-  ScreenLayoutTextToolbarOperations in 'Source\Shell\ScreenLayoutTextToolbarOperations.pas',
-  ScreenLayoutLineStyleControls in 'Source\Shell\ScreenLayoutLineStyleControls.pas',
+  ScreenLayoutLineToolbar in 'Source\Shell\Toolbars\ScreenLayoutLineToolbar.pas',
+  ScreenLayoutLineToolbarOperations in 'Source\Shell\Toolbars\ScreenLayoutLineToolbarOperations.pas',
+  ScreenLayoutTextToolbarOperations in 'Source\Shell\Toolbars\ScreenLayoutTextToolbarOperations.pas',
+  ScreenLayoutLineStyleControls in 'Source\Shell\Toolbars\ScreenLayoutLineStyleControls.pas',
   ScreenLayoutCanvasSettingsDialog in 'Source\Shell\ScreenLayoutCanvasSettingsDialog.pas',
+  ScreenLayoutProjectiveTransform in 'Source\Core\Geometry\ScreenLayoutProjectiveTransform.pas',
+  ScreenLayoutTransformInteraction in 'Source\Editor\Interaction\Transform\ScreenLayoutTransformInteraction.pas',
   ScreenLayoutDocument in 'Source\Core\Model\ScreenLayoutDocument.pas',
   ScreenLayoutPaintStyles in 'Source\Core\Model\ScreenLayoutPaintStyles.pas',
   ScreenLayoutTextureInteraction in 'Source\Editor\Interaction\Texture\ScreenLayoutTextureInteraction.pas',
@@ -51,6 +55,7 @@ uses
   ScreenLayoutShapeBooleanOperations in 'Source\Core\Geometry\Shape\ScreenLayoutShapeBooleanOperations.pas',
   ScreenLayoutLayerGeometry in 'Source\Core\Geometry\ScreenLayoutLayerGeometry.pas',
   ScreenLayoutRenderer in 'Source\Rendering\ScreenLayoutRenderer.pas',
+  ScreenLayoutCanvasRenderCache in 'Source\Rendering\Cache\ScreenLayoutCanvasRenderCache.pas',
   ScreenLayoutPaintRenderer in 'Source\Rendering\Paint\ScreenLayoutPaintRenderer.pas',
   ScreenLayoutCanvasGuides in 'Source\Rendering\ScreenLayoutCanvasGuides.pas',
   ScreenLayoutCanvasPreview in 'Source\Rendering\ScreenLayoutCanvasPreview.pas',
@@ -71,6 +76,9 @@ uses
   ScreenLayoutGroupCommands in 'Source\Core\Commands\Layer\ScreenLayoutGroupCommands.pas',
   ScreenLayoutGroupChildCommands in 'Source\Core\Commands\Layer\ScreenLayoutGroupChildCommands.pas',
   ScreenLayoutGroupTransformCommands in 'Source\Core\Commands\Layer\ScreenLayoutGroupTransformCommands.pas',
+  ScreenLayoutLayerFlipOperations in 'Source\Core\Commands\Layer\ScreenLayoutLayerFlipOperations.pas',
+  ScreenLayoutLayerArrangementOperations in 'Source\Core\Commands\Layer\ScreenLayoutLayerArrangementOperations.pas',
+  ScreenLayoutLayerTransformCommands in 'Source\Core\Commands\Layer\ScreenLayoutLayerTransformCommands.pas',
   ScreenLayoutFilterCommands in 'Source\Core\Commands\ScreenLayoutFilterCommands.pas',
   ScreenLayoutPaintCommands in 'Source\Core\Commands\ScreenLayoutPaintCommands.pas',
   ScreenLayoutEditHistory in 'Source\Core\Model\ScreenLayoutEditHistory.pas',
@@ -112,6 +120,8 @@ uses
   ScreenLayoutToolPaletteFrame in 'Source\ToolPalette\ScreenLayoutToolPaletteFrame.pas',
   ScreenLayoutToolPalette in 'Source\ToolPalette\ScreenLayoutToolPalette.pas',
   WindowsImeController in 'Lib\InputMethod\WindowsImeController.pas';
+
+{$R *.res}
 
 begin
   Application.Initialize;

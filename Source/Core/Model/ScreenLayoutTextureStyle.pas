@@ -15,6 +15,8 @@ type
     OffsetX: Single;                    // オブジェクト幅に対する中心からの移動量。
     OffsetY: Single;                    // オブジェクト高さに対する中心からの移動量。
     Angle: Single;                      // オブジェクトに対する画像回転角（度）。
+    FlipHorizontal: Boolean;            // オブジェクトのローカル左右反転を画像配置にも適用する。
+    FlipVertical: Boolean;              // オブジェクトのローカル上下反転を画像配置にも適用する。
     // 未設定画像と中央配置を準備する。
     class function DefaultStyle: TScreenLayoutTextureStyle; static;
     // 埋め込み画像と配置がすべて等しいかを返す。
@@ -33,7 +35,9 @@ function TScreenLayoutTextureStyle.SameAs(const Other: TScreenLayoutTextureStyle
 begin
   Result := (Data = Other.Data) and (FileName = Other.FileName) and (Fit = Other.Fit) and
     (RepeatMode = Other.RepeatMode) and (Scale = Other.Scale) and (OffsetX = Other.OffsetX) and
-    (OffsetY = Other.OffsetY) and (Angle = Other.Angle);
+    (OffsetY = Other.OffsetY) and (Angle = Other.Angle) and
+    (FlipHorizontal = Other.FlipHorizontal) and
+    (FlipVertical = Other.FlipVertical);
 end;
 
 end.

@@ -15,7 +15,7 @@ implementation
 
 uses
   System.Generics.Collections, System.Types, Winapi.Windows,
-  ScreenLayoutEditCommands;
+  ScreenLayoutEditCommands, ScreenLayoutGroupTransformCommands;
 
 const
   NUDGE_DISTANCE       = 1;
@@ -38,6 +38,7 @@ var
   NewBounds: TArray<TRectF>;
   OldImagePoints: TArray<TVectArtImagePoints>;
   OldBounds: TArray<TRectF>;
+  HasTransform: Boolean;
 begin
   Result := False;
   if (ADocument = nil) or (AEditHistory = nil) or
@@ -54,6 +55,25 @@ begin
     VK_UP:    DY := -Distance;
     VK_RIGHT: DX := Distance;
     VK_DOWN:  DY := Distance;
+  end;
+
+  HasTransform := False;
+  for I := 1 to ADocument.LayerCount - 1 do
+    if ADocument.IsLayerSelected(I) then
+    begin
+      if ADocument[I].Locked then Exit;
+      HasTransform := HasTransform or not ADocument[I].Transform.IsIdentity or
+        (ADocument[I] is TScreenLayoutGroupLayer);
+    end;
+  if HasTransform then
+  begin
+    Command := TVectArtCompoundCommand.Create;
+    for I := 1 to ADocument.LayerCount - 1 do
+      if ADocument.IsLayerSelected(I) then
+        Command.Add(TScreenLayoutTranslateLayerCommand.Create(ADocument, ADocument[I], DX, DY));
+    Command.Execute;
+    AEditHistory.AddApplied(Command);
+    Exit(True);
   end;
 
   Indices := TList<Integer>.Create;

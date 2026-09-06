@@ -33,7 +33,7 @@ type
 implementation
 
 uses
-  Vcl.Controls, Vcl.Graphics;
+  Winapi.Windows, Vcl.Controls, Vcl.Graphics;
 
 {$R ScreenLayoutLayerPanelFrame.dfm}
 
@@ -59,7 +59,7 @@ begin
   FLayerActions := TVectArtLayerActionsControl.Create(Self);
   FLayerActions.Parent := Self;
   FLayerActions.Align := alBottom;
-  FLayerActions.Height := 34;
+  FLayerActions.Height := MulDiv(34, CurrentPPI, 96);
   FLayerActions.BringToFront;
 end;
 

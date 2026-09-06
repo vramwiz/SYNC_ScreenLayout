@@ -197,6 +197,7 @@ end;
 procedure ApplyScreenLayoutPattern(const Paint: ISkPaint; const Style: TScreenLayoutPatternStyle;
   const Bounds: TRectF; Rotation, Opacity: Single);
 var
+  FlipX, FlipY: Single;
   Image: ISkImage;
   Size: TSizeF;
   Tile: TPatternTile;
@@ -209,9 +210,12 @@ begin
     Size := Tile.Size;
   end
   else Image := MakeScreenLayoutPatternTile(Style, 1, Size);
+  if Style.FlipHorizontal then FlipX := -1 else FlipX := 1;
+  if Style.FlipVertical then FlipY := -1 else FlipY := 1;
   Matrix := TMatrix.CreateScaling(Size.Width / Image.Width, Size.Height / Image.Height) *
     TMatrix.CreateRotation(DegToRad(Style.Number('angle'))) *
     TMatrix.CreateTranslation(Style.Number('offsetX'), Style.Number('offsetY')) *
+    TMatrix.CreateScaling(FlipX, FlipY) *
     TMatrix.CreateRotation(DegToRad(Rotation)) *
     TMatrix.CreateTranslation(Bounds.CenterPoint.X, Bounds.CenterPoint.Y);
   Paint.Shader := Image.MakeShader(Matrix, TSkSamplingOptions.Create(TSkFilterMode.Linear, TSkMipmapMode.None),

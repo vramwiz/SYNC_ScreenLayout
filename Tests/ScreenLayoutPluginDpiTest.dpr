@@ -1,4 +1,4 @@
-﻿// DPI対応ホスト内でも編集Formだけを単独アプリと同じ96 DPI座標で生成できることを確認する。
+﻿// プラグイン編集Formだけを96 DPI座標で生成できることを確認する。
 program ScreenLayoutPluginDpiTest;
 
 {$APPTYPE CONSOLE}

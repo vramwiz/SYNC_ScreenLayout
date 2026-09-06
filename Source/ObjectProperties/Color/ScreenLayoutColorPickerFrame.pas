@@ -153,7 +153,7 @@ begin
   FTitleLabel.Caption := '色';
   FTitleLabel.Color := COLOR_HEADER;
   FTitleLabel.Font.Name := 'Segoe UI';
-  FTitleLabel.Font.Height := -12;
+  FTitleLabel.Font.Height := -MulDiv(12, CurrentPPI, 96);
   FTitleLabel.Font.Style := [fsBold];
   FTitleLabel.Font.Color := COLOR_TEXT;
   FTitleLabel.ParentColor := False;
@@ -183,7 +183,7 @@ begin
   FOpacityLabel.Parent := Self;
   FOpacityLabel.AutoSize := False;
   FOpacityLabel.Font.Name := 'Segoe UI';
-  FOpacityLabel.Font.Height := -11;
+  FOpacityLabel.Font.Height := -MulDiv(11, CurrentPPI, 96);
   FOpacityLabel.Font.Color := COLOR_TEXT;
   FOpacityLabel.ParentFont := False;
   FOpacityLabel.Caption := '透明度：';

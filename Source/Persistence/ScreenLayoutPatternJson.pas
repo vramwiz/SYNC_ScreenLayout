@@ -35,6 +35,18 @@ begin
     raise EConvertError.Create('Pattern field out of range: ' + Name);
 end;
 
+function OptionalBoolean(Json: TJSONObject; const Name: string): Boolean;
+var
+  Value: TJSONValue;
+begin
+  Value := Json.GetValue(Name);
+  if Value = nil then
+    Exit(False);
+  if not (Value is TJSONBool) then
+    raise EConvertError.Create('Invalid pattern field: ' + Name);
+  Result := TJSONBool(Value).AsBoolean;
+end;
+
 function WriteScreenLayoutPattern(const Style: TScreenLayoutPatternStyle): TJSONObject;
 var Params, Colors, Color: TJSONObject; V: TScreenLayoutPatternValue; C: TScreenLayoutPatternColor;
 begin
@@ -42,6 +54,8 @@ begin
   try
     Result.AddPair('type', 'pattern');
     Result.AddPair('patternId', Style.Id);
+    Result.AddPair('flipHorizontal', TJSONBool.Create(Style.FlipHorizontal));
+    Result.AddPair('flipVertical', TJSONBool.Create(Style.FlipVertical));
     Params := TJSONObject.Create;
     Result.AddPair('parameters', Params);
     for V in Style.Values do Params.AddPair(V.Id, TJSONNumber.Create(V.Value));
@@ -72,6 +86,8 @@ begin
     raise EConvertError.Create('Invalid pattern type');
   Kind := ScreenLayoutPatternKind(UniqueValue(Json, 'patternId', TJSONString).Value);
   Result := TScreenLayoutPatternStyle.Create(Kind, clBlack);
+  Result.FlipHorizontal := OptionalBoolean(Json, 'flipHorizontal');
+  Result.FlipVertical := OptionalBoolean(Json, 'flipVertical');
   Params := TJSONObject(UniqueValue(Json, 'parameters', TJSONObject));
   Colors := TJSONObject(UniqueValue(Json, 'colors', TJSONObject));
   if Params.Count <> Length(Result.Values) then raise EConvertError.Create('Invalid pattern parameter count');

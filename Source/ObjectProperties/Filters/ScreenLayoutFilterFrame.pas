@@ -205,7 +205,7 @@ begin
   FCaptionLabel.Height := MulDiv(CAPTION_HEIGHT, CurrentPPI, 96);
   FCaptionLabel.Caption := 'フィルター';
   FCaptionLabel.Font.Name := 'Segoe UI';
-  FCaptionLabel.Font.Height := -12;
+  FCaptionLabel.Font.Height := -MulDiv(12, CurrentPPI, 96);
   FCaptionLabel.Font.Style := [fsBold];
   FCaptionLabel.Font.Color := COLOR_TEXT_PRIMARY;
   FCaptionLabel.Layout := tlCenter;
@@ -282,12 +282,11 @@ begin
     Exit;
   FAddMenuGroup := TVectArtDarkMenuGroup.Create(Self);
   FAddMenu := TVectArtDarkPopupMenu.CreatePopup(Self, Host,
-    MulDiv(MENU_WIDTH, CurrentPPI, 96),
-    MulDiv(ITEM_HEIGHT * 3, CurrentPPI, 96));
+    MENU_WIDTH, ITEM_HEIGHT * 3);
   FAddMenuGroup.RegisterMenu(FAddMenu);
   AddMenuItem('縁取り', slfkOutline, 0);
-  AddMenuItem('影', slfkShadow, MulDiv(ITEM_HEIGHT, CurrentPPI, 96));
-  AddMenuItem('ぼかし', slfkBlur, MulDiv(ITEM_HEIGHT * 2, CurrentPPI, 96));
+  AddMenuItem('影', slfkShadow, ITEM_HEIGHT);
+  AddMenuItem('ぼかし', slfkBlur, ITEM_HEIGHT * 2);
 end;
 
 destructor TScreenLayoutFilterFrame.Destroy;

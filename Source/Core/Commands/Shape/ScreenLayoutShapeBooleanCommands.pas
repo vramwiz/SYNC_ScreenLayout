@@ -4,7 +4,7 @@ unit ScreenLayoutShapeBooleanCommands;
 interface
 
 uses
-  ScreenLayoutDocument, ScreenLayoutEditCommands;
+  ScreenLayoutDocument, ScreenLayoutEditCommands, ScreenLayoutProjectiveTransform;
 
 type
   TScreenLayoutShapeBooleanOriginalKind = (slsbokRectangle,
@@ -12,6 +12,7 @@ type
     slsbokShape);
 
   TScreenLayoutShapeBooleanOriginal = record
+    Transform: TArray<Double>; // Undoで元の表示変形を復元する。
     Kind: TScreenLayoutShapeBooleanOriginalKind;             // Undoで復元するレイヤー型。
     EllipseData: TScreenLayoutEllipseData;                   // 楕円だった場合の全属性。
     EllipseArcShapeData: TScreenLayoutEllipseArcShapeData;   // 楕円弧図形だった場合の全属性。
@@ -67,6 +68,7 @@ var
   ShapeLayer: TScreenLayoutShapeLayer;
 begin
   Original := Default(TScreenLayoutShapeBooleanOriginal);
+  Original.Transform := FDocument[Index].Transform.ToArray;
   // 楕円弧図形はRectangle系の基底クラスなので、四角形より先に判定する。
   if FDocument[Index] is TScreenLayoutEllipseArcShapeLayer then
   begin
@@ -243,6 +245,8 @@ begin
           FOriginalIndices[I] := FDocument.InsertShape(
             FOriginalIndices[I], FOriginalData[I].ShapeData);
       end;
+    for I := 0 to High(FOriginalIndices) do
+      FDocument[FOriginalIndices[I]].Transform := TScreenLayoutTransform.FromArray(FOriginalData[I].Transform);
     FDocument.SetSelectedLayers(FBeforeSelection);
   finally
     FDocument.EndUpdate;

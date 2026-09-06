@@ -6,7 +6,8 @@ interface
 
 uses
   System.Classes, System.Generics.Collections, System.SysUtils, System.Types,
-  Vcl.Graphics, ScreenLayoutFilters, ScreenLayoutPaintStyles;
+  Vcl.Graphics, ScreenLayoutFilters, ScreenLayoutPaintStyles,
+  ScreenLayoutProjectiveTransform;
 
 const
   SCREEN_LAYOUT_TEXT_PATH_CHARACTER_SCALE_MIN = 0.1;
@@ -59,12 +60,15 @@ type
   TVectArtLayer = class
   private
     FFilters: TObjectList<TScreenLayoutFilter>;
+    FFlipHorizontal: Boolean;
+    FFlipVertical: Boolean;
     FKind: TVectArtLayerKind;
     FLocked: Boolean;
     FName: string;
     FOpacity: Single;
     FPaintStyle: TScreenLayoutPaintStyle;
     FVisible: Boolean;
+    FTransform: TScreenLayoutTransform;
     function GetFilter(Index: Integer): TScreenLayoutFilter;
     function GetFilterCount: Integer;
   protected
@@ -86,6 +90,9 @@ type
     function SupportsPathEditing: Boolean; virtual;
     property FilterCount: Integer read GetFilterCount;
     property Filters[Index: Integer]: TScreenLayoutFilter read GetFilter;
+    // 文字など座標だけでは鏡像を表せない内容を、ローカル中心で反転する状態。
+    property FlipHorizontal: Boolean read FFlipHorizontal write FFlipHorizontal;
+    property FlipVertical: Boolean read FFlipVertical write FFlipVertical;
     property Kind: TVectArtLayerKind read FKind;
     property Locked: Boolean read FLocked write FLocked;
     property Name: string read FName write FName;
@@ -94,6 +101,8 @@ type
     property PaintStyle: TScreenLayoutPaintStyle read FPaintStyle
       write FPaintStyle;
     property Visible: Boolean read FVisible write FVisible;
+    // 元の編集データを保ったまま表示へ適用する射影変換。
+    property Transform: TScreenLayoutTransform read FTransform write FTransform;
   end;
 
   // 複数レイヤーを積層順のまま所有する。子の座標はDocument座標のまま保持する。
@@ -145,6 +154,7 @@ type
   end;
 
   TVectArtRectangleData = record
+    Transform: TArray<Double>; // 復元時にも保持する表示変形。未設定は恒等変換。
     Bounds: TRectF;                         // 回転前の基本矩形。
     FillColor: TColor;                      // 内部の塗り色。
     PaintStyle: TScreenLayoutPaintStyle;    // 単色以外を含む内部の描画スタイル。
@@ -173,6 +183,7 @@ type
   end;
 
   TScreenLayoutRoundedRectangleData = record
+    Transform: TArray<Double>; // 復元時にも保持する表示変形。未設定は恒等変換。
     Bounds: TRectF;                         // 回転前の基本矩形。
     CornerRadii: TScreenLayoutCornerRadii; // 左上から時計回りの角丸半径。
     FillColor: TColor;                      // 内部の塗り色。
@@ -191,6 +202,7 @@ type
   end;
 
   TScreenLayoutEllipseData = record
+    Transform: TArray<Double>; // 復元時にも保持する表示変形。未設定は恒等変換。
     Bounds: TRectF;          // 回転前の楕円へ外接する基本矩形。
     FillColor: TColor;       // 楕円内部の塗り色。
     PaintStyle: TScreenLayoutPaintStyle; // 単色以外を含む内部の描画スタイル。
@@ -285,6 +297,7 @@ type
   end;
 
   TScreenLayoutTextData = record
+    Transform: TArray<Double>; // 復元時にも保持する表示変形。未設定は恒等変換。
     Alignment: TScreenLayoutTextAlignment; // 枠内の上中下と左中央右を組み合わせた配置。
     TextPathAttachment: TScreenLayoutTextPathAttachment; // Pathへ接触させる文字セルの面。
     Bounds: TRectF;          // 文字の組版実寸または変形後の表示範囲。
@@ -329,6 +342,7 @@ type
   end;
 
   TScreenLayoutRectangleLineData = record
+    Transform: TArray<Double>; // 復元時にも保持する表示変形。未設定は恒等変換。
     Bounds: TRectF;          // 回転前の四角線へ外接する基本矩形。
     Locked: Boolean;         // 編集を禁止する状態。
     Name: string;            // レイヤー一覧の表示名。
@@ -353,6 +367,7 @@ type
   end;
 
   TScreenLayoutRoundedRectangleLineData = record
+    Transform: TArray<Double>; // 復元時にも保持する表示変形。未設定は恒等変換。
     Bounds: TRectF;
     CornerRadii: TScreenLayoutCornerRadii;
     Locked: Boolean;
@@ -372,6 +387,7 @@ type
   end;
 
   TScreenLayoutEllipseLineData = record
+    Transform: TArray<Double>; // 復元時にも保持する表示変形。未設定は恒等変換。
     Bounds: TRectF;
     Locked: Boolean;
     Name: string;
@@ -407,6 +423,7 @@ type
   end;
 
   TScreenLayoutArcData = record
+    Transform: TArray<Double>; // 復元時にも保持する表示変形。未設定は恒等変換。
     Bounds: TRectF;            // 回転前の基礎楕円へ外接する基本矩形。
     LineCap: TVectArtLineCap;  // 開いた円弧の両端形状。
     Locked: Boolean;           // 編集を禁止する状態。
@@ -436,6 +453,7 @@ type
   end;
 
   TScreenLayoutEllipseArcShapeData = record
+    Transform: TArray<Double>; // 復元時にも保持する表示変形。未設定は恒等変換。
     Bounds: TRectF;
     FillColor: TColor;
     PaintStyle: TScreenLayoutPaintStyle;
@@ -476,6 +494,7 @@ type
   end;
 
   TVectArtPathData = record
+    Transform: TArray<Double>; // 復元時にも保持する表示変形。未設定は恒等変換。
     Closed: Boolean;                        // 終点と始点を閉じる状態。
     LineCap: TVectArtLineCap;               // 開いたPathの線端形状。
     Locked: Boolean;                        // 編集を禁止する状態。
@@ -515,6 +534,7 @@ type
   end;
 
   TScreenLayoutShapeData = record
+    Transform: TArray<Double>; // 復元時にも保持する表示変形。未設定は恒等変換。
     Contours: TArray<TScreenLayoutContour>; // 外周、穴、分離領域を含む閉輪郭群。
     FillColor: TColor;                      // Even-Odd等の規則で塗る色。
     PaintStyle: TScreenLayoutPaintStyle;    // 主となる塗りへ適用する描画スタイル。
@@ -545,6 +565,7 @@ type
   end;
 
   TVectArtImageData = record
+    Transform: TArray<Double>; // 復元時にも保持する表示変形。未設定は恒等変換。
     Locked: Boolean;                     // 編集を禁止する状態。
     Name: string;                        // レイヤー一覧の表示名。
     Opacity: Single;                     // 0.0..1.0のレイヤー不透明度。
@@ -559,6 +580,8 @@ type
   private
     FLayers: TObjectList<TVectArtLayer>;
     FChangePending: Boolean;
+    FDeferredChanged: Boolean;
+    FDeferredNotificationCount: Integer;
     FInteractiveChanged: Boolean;
     FInteractiveUpdateCount: Integer;
     FOnChanged: TNotifyEvent;
@@ -579,9 +602,13 @@ type
     constructor Create;
     destructor Destroy; override;
     procedure BeginInteractiveUpdate;
+    // 高頻度操作中の変更通知だけをまとめ、RevisionとDocument内容は即時更新する。
+    procedure BeginDeferredNotification;
     procedure BeginUpdate;
     procedure Changed;
     procedure EndInteractiveUpdate;
+    // 対応する開始以降に変更があれば、最後にOnChangedを1回だけ呼ぶ。
+    procedure EndDeferredNotification;
     procedure EndUpdate;
     function GetSelectedLayerIndices: TArray<Integer>;
     // 所有権を呼び出し側へ移し、レイヤーデータを破棄せずDocumentから取り外す。
@@ -913,6 +940,7 @@ constructor TVectArtLayer.Create(AKind: TVectArtLayerKind;
 begin
   inherited Create;
   FFilters := TObjectList<TScreenLayoutFilter>.Create(True);
+  FTransform := TScreenLayoutTransform.Identity;
   FKind := AKind;
   FLocked := False;
   FName := AName;
@@ -1374,10 +1402,20 @@ begin
     Exit;
   end;
   Inc(FRevision);
+  if FDeferredNotificationCount > 0 then
+  begin
+    FDeferredChanged := True;
+    Exit;
+  end;
   if FInteractiveUpdateCount > 0 then
     FInteractiveChanged := True;
   if Assigned(FOnChanged) then
     FOnChanged(Self);
+end;
+
+procedure TVectArtDocument.BeginDeferredNotification;
+begin
+  Inc(FDeferredNotificationCount);
 end;
 
 procedure TVectArtDocument.BeginInteractiveUpdate;
@@ -1403,6 +1441,19 @@ begin
   end;
 end;
 
+procedure TVectArtDocument.EndDeferredNotification;
+begin
+  if FDeferredNotificationCount <= 0 then
+    Exit;
+  Dec(FDeferredNotificationCount);
+  if (FDeferredNotificationCount = 0) and FDeferredChanged then
+  begin
+    FDeferredChanged := False;
+    if Assigned(FOnChanged) then
+      FOnChanged(Self);
+  end;
+end;
+
 procedure TVectArtDocument.EndUpdate;
 begin
   if FUpdateCount <= 0 then
@@ -1417,6 +1468,11 @@ end;
 
 procedure TVectArtDocument.SelectionChanged;
 begin
+  if FDeferredNotificationCount > 0 then
+  begin
+    FDeferredChanged := True;
+    Exit;
+  end;
   if Assigned(FOnChanged) then
     FOnChanged(Self);
 end;
@@ -1486,6 +1542,7 @@ begin
   RectangleLayer.RotationDegrees := NormalizeAngleDegrees(
     Data.RotationDegrees);
   RectangleLayer.Visible := Data.Visible;
+  RectangleLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, RectangleLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
@@ -1510,6 +1567,7 @@ begin
   RoundedLayer.RotationDegrees := NormalizeAngleDegrees(
     Data.RotationDegrees);
   RoundedLayer.Visible := Data.Visible;
+  RoundedLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, RoundedLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
@@ -1534,6 +1592,7 @@ begin
   EllipseLayer.RotationDegrees := NormalizeAngleDegrees(
     Data.RotationDegrees);
   EllipseLayer.Visible := Data.Visible;
+  EllipseLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, EllipseLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
@@ -1564,6 +1623,7 @@ begin
   ArcLayer.SweepAngleDegrees := EnsureRange(Data.SweepAngleDegrees,
     0.0, 360.0);
   ArcLayer.Visible := Data.Visible;
+  ArcLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, ArcLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
@@ -1591,6 +1651,7 @@ begin
   ShapeLayer.SweepAngleDegrees := EnsureRange(Data.SweepAngleDegrees,
     0.0, 360.0);
   ShapeLayer.Visible := Data.Visible;
+  ShapeLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, ShapeLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
@@ -1616,6 +1677,7 @@ begin
   LineLayer.StrokeStyle := Data.StrokeStyle;
   LineLayer.StrokeWidth := Max(Data.StrokeWidth, 0.1);
   LineLayer.Visible := Data.Visible;
+  LineLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, LineLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
@@ -1642,6 +1704,7 @@ begin
   LineLayer.StrokeStyle := Data.StrokeStyle;
   LineLayer.StrokeWidth := Max(Data.StrokeWidth, 0.1);
   LineLayer.Visible := Data.Visible;
+  LineLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, LineLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
@@ -1667,6 +1730,7 @@ begin
   LineLayer.StrokeStyle := Data.StrokeStyle;
   LineLayer.StrokeWidth := Max(Data.StrokeWidth, 0.1);
   LineLayer.Visible := Data.Visible;
+  LineLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, LineLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
@@ -1692,6 +1756,7 @@ begin
   PathLayer.MifStrokeStyle := Data.MifStrokeStyle;
   PathLayer.StrokeWidth := Max(Data.StrokeWidth, 0.0);
   PathLayer.Visible := Data.Visible;
+  PathLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, PathLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
@@ -1718,6 +1783,7 @@ begin
   ShapeLayer.StrokeStyle := Data.StrokeStyle;
   ShapeLayer.StrokeWidth := Max(Data.StrokeWidth, 0.0);
   ShapeLayer.Visible := Data.Visible;
+  ShapeLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, ShapeLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
@@ -1739,6 +1805,7 @@ begin
   ImageLayer.Locked := Data.Locked;
   ImageLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
   ImageLayer.Visible := Data.Visible;
+  ImageLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, ImageLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
@@ -1769,6 +1836,7 @@ begin
   TextLayer.RotationDegrees := Data.RotationDegrees;
   TextLayer.TransformMode := Data.TransformMode;
   TextLayer.Visible := Data.Visible;
+  TextLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, TextLayer);
   for I := 0 to FSelectedLayers.Count - 1 do
     if FSelectedLayers[I] >= Result then
@@ -1824,6 +1892,7 @@ begin
   Data.Opacity := RectangleLayer.Opacity;
   Data.RotationDegrees := RectangleLayer.RotationDegrees;
   Data.Visible := RectangleLayer.Visible;
+  Data.Transform := RectangleLayer.Transform.ToArray;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -1861,6 +1930,7 @@ begin
   Data.Opacity := RoundedLayer.Opacity;
   Data.RotationDegrees := RoundedLayer.RotationDegrees;
   Data.Visible := RoundedLayer.Visible;
+  Data.Transform := RoundedLayer.Transform.ToArray;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -1897,6 +1967,7 @@ begin
   Data.Opacity := EllipseLayer.Opacity;
   Data.RotationDegrees := EllipseLayer.RotationDegrees;
   Data.Visible := EllipseLayer.Visible;
+  Data.Transform := EllipseLayer.Transform.ToArray;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -1938,6 +2009,7 @@ begin
   Data.StrokeWidth := ArcLayer.StrokeWidth;
   Data.SweepAngleDegrees := ArcLayer.SweepAngleDegrees;
   Data.Visible := ArcLayer.Visible;
+  Data.Transform := ArcLayer.Transform.ToArray;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -1976,6 +2048,7 @@ begin
   Data.StrokeStyle := LineLayer.StrokeStyle;
   Data.StrokeWidth := LineLayer.StrokeWidth;
   Data.Visible := LineLayer.Visible;
+  Data.Transform := LineLayer.Transform.ToArray;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -2015,6 +2088,7 @@ begin
   Data.StrokeStyle := LineLayer.StrokeStyle;
   Data.StrokeWidth := LineLayer.StrokeWidth;
   Data.Visible := LineLayer.Visible;
+  Data.Transform := LineLayer.Transform.ToArray;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -2053,6 +2127,7 @@ begin
   Data.StartAngleDegrees := ShapeLayer.StartAngleDegrees;
   Data.SweepAngleDegrees := ShapeLayer.SweepAngleDegrees;
   Data.Visible := ShapeLayer.Visible;
+  Data.Transform := ShapeLayer.Transform.ToArray;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -2091,6 +2166,7 @@ begin
   Data.StrokeStyle := LineLayer.StrokeStyle;
   Data.StrokeWidth := LineLayer.StrokeWidth;
   Data.Visible := LineLayer.Visible;
+  Data.Transform := LineLayer.Transform.ToArray;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -2130,6 +2206,7 @@ begin
   Data.MifStrokeStyle := PathLayer.MifStrokeStyle;
   Data.StrokeWidth := PathLayer.StrokeWidth;
   Data.Visible := PathLayer.Visible;
+  Data.Transform := PathLayer.Transform.ToArray;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -2167,6 +2244,7 @@ begin
   Data.SourceFileName := ImageLayer.SourceFileName;
   Data.SourceKind := ImageLayer.SourceKind;
   Data.Visible := ImageLayer.Visible;
+  Data.Transform := ImageLayer.Transform.ToArray;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try
@@ -2213,6 +2291,7 @@ begin
   Data.TextColor := TextLayer.FillColor;
   Data.TransformMode := TextLayer.TransformMode;
   Data.Visible := TextLayer.Visible;
+  Data.Transform := TextLayer.Transform.ToArray;
   Data.WrapWidth := TextLayer.WrapWidth;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
@@ -2253,6 +2332,7 @@ begin
   Data.StrokeStyle := ShapeLayer.StrokeStyle;
   Data.StrokeWidth := ShapeLayer.StrokeWidth;
   Data.Visible := ShapeLayer.Visible;
+  Data.Transform := ShapeLayer.Transform.ToArray;
   FLayers.Delete(Index);
   Selection := TList<Integer>.Create;
   try

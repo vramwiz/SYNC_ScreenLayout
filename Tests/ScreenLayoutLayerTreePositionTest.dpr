@@ -1,4 +1,4 @@
-program ScreenLayoutLayerTreePositionTest;
+﻿program ScreenLayoutLayerTreePositionTest;
 
 {$APPTYPE CONSOLE}
 
@@ -38,6 +38,8 @@ var
   I: Integer;
   Index: Integer;
   Renderer: TVectArtLayerRenderer;
+  RowRect: TRect;
+  StateRect: TRect;
   TopBefore: Integer;
 begin
   Document := TVectArtDocument.Create;
@@ -74,6 +76,24 @@ begin
     Index := FindLayerIndex(Renderer, Group);
     Check(Renderer.LayerItemRect(Bounds, Index).Top = TopBefore,
       'Closing moved the group row');
+
+    Renderer.PPI := 192;
+    Renderer.ScrollOffset := 0;
+    Bounds := Rect(0, 0, 400, 500);
+    Renderer.MaximumScrollOffset(Bounds);
+    Index := FindLayerIndex(Renderer, Group);
+    RowRect := Renderer.LayerItemRect(Bounds, Index);
+    Check(RowRect.Height = 164, 'The layer row height was not DPI-scaled');
+    Check(Renderer.ScrollStep = 176,
+      'The layer scroll step was not DPI-scaled');
+    Check(RowRect.Left = 16,
+      'The layer list padding was not DPI-scaled');
+    StateRect := Renderer.VisibilityButtonRect(RowRect);
+    Check((StateRect.Width = 40) and (StateRect.Height = 40),
+      'The visibility hit target was not DPI-scaled');
+    Check(Renderer.LayerIndexAt(Bounds,
+      (RowRect.Top + RowRect.Bottom) div 2) = Index,
+      'The DPI-scaled row hit test did not match its drawing rectangle');
   finally
     Renderer.Free;
     EditorState.Free;

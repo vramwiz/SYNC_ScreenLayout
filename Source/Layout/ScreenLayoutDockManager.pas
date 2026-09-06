@@ -81,7 +81,7 @@ type
 implementation
 
 uses
-  System.Math, System.SysUtils, Vcl.Controls, Vcl.Graphics;
+  System.Math, System.SysUtils, Vcl.Controls, Vcl.Graphics, Winapi.Windows;
 
 const
   DOCK_GAP            = 4;
@@ -216,12 +216,14 @@ begin
       Exit(True);
     end;
   end;
-  if ScreenPoint.X < WorkspaceRect.Left + DOCK_TARGET_WIDTH then
+  if ScreenPoint.X < WorkspaceRect.Left +
+    MulDiv(DOCK_TARGET_WIDTH, FOwnerForm.CurrentPPI, 96) then
   begin
     Side := vdsLeft;
     Exit(True);
   end;
-  if ScreenPoint.X >= WorkspaceRect.Right - DOCK_TARGET_WIDTH then
+  if ScreenPoint.X >= WorkspaceRect.Right -
+    MulDiv(DOCK_TARGET_WIDTH, FOwnerForm.CurrentPPI, 96) then
   begin
     Side := vdsRight;
     Exit(True);
@@ -273,9 +275,11 @@ begin
     Splitter.Visible := False;
     Exit;
   end;
-  TotalWidth := DOCK_GAP * (Tools.Count - 1);
+  TotalWidth := MulDiv(DOCK_GAP, FOwnerForm.CurrentPPI, 96) *
+    (Tools.Count - 1);
   for Frame in Tools do
-    Inc(TotalWidth, Frame.PreferredDockWidth);
+    Inc(TotalWidth, MulDiv(Frame.PreferredDockWidth,
+      FOwnerForm.CurrentPPI, 96));
   Area.Width := TotalWidth;
   Area.Visible := True;
   Splitter.Visible := True;
@@ -306,7 +310,9 @@ var
   Side: TVectDockSide;
   State: string;
   Visible: Boolean;
+  PPI: Integer;
 begin
+  PPI := FOwnerForm.CurrentPPI;
   FRestoring := True;
   try
     for Frame in FAllTools do
@@ -357,12 +363,14 @@ begin
           Ini.ReadInteger(Section, 'FloatingLeft', 100),
           Ini.ReadInteger(Section, 'FloatingTop', 100),
           0, 0);
-        Bounds.Right := Bounds.Left + Ini.ReadInteger(Section,
-          'FloatingWidth', Max(Frame.PreferredDockWidth, 160));
-        Bounds.Bottom := Bounds.Top + Ini.ReadInteger(Section,
-          'FloatingHeight', 600);
-        Bounds.Right := Bounds.Left + Max(Bounds.Width, 160);
-        Bounds.Bottom := Bounds.Top + Max(Bounds.Height, 120);
+        Bounds.Right := Bounds.Left + MulDiv(Ini.ReadInteger(Section,
+          'FloatingWidth', Max(Frame.PreferredDockWidth, 160)), PPI, 96);
+        Bounds.Bottom := Bounds.Top + MulDiv(Ini.ReadInteger(Section,
+          'FloatingHeight', 600), PPI, 96);
+        Bounds.Right := Bounds.Left + Max(Bounds.Width,
+          MulDiv(160, PPI, 96));
+        Bounds.Bottom := Bounds.Top + Max(Bounds.Height,
+          MulDiv(120, PPI, 96));
         Frame.FloatAt(ConstrainToolBounds(Bounds));
       end;
     end;
@@ -373,11 +381,13 @@ begin
   try
     // Frame登録中の推奨幅再計算より、利用者が最後に決めた外枠幅を優先する。
     if FLeftTools.Count > 0 then
-      FLeftArea.Width := Max(Ini.ReadInteger('DockAreas', 'LeftWidth',
-        FLeftArea.Width), DOCK_MIN_TOOL_WIDTH);
+      FLeftArea.Width := Max(MulDiv(Ini.ReadInteger('DockAreas', 'LeftWidth',
+        MulDiv(FLeftArea.Width, 96, PPI)), PPI, 96),
+        MulDiv(DOCK_MIN_TOOL_WIDTH, PPI, 96));
     if FRightTools.Count > 0 then
-      FRightArea.Width := Max(Ini.ReadInteger('DockAreas', 'RightWidth',
-        FRightArea.Width), DOCK_MIN_TOOL_WIDTH);
+      FRightArea.Width := Max(MulDiv(Ini.ReadInteger('DockAreas', 'RightWidth',
+        MulDiv(FRightArea.Width, 96, PPI)), PPI, 96),
+        MulDiv(DOCK_MIN_TOOL_WIDTH, PPI, 96));
   finally
     FWorkspace.EnableAlign;
   end;
@@ -412,9 +422,13 @@ var
   Index: Integer;
   Section: string;
   Side: TVectDockSide;
+  PPI: Integer;
 begin
-  Ini.WriteInteger('DockAreas', 'LeftWidth', FLeftArea.Width);
-  Ini.WriteInteger('DockAreas', 'RightWidth', FRightArea.Width);
+  PPI := FOwnerForm.CurrentPPI;
+  Ini.WriteInteger('DockAreas', 'LeftWidth',
+    MulDiv(FLeftArea.Width, 96, PPI));
+  Ini.WriteInteger('DockAreas', 'RightWidth',
+    MulDiv(FRightArea.Width, 96, PPI));
   for Frame in FAllTools do
   begin
     Section := 'Tool.' + Frame.ToolId;
@@ -438,8 +452,9 @@ begin
     Bounds := Frame.FloatingBounds;
     Ini.WriteInteger(Section, 'FloatingLeft', Bounds.Left);
     Ini.WriteInteger(Section, 'FloatingTop', Bounds.Top);
-    Ini.WriteInteger(Section, 'FloatingWidth', Bounds.Width);
-    Ini.WriteInteger(Section, 'FloatingHeight', Bounds.Height);
+    Ini.WriteInteger(Section, 'FloatingWidth', MulDiv(Bounds.Width, 96, PPI));
+    Ini.WriteInteger(Section, 'FloatingHeight',
+      MulDiv(Bounds.Height, 96, PPI));
   end;
 end;
 
@@ -516,14 +531,17 @@ begin
 end;
 
 procedure TVectDockManager.Resize;
+var
+  TargetWidth: Integer;
 begin
+  TargetWidth := MulDiv(DOCK_TARGET_WIDTH, FOwnerForm.CurrentPPI, 96);
   ResizeDockArea(vdsLeft);
   ResizeDockArea(vdsRight);
   if FLeftDropTarget.Visible then
-    FLeftDropTarget.SetBounds(0, 0, DOCK_TARGET_WIDTH, FWorkspace.ClientHeight);
+    FLeftDropTarget.SetBounds(0, 0, TargetWidth, FWorkspace.ClientHeight);
   if FRightDropTarget.Visible then
-    FRightDropTarget.SetBounds(FWorkspace.ClientWidth - DOCK_TARGET_WIDTH, 0,
-      DOCK_TARGET_WIDTH, FWorkspace.ClientHeight);
+    FRightDropTarget.SetBounds(FWorkspace.ClientWidth - TargetWidth, 0,
+      TargetWidth, FWorkspace.ClientHeight);
 end;
 
 procedure TVectDockManager.ResizeDockArea(Side: TVectDockSide);
@@ -537,6 +555,8 @@ var
   Slot: TPanel;
   Tools: TList<TToolPlaceholderFrame>;
   X: Integer;
+  DockGap: Integer;
+  MinimumToolWidth: Integer;
 begin
   Area := AreaForSide(Side);
   Tools := ToolsForSide(Side);
@@ -548,11 +568,15 @@ begin
   for I := 1 to Tools.Count - 1 do
     if Tools[I].PreferredDockWidth > Tools[FlexibleIndex].PreferredDockWidth then
       FlexibleIndex := I;
-  FixedWidth := DOCK_GAP * (Tools.Count - 1);
+  DockGap := MulDiv(DOCK_GAP, FOwnerForm.CurrentPPI, 96);
+  MinimumToolWidth := MulDiv(DOCK_MIN_TOOL_WIDTH,
+    FOwnerForm.CurrentPPI, 96);
+  FixedWidth := DockGap * (Tools.Count - 1);
   for I := 0 to Tools.Count - 1 do
     if I <> FlexibleIndex then
-      Inc(FixedWidth, Tools[I].PreferredDockWidth);
-  FlexibleWidth := Max(Area.ClientWidth - FixedWidth, DOCK_MIN_TOOL_WIDTH);
+      Inc(FixedWidth, MulDiv(Tools[I].PreferredDockWidth,
+        FOwnerForm.CurrentPPI, 96));
+  FlexibleWidth := Max(Area.ClientWidth - FixedWidth, MinimumToolWidth);
 
   X := 0;
   for I := 0 to Tools.Count - 1 do
@@ -562,9 +586,10 @@ begin
     if I = FlexibleIndex then
       Slot.SetBounds(X, 0, FlexibleWidth, Area.ClientHeight)
     else
-      Slot.SetBounds(X, 0, Frame.PreferredDockWidth, Area.ClientHeight);
+      Slot.SetBounds(X, 0, MulDiv(Frame.PreferredDockWidth,
+        FOwnerForm.CurrentPPI, 96), Area.ClientHeight);
     Slot.Realign;
-    Inc(X, Slot.Width + DOCK_GAP);
+    Inc(X, Slot.Width + DockGap);
   end;
 end;
 

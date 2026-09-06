@@ -39,6 +39,10 @@ begin
   Center := TPointF.Create(
     (Source.Bounds.Left + Source.Bounds.Right) * 0.5,
     (Source.Bounds.Top + Source.Bounds.Bottom) * 0.5);
+  if Source.FlipHorizontal then
+    Result.X := 2 * Center.X - Result.X;
+  if Source.FlipVertical then
+    Result.Y := 2 * Center.Y - Result.Y;
   Result := RotatePointAround(Result, Center, Source.RotationDegrees);
 end;
 

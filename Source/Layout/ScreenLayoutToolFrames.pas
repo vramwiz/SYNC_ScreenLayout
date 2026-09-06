@@ -175,7 +175,7 @@ begin
   FTitleLabel.Alignment := taCenter;
   FTitleLabel.AutoSize := False;
   FTitleLabel.Font.Name := 'Segoe UI';
-  FTitleLabel.Font.Height := -15;
+  FTitleLabel.Font.Height := -MulDiv(15, CurrentPPI, 96);
   FTitleLabel.Font.Color := COLOR_TEXT_PRIMARY;
   FTitleLabel.Layout := tlCenter;
   FTitleLabel.Transparent := True;
@@ -203,7 +203,7 @@ begin
   FGripPanel.BevelOuter := bvNone;
   FGripPanel.Color := COLOR_GRIP_BACKGROUND;
   FGripPanel.Cursor := crSizeAll;
-  FGripPanel.Height := 24;
+  FGripPanel.Height := MulDiv(24, CurrentPPI, 96);
   FGripPanel.ParentBackground := False;
   FGripPanel.Visible := False;
   FGripPanel.OnMouseDown := GripMouseDown;
@@ -218,7 +218,7 @@ begin
   FGripLabel.Caption := ':: DRAG ::';
   FGripLabel.Cursor := crSizeAll;
   FGripLabel.Font.Name := 'Segoe UI';
-  FGripLabel.Font.Height := -11;
+  FGripLabel.Font.Height := -MulDiv(11, CurrentPPI, 96);
   FGripLabel.Font.Color := COLOR_TEXT_PRIMARY;
   FGripLabel.Layout := tlCenter;
   FGripLabel.Transparent := True;
@@ -272,8 +272,10 @@ begin
   FToolId := AToolId;
   FToolTitle := ATitle;
   FPreferredDockWidth := APreferredDockWidth;
-  FLastFloatingBounds := Rect(100, 100, 100 + Max(APreferredDockWidth, 160),
-    700);
+  FLastFloatingBounds := Rect(MulDiv(100, CurrentPPI, 96),
+    MulDiv(100, CurrentPPI, 96),
+    MulDiv(100 + Max(APreferredDockWidth, 160), CurrentPPI, 96),
+    MulDiv(700, CurrentPPI, 96));
   SetPlaceholderAppearance(ATitle, ABackgroundColor);
   FGripLabel.Caption := ':: ' + ATitle + ' ::';
 end;
@@ -518,13 +520,13 @@ begin
     FContextForm := TForm.CreateNew(nil);
     FContextForm.BorderStyle := bsNone;
     FContextForm.Color := COLOR_GRIP_BACKGROUND;
-    FContextForm.ClientWidth := 128;
-    FContextForm.ClientHeight := 32;
+    FContextForm.PopupParent := FMainForm;
+    FContextForm.ClientWidth := MulDiv(128, CurrentPPI, 96);
+    FContextForm.ClientHeight := MulDiv(32, CurrentPPI, 96);
     FContextForm.Font.Name := 'Segoe UI';
-    FContextForm.Font.Height := -12;
+    FContextForm.Font.Height := -MulDiv(12, CurrentPPI, 96);
     FContextForm.FormStyle := fsStayOnTop;
     FContextForm.OnDeactivate := ContextFormDeactivate;
-    FContextForm.PopupParent := FMainForm;
     ClosePanel := TPanel.Create(FContextForm);
     ClosePanel.Parent := FContextForm;
     ClosePanel.Align := alClient;

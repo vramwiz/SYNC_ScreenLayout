@@ -1,4 +1,4 @@
-// 文字パスを文字単位の配置セルへ展開し、描画と選択で共有する幾何情報を生成する。
+﻿// 文字パスを文字単位の配置セルへ展開し、描画と選択で共有する幾何情報を生成する。
 unit ScreenLayoutTextPathGeometry;
 
 interface
@@ -181,6 +181,9 @@ var
       Sin(DegToRad(AngleDegrees)));
     Placement.TextYAxis := TPointF.Create(-Placement.TextXAxis.Y,
       Placement.TextXAxis.X);
+    if Layer.FlipHorizontal xor Layer.FlipVertical then
+      Placement.TextYAxis := TPointF.Create(-Placement.TextYAxis.X,
+        -Placement.TextYAxis.Y);
     Placement.PathDistance := Distance;
     Placement.Anchor := PathPoint;
     Placement.Tangent := Tangent;

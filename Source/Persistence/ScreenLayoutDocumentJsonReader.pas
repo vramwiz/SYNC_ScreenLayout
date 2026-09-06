@@ -19,7 +19,8 @@ implementation
 uses
   System.Generics.Collections, System.IOUtils, System.JSON, System.Math,
   System.SysUtils, System.Types, Vcl.Graphics, ScreenLayoutFilters,
-  ScreenLayoutPaintStyles, ScreenLayoutTextureJson, ScreenLayoutPatternJson;
+  ScreenLayoutPaintStyles, ScreenLayoutTextureJson, ScreenLayoutPatternJson,
+  ScreenLayoutProjectiveTransform;
 
 const
   DOCUMENT_FORMAT_VERSION = 15;
@@ -280,6 +281,25 @@ begin
   end;
 end;
 
+function ReadLayerTransform(LayerJson: TJSONObject): TScreenLayoutTransform;
+var Value: TJSONValue; Values: TJSONArray; I: Integer; Inverse: TScreenLayoutTransform;
+begin
+  Result := TScreenLayoutTransform.Identity;
+  Value := LayerJson.GetValue('transform');
+  if Value = nil then Exit;
+  if not (Value is TJSONArray) then raise EConvertError.Create('Invalid transform');
+  Values := TJSONArray(Value);
+  if Values.Count <> 9 then raise EConvertError.Create('Invalid transform length');
+  for I := 0 to 8 do
+  begin
+    if not (Values.Items[I] is TJSONNumber) then raise EConvertError.Create('Invalid transform value');
+    Result.Values[I] := TJSONNumber(Values.Items[I]).AsDouble;
+    if IsNan(Result.Values[I]) or IsInfinite(Result.Values[I]) then
+      raise EConvertError.Create('Non-finite transform');
+  end;
+  if not Result.Inverse(Inverse) then raise EConvertError.Create('Singular transform');
+end;
+
 procedure ValidateLayerFilters(LayerJson: TJSONObject);
 var
   Filter: TScreenLayoutFilter;
@@ -287,6 +307,9 @@ var
   I: Integer;
   PaintStyle: TScreenLayoutPaintStyle;
 begin
+  ReadLayerTransform(LayerJson);
+  ReadOptionalBoolean(LayerJson, 'flipHorizontal', False);
+  ReadOptionalBoolean(LayerJson, 'flipVertical', False);
   ReadLayerPaintStyle(LayerJson, PaintStyle);
   FiltersJson := TJSONArray(RequireValue(LayerJson, 'filters', TJSONArray));
   for I := 0 to FiltersJson.Count - 1 do
@@ -303,6 +326,11 @@ var
   I: Integer;
   PaintStyle: TScreenLayoutPaintStyle;
 begin
+  Layer.Transform := ReadLayerTransform(LayerJson);
+  Layer.FlipHorizontal := ReadOptionalBoolean(LayerJson,
+    'flipHorizontal', False);
+  Layer.FlipVertical := ReadOptionalBoolean(LayerJson,
+    'flipVertical', False);
   FiltersJson := TJSONArray(RequireValue(LayerJson, 'filters', TJSONArray));
   Layer.ClearFilters;
   for I := 0 to FiltersJson.Count - 1 do

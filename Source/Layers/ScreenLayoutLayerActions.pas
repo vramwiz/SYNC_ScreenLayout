@@ -41,7 +41,7 @@ type
 implementation
 
 uses
-  Vcl.Graphics;
+  Vcl.Graphics, Winapi.Windows;
 
 const
   BUTTON_COUNT = 5;
@@ -54,7 +54,7 @@ const
 function TVectArtLayerActionsControl.ButtonRect(Index: Integer): TRect;
 begin
   Result := Rect(Index * BUTTON_SIZE, 0, (Index + 1) * BUTTON_SIZE,
-    ClientHeight);
+    MulDiv(ClientHeight, 96, CurrentPPI));
 end;
 
 constructor TVectArtLayerActionsControl.Create(AOwner: TComponent);
@@ -162,7 +162,7 @@ var
 begin
   if Button = mbLeft then
   begin
-    Index := X div BUTTON_SIZE;
+    Index := MulDiv(X, 96, CurrentPPI) div BUTTON_SIZE;
     if (Index >= 0) and (Index < BUTTON_COUNT) then
       FOperations.Execute(TVectArtLayerAction(Index));
   end;
@@ -172,11 +172,23 @@ end;
 procedure TVectArtLayerActionsControl.Paint;
 var
   I: Integer;
+  LogicalBounds: TRect;
+  SavedDC: Integer;
 begin
-  Canvas.Brush.Color := COLOR_BACKGROUND;
-  Canvas.FillRect(ClientRect);
-  for I := 0 to BUTTON_COUNT - 1 do
-    DrawButton(I);
+  SavedDC := SaveDC(Canvas.Handle);
+  try
+    SetMapMode(Canvas.Handle, MM_ANISOTROPIC);
+    SetWindowExtEx(Canvas.Handle, 96, 96, nil);
+    SetViewportExtEx(Canvas.Handle, CurrentPPI, CurrentPPI, nil);
+    LogicalBounds := Rect(0, 0, MulDiv(ClientWidth, 96, CurrentPPI),
+      MulDiv(ClientHeight, 96, CurrentPPI));
+    Canvas.Brush.Color := COLOR_BACKGROUND;
+    Canvas.FillRect(LogicalBounds);
+    for I := 0 to BUTTON_COUNT - 1 do
+      DrawButton(I);
+  finally
+    RestoreDC(Canvas.Handle, SavedDC);
+  end;
 end;
 
 procedure TVectArtLayerActionsControl.RefreshState;

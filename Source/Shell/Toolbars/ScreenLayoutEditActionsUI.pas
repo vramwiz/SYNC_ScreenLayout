@@ -5,12 +5,14 @@ interface
 
 uses
   System.Classes, System.Types, Vcl.Controls, Vcl.ExtCtrls,
-  VectArtDarkPopupMenu, ScreenLayoutDocument, ScreenLayoutEditHistory;
+  VectArtDarkPopupMenu, ScreenLayoutDocument, ScreenLayoutEditHistory,
+  ScreenLayoutEditorState;
 
 type
   TVectArtEditShortcutControl = class(TCustomControl)
   private
     FDocument: TVectArtDocument;
+    FEditorState: TVectArtEditorState;
     FHistory: TVectArtEditHistory;
     function ButtonEnabled(Index: Integer): Boolean;
     function ButtonRect(Index: Integer): TRect;
@@ -18,6 +20,7 @@ type
     procedure DrawButton(Index: Integer; const Caption: string);
     procedure DrawIcon(Index: Integer; const Bounds: TRect);
     procedure SetDocument(const Value: TVectArtDocument);
+    procedure SetEditorState(const Value: TVectArtEditorState);
     procedure SetHistory(const Value: TVectArtEditHistory);
   protected
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState;
@@ -31,6 +34,8 @@ type
     procedure RefreshState;
     // DocumentとHistoryは非所有参照であり、交換時に表示を再同期する。
     property Document: TVectArtDocument read FDocument write SetDocument;
+    property EditorState: TVectArtEditorState read FEditorState
+      write SetEditorState;
     property History: TVectArtEditHistory read FHistory write SetHistory;
   end;
 
@@ -39,6 +44,7 @@ type
     FCanvasSettingsItem: TPanel;
     FCanvasSettingsVisible: Boolean;
     FDocument: TVectArtDocument;
+    FEditorState: TVectArtEditorState;
     FGeometrySettingsEnabled: Boolean;
     FGeometrySettingsItem: TPanel;
     FHistory: TVectArtEditHistory;
@@ -54,6 +60,7 @@ type
       ClickHandler: TNotifyEvent): TPanel;
     procedure RedoClick(Sender: TObject);
     procedure SetDocument(const Value: TVectArtDocument);
+    procedure SetEditorState(const Value: TVectArtEditorState);
     procedure SetHistory(const Value: TVectArtEditHistory);
     procedure SetCanvasSettingsVisible(const Value: Boolean);
     procedure SetGeometrySettingsEnabled(const Value: Boolean);
@@ -66,6 +73,8 @@ type
     procedure RefreshState;
     // DocumentとHistoryは非所有参照であり、交換時にメニューを再同期する。
     property Document: TVectArtDocument read FDocument write SetDocument;
+    property EditorState: TVectArtEditorState read FEditorState
+      write SetEditorState;
     property History: TVectArtEditHistory read FHistory write SetHistory;
     // Editボタンとポップアップを所有するメニューUI。
     property Menu: TVectArtDarkPopupMenu read FMenu;
@@ -86,16 +95,19 @@ type
 implementation
 
 uses
-  Vcl.Graphics, ScreenLayoutShapeBooleanOperations;
+  Vcl.Graphics, Winapi.Windows, ScreenLayoutLayerFlipOperations,
+  ScreenLayoutShapeBooleanOperations;
 
 const
   BUTTON_UNDO_INDEX      = 0;
   BUTTON_REDO_INDEX      = 1;
-  BUTTON_UNION_INDEX     = 2;
-  BUTTON_SUBTRACT_INDEX  = 3;
-  BUTTON_INTERSECT_INDEX = 4;
-  BUTTON_XOR_INDEX       = 5;
-  BUTTON_COUNT           = 6;
+  BUTTON_FLIP_H_INDEX    = 2;
+  BUTTON_FLIP_V_INDEX    = 3;
+  BUTTON_UNION_INDEX     = 4;
+  BUTTON_SUBTRACT_INDEX  = 5;
+  BUTTON_INTERSECT_INDEX = 6;
+  BUTTON_XOR_INDEX       = 7;
+  BUTTON_COUNT           = 8;
   BUTTON_WIDTH           = 78;
   COLOR_BACKGROUND = TColor($00282828);
   COLOR_BUTTON = TColor($00303030);
@@ -109,6 +121,8 @@ begin
   case Index of
     BUTTON_UNDO_INDEX: Result := (FHistory <> nil) and FHistory.CanUndo;
     BUTTON_REDO_INDEX: Result := (FHistory <> nil) and FHistory.CanRedo;
+    BUTTON_FLIP_H_INDEX, BUTTON_FLIP_V_INDEX:
+      Result := CanFlipScreenLayoutSelection(FDocument, FEditorState);
     BUTTON_UNION_INDEX..BUTTON_XOR_INDEX: Result := CanApplyShapeBoolean;
   else
     Result := False;
@@ -118,7 +132,7 @@ end;
 function TVectArtEditShortcutControl.ButtonRect(Index: Integer): TRect;
 begin
   Result := Rect(Index * BUTTON_WIDTH, 0, (Index + 1) * BUTTON_WIDTH,
-    ClientHeight);
+    MulDiv(ClientHeight, 96, CurrentPPI));
 end;
 
 function TVectArtEditShortcutControl.CanApplyShapeBoolean: Boolean;
@@ -189,6 +203,40 @@ begin
           Canvas.LineTo(Bounds.Right - 8, Bounds.Top + 11);
         end;
       end;
+    BUTTON_FLIP_H_INDEX:
+      begin
+        Canvas.MoveTo(Bounds.Left + 10, Bounds.Top + 1);
+        Canvas.LineTo(Bounds.Left + 10, Bounds.Bottom);
+        Canvas.MoveTo(Bounds.Left + 8, Bounds.Top + 10);
+        Canvas.LineTo(Bounds.Left + 2, Bounds.Top + 10);
+        Canvas.MoveTo(Bounds.Left + 2, Bounds.Top + 10);
+        Canvas.LineTo(Bounds.Left + 5, Bounds.Top + 7);
+        Canvas.MoveTo(Bounds.Left + 2, Bounds.Top + 10);
+        Canvas.LineTo(Bounds.Left + 5, Bounds.Top + 13);
+        Canvas.MoveTo(Bounds.Left + 12, Bounds.Top + 10);
+        Canvas.LineTo(Bounds.Right - 1, Bounds.Top + 10);
+        Canvas.MoveTo(Bounds.Right - 1, Bounds.Top + 10);
+        Canvas.LineTo(Bounds.Right - 4, Bounds.Top + 7);
+        Canvas.MoveTo(Bounds.Right - 1, Bounds.Top + 10);
+        Canvas.LineTo(Bounds.Right - 4, Bounds.Top + 13);
+      end;
+    BUTTON_FLIP_V_INDEX:
+      begin
+        Canvas.MoveTo(Bounds.Left + 1, Bounds.Top + 10);
+        Canvas.LineTo(Bounds.Right, Bounds.Top + 10);
+        Canvas.MoveTo(Bounds.Left + 10, Bounds.Top + 8);
+        Canvas.LineTo(Bounds.Left + 10, Bounds.Top + 2);
+        Canvas.MoveTo(Bounds.Left + 10, Bounds.Top + 2);
+        Canvas.LineTo(Bounds.Left + 7, Bounds.Top + 5);
+        Canvas.MoveTo(Bounds.Left + 10, Bounds.Top + 2);
+        Canvas.LineTo(Bounds.Left + 13, Bounds.Top + 5);
+        Canvas.MoveTo(Bounds.Left + 10, Bounds.Top + 12);
+        Canvas.LineTo(Bounds.Left + 10, Bounds.Bottom - 1);
+        Canvas.MoveTo(Bounds.Left + 10, Bounds.Bottom - 1);
+        Canvas.LineTo(Bounds.Left + 7, Bounds.Bottom - 4);
+        Canvas.MoveTo(Bounds.Left + 10, Bounds.Bottom - 1);
+        Canvas.LineTo(Bounds.Left + 13, Bounds.Bottom - 4);
+      end;
     BUTTON_UNION_INDEX:
       begin
         Canvas.Rectangle(Bounds.Left + 2, Bounds.Top + 7,
@@ -242,7 +290,7 @@ var
 begin
   if Button = mbLeft then
   begin
-    Index := X div BUTTON_WIDTH;
+    Index := MulDiv(X, 96, CurrentPPI) div BUTTON_WIDTH;
     if (Index >= 0) and (Index < BUTTON_COUNT) then
     begin
       if (Index = BUTTON_UNDO_INDEX) and (FHistory <> nil) and
@@ -251,6 +299,14 @@ begin
       else if (Index = BUTTON_REDO_INDEX) and (FHistory <> nil) and
         FHistory.CanRedo then
         FHistory.Redo
+      else if (Index = BUTTON_FLIP_H_INDEX) and
+        CanFlipScreenLayoutSelection(FDocument, FEditorState) then
+        FlipScreenLayoutSelection(FDocument, FHistory, FEditorState,
+          slfdHorizontal)
+      else if (Index = BUTTON_FLIP_V_INDEX) and
+        CanFlipScreenLayoutSelection(FDocument, FEditorState) then
+        FlipScreenLayoutSelection(FDocument, FHistory, FEditorState,
+          slfdVertical)
       else if (Index = BUTTON_UNION_INDEX) and CanApplyShapeBoolean then
         ExecuteScreenLayoutShapeBoolean(FDocument, FHistory, slsboUnion)
       else if (Index = BUTTON_SUBTRACT_INDEX) and CanApplyShapeBoolean then
@@ -267,14 +323,26 @@ end;
 procedure TVectArtEditShortcutControl.Paint;
 const
   CAPTIONS: array[0..BUTTON_COUNT - 1] of string =
-    ('Undo', 'Redo', '加算', '減算', 'AND', 'XOR');
+    ('Undo', 'Redo', '左右', '上下', '加算', '減算', 'AND', 'XOR');
 var
   I: Integer;
+  LogicalBounds: TRect;
+  SavedDC: Integer;
 begin
-  Canvas.Brush.Color := COLOR_BACKGROUND;
-  Canvas.FillRect(ClientRect);
-  for I := 0 to BUTTON_COUNT - 1 do
-    DrawButton(I, CAPTIONS[I]);
+  SavedDC := SaveDC(Canvas.Handle);
+  try
+    SetMapMode(Canvas.Handle, MM_ANISOTROPIC);
+    SetWindowExtEx(Canvas.Handle, 96, 96, nil);
+    SetViewportExtEx(Canvas.Handle, CurrentPPI, CurrentPPI, nil);
+    LogicalBounds := Rect(0, 0, MulDiv(ClientWidth, 96, CurrentPPI),
+      MulDiv(ClientHeight, 96, CurrentPPI));
+    Canvas.Brush.Color := COLOR_BACKGROUND;
+    Canvas.FillRect(LogicalBounds);
+    for I := 0 to BUTTON_COUNT - 1 do
+      DrawButton(I, CAPTIONS[I]);
+  finally
+    RestoreDC(Canvas.Handle, SavedDC);
+  end;
 end;
 
 procedure TVectArtEditShortcutControl.MouseMove(Shift: TShiftState;
@@ -282,7 +350,7 @@ procedure TVectArtEditShortcutControl.MouseMove(Shift: TShiftState;
 var
   Index: Integer;
 begin
-  Index := X div BUTTON_WIDTH;
+  Index := MulDiv(X, 96, CurrentPPI) div BUTTON_WIDTH;
   if (Index < 0) or (Index >= BUTTON_COUNT) then
   begin
     Hint := '';
@@ -292,6 +360,8 @@ begin
   case Index of
     BUTTON_UNDO_INDEX: Hint := '元に戻す';
     BUTTON_REDO_INDEX: Hint := 'やり直す';
+    BUTTON_FLIP_H_INDEX: Hint := '選択を左右反転 (Shift+H)';
+    BUTTON_FLIP_V_INDEX: Hint := '選択を上下反転 (Shift+V)';
     BUTTON_UNION_INDEX: Hint := '選択したShapeを加算';
     BUTTON_SUBTRACT_INDEX:
       Hint := 'アクティブShapeからほかの選択Shapeを減算';
@@ -317,6 +387,13 @@ procedure TVectArtEditShortcutControl.SetDocument(
   const Value: TVectArtDocument);
 begin
   FDocument := Value;
+  RefreshState;
+end;
+
+procedure TVectArtEditShortcutControl.SetEditorState(
+  const Value: TVectArtEditorState);
+begin
+  FEditorState := Value;
   RefreshState;
 end;
 
@@ -391,6 +468,14 @@ procedure TVectArtEditActionsUI.SetDocument(const Value: TVectArtDocument);
 begin
   FDocument := Value;
   FShortcutControl.Document := Value;
+  RefreshState;
+end;
+
+procedure TVectArtEditActionsUI.SetEditorState(
+  const Value: TVectArtEditorState);
+begin
+  FEditorState := Value;
+  FShortcutControl.EditorState := Value;
   RefreshState;
 end;
 

@@ -72,7 +72,7 @@ begin
   FTitleLabel.Caption := 'フィルター設定';
   FTitleLabel.Color := COLOR_HEADER;
   FTitleLabel.Font.Name := 'Segoe UI';
-  FTitleLabel.Font.Height := -12;
+  FTitleLabel.Font.Height := -MulDiv(12, CurrentPPI, 96);
   FTitleLabel.Font.Style := [fsBold];
   FTitleLabel.Font.Color := COLOR_TEXT;
   FTitleLabel.Layout := tlCenter;
@@ -88,7 +88,7 @@ begin
       MulDiv(TITLE_HEIGHT + I * ROW_HEIGHT + 5, CurrentPPI, 96),
       MulDiv(72, CurrentPPI, 96), MulDiv(21, CurrentPPI, 96));
     FLabels[I].Font.Name := 'Segoe UI';
-    FLabels[I].Font.Height := -12;
+    FLabels[I].Font.Height := -MulDiv(12, CurrentPPI, 96);
     FLabels[I].Font.Color := COLOR_TEXT;
 
     FEdits[I] := TEdit.Create(Self);
@@ -98,7 +98,7 @@ begin
       MulDiv(EDIT_WIDTH, CurrentPPI, 96), MulDiv(23, CurrentPPI, 96));
     FEdits[I].Color := COLOR_HEADER;
     FEdits[I].Font.Name := 'Segoe UI';
-    FEdits[I].Font.Height := -12;
+    FEdits[I].Font.Height := -MulDiv(12, CurrentPPI, 96);
     FEdits[I].Font.Color := COLOR_TEXT;
     FEdits[I].Tag := I;
     FEdits[I].OnExit := EditExit;

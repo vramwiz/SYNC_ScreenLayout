@@ -92,7 +92,7 @@ type
 implementation
 
 uses
-  System.Types, System.UITypes, Winapi.Windows;
+  System.Math, System.Types, System.UITypes, Winapi.Windows;
 
 const
   COLOR_BUTTON = TColor($00383838);
@@ -242,16 +242,16 @@ begin
     Canvas.Rectangle(Bounds);
   end;
 
-  ShaftLeft := 7;
-  EndX := Width - 10;
+  ShaftLeft := MulDiv(7, CurrentPPI, 96);
+  EndX := Width - MulDiv(10, CurrentPPI, 96);
   MidY := Height div 2;
   StrokeHalfWidth := Height div 6;
-  if StrokeHalfWidth < 3 then
-    StrokeHalfWidth := 3;
+  if StrokeHalfWidth < MulDiv(3, CurrentPPI, 96) then
+    StrokeHalfWidth := MulDiv(3, CurrentPPI, 96);
   Canvas.Pen.Color := TColor($00606060);
   Canvas.Pen.Style := psDot;
-  Canvas.MoveTo(EndX, 4);
-  Canvas.LineTo(EndX, Height - 4);
+  Canvas.MoveTo(EndX, MulDiv(4, CurrentPPI, 96));
+  Canvas.LineTo(EndX, Height - MulDiv(4, CurrentPPI, 96));
   Canvas.Pen.Style := psSolid;
   Canvas.Brush.Style := bsSolid;
   if Enabled then
@@ -341,6 +341,7 @@ var
   Column: Integer;
   I: Integer;
   LeftValue: Integer;
+  LineLength: Integer;
   Row: Integer;
   TopValue: Integer;
 begin
@@ -369,28 +370,34 @@ begin
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := Canvas.Pen.Color;
     for I := 0 to 2 do
-      Canvas.Ellipse(Width div 2 - 1, Height div 2 - 5 + I * 4,
-        Width div 2 + 2, Height div 2 - 2 + I * 4);
+      Canvas.Ellipse(Width div 2 - MulDiv(1, CurrentPPI, 96),
+        Height div 2 - MulDiv(5, CurrentPPI, 96) +
+        I * MulDiv(4, CurrentPPI, 96),
+        Width div 2 + MulDiv(2, CurrentPPI, 96),
+        Height div 2 - MulDiv(2, CurrentPPI, 96) +
+        I * MulDiv(4, CurrentPPI, 96));
     Exit;
   end;
   Column := Ord(FAlignment) mod 3;
   Row := Ord(FAlignment) div 3;
   case Row of
-    0: TopValue := 6;
-    2: TopValue := Height - 13;
+    0: TopValue := MulDiv(6, CurrentPPI, 96);
+    2: TopValue := Height - MulDiv(13, CurrentPPI, 96);
   else
-    TopValue := (Height - 7) div 2;
+    TopValue := (Height - MulDiv(7, CurrentPPI, 96)) div 2;
   end;
   for I := 0 to 2 do
   begin
+    LineLength := MulDiv(LINE_LENGTHS[I], CurrentPPI, 96);
     case Column of
-      0: LeftValue := 6;
-      2: LeftValue := Width - 6 - LINE_LENGTHS[I];
+      0: LeftValue := MulDiv(6, CurrentPPI, 96);
+      2: LeftValue := Width - MulDiv(6, CurrentPPI, 96) - LineLength;
     else
-      LeftValue := (Width - LINE_LENGTHS[I]) div 2;
+      LeftValue := (Width - LineLength) div 2;
     end;
-    Canvas.MoveTo(LeftValue, TopValue + I * 3);
-    Canvas.LineTo(LeftValue + LINE_LENGTHS[I], TopValue + I * 3);
+    Canvas.MoveTo(LeftValue, TopValue + I * MulDiv(3, CurrentPPI, 96));
+    Canvas.LineTo(LeftValue + LineLength,
+      TopValue + I * MulDiv(3, CurrentPPI, 96));
   end;
 end;
 
@@ -456,13 +463,17 @@ begin
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := Canvas.Pen.Color;
     for I := 0 to 2 do
-      Canvas.Ellipse(Width div 2 - 1, Height div 2 - 5 + I * 4,
-        Width div 2 + 2, Height div 2 - 2 + I * 4);
+      Canvas.Ellipse(Width div 2 - MulDiv(1, CurrentPPI, 96),
+        Height div 2 - MulDiv(5, CurrentPPI, 96) +
+        I * MulDiv(4, CurrentPPI, 96),
+        Width div 2 + MulDiv(2, CurrentPPI, 96),
+        Height div 2 - MulDiv(2, CurrentPPI, 96) +
+        I * MulDiv(4, CurrentPPI, 96));
     Exit;
   end;
   Canvas.Brush.Style := bsClear;
   Canvas.Font.Name := 'Segoe UI';
-  Canvas.Font.Height := -16;
+  Canvas.Font.Height := -MulDiv(16, CurrentPPI, 96);
   Canvas.Font.Style := [fsBold];
   if Enabled then
     Canvas.Font.Color := COLOR_TEXT
@@ -477,34 +488,36 @@ begin
     Canvas.Pen.Color := COLOR_BUTTON_SELECTED_BORDER
   else
     Canvas.Pen.Color := COLOR_BUTTON_BORDER;
-  Canvas.Pen.Width := 3;
+  Canvas.Pen.Width := Max(MulDiv(3, CurrentPPI, 96), 1);
   case FAttachment of
     sltpaTop:
       begin
-        LinePosition := 5;
-        TextY := LinePosition + 3;
-        Canvas.MoveTo((Width - 18) div 2, LinePosition);
-        Canvas.LineTo((Width + 18) div 2, LinePosition);
+        LinePosition := MulDiv(5, CurrentPPI, 96);
+        TextY := LinePosition + MulDiv(3, CurrentPPI, 96);
+        Canvas.MoveTo((Width - MulDiv(18, CurrentPPI, 96)) div 2,
+          LinePosition);
+        Canvas.LineTo((Width + MulDiv(18, CurrentPPI, 96)) div 2,
+          LinePosition);
       end;
     sltpaLeft:
       begin
-        LinePosition := 6;
-        TextX := LinePosition + 3;
-        Canvas.MoveTo(LinePosition, 5);
-        Canvas.LineTo(LinePosition, Height - 5);
+        LinePosition := MulDiv(6, CurrentPPI, 96);
+        TextX := LinePosition + MulDiv(3, CurrentPPI, 96);
+        Canvas.MoveTo(LinePosition, MulDiv(5, CurrentPPI, 96));
+        Canvas.LineTo(LinePosition, Height - MulDiv(5, CurrentPPI, 96));
       end;
     sltpaRight:
       begin
-        LinePosition := Width - 7;
-        TextX := LinePosition - 3 - TextWidth;
-        Canvas.MoveTo(LinePosition, 5);
-        Canvas.LineTo(LinePosition, Height - 5);
+        LinePosition := Width - MulDiv(7, CurrentPPI, 96);
+        TextX := LinePosition - MulDiv(3, CurrentPPI, 96) - TextWidth;
+        Canvas.MoveTo(LinePosition, MulDiv(5, CurrentPPI, 96));
+        Canvas.LineTo(LinePosition, Height - MulDiv(5, CurrentPPI, 96));
       end;
   else
-    LinePosition := Height - 6;
-    TextY := LinePosition - 3 - TextHeight;
-    Canvas.MoveTo((Width - 18) div 2, LinePosition);
-    Canvas.LineTo((Width + 18) div 2, LinePosition);
+    LinePosition := Height - MulDiv(6, CurrentPPI, 96);
+    TextY := LinePosition - MulDiv(3, CurrentPPI, 96) - TextHeight;
+    Canvas.MoveTo((Width - MulDiv(18, CurrentPPI, 96)) div 2, LinePosition);
+    Canvas.LineTo((Width + MulDiv(18, CurrentPPI, 96)) div 2, LinePosition);
   end;
   Canvas.Pen.Width := 1;
   Canvas.TextOut(TextX, TextY, 'A');

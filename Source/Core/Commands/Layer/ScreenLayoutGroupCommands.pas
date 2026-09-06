@@ -245,6 +245,9 @@ var
   I: Integer;
 begin
   Target.Locked := False;
+  Target.FlipHorizontal := Source.FlipHorizontal;
+  Target.Transform := Source.Transform;
+  Target.FlipVertical := Source.FlipVertical;
   Target.Opacity := Source.Opacity;
   Target.PaintStyle := Source.PaintStyle;
   Target.Visible := Source.Visible;

@@ -79,6 +79,10 @@ begin
   FragmentCenter := TPointF.Create(
     Source.Bounds.Left + (Left + Width * 0.5) * ScaleX,
     Source.Bounds.Top + (Top + Height * 0.5) * ScaleY);
+  if Source.FlipHorizontal then
+    FragmentCenter.X := 2 * Center.X - FragmentCenter.X;
+  if Source.FlipVertical then
+    FragmentCenter.Y := 2 * Center.Y - FragmentCenter.Y;
   FragmentCenter := RotatePointAround(FragmentCenter, Center,
     Source.RotationDegrees);
   Width := Width * ScaleX;
@@ -105,6 +109,8 @@ begin
   Result.Locked := Source.Locked;
   Result.Opacity := Source.Opacity;
   Result.RotationDegrees := Source.RotationDegrees;
+  Result.FlipHorizontal := Source.FlipHorizontal;
+  Result.FlipVertical := Source.FlipVertical;
   Result.TransformMode := Source.TransformMode;
   Result.Visible := Source.Visible;
   for I := 0 to Source.FilterCount - 1 do
@@ -235,6 +241,7 @@ constructor TScreenLayoutDecomposeTextCommand.Create(
   ADocument: TVectArtDocument; AEditorState: TVectArtEditorState;
   AParent: TScreenLayoutGroupLayer; Index: Integer;
   Source: TScreenLayoutTextLayer; Kind: TScreenLayoutTextDecompositionKind);
+var Piece: TVectArtLayer;
 begin
   inherited Create;
   FDocument := ADocument;
@@ -249,6 +256,7 @@ begin
     sldkClosedPathShapes:
       FPieces := BuildClosedPathShapeFragments(Source);
   end;
+  for Piece in FPieces do Piece.Transform := Source.Transform;
 end;
 
 destructor TScreenLayoutDecomposeTextCommand.Destroy;
