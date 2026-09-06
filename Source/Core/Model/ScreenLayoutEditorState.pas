@@ -385,7 +385,12 @@ begin
   if (FSelectedFilter = nil) and (FSelectedFilterLayer = nil) then
     Exit;
   if not DocumentContainsLayer(Document, FSelectedFilterLayer) or
-    not LayerContainsFilter(FSelectedFilterLayer, FSelectedFilter) then
+    not LayerContainsFilter(FSelectedFilterLayer, FSelectedFilter) or
+    not (((FOpenGroup <> nil) and (OpenGroupChildCount = 1) and
+      IsOpenGroupChildSelected(FSelectedFilterLayer)) or
+      ((FOpenGroup = nil) and (Document <> nil) and
+      (Document.SelectionCount = 1) and (Document.SelectedIndex > 0) and
+      (Document[Document.SelectedIndex] = FSelectedFilterLayer))) then
     SelectFilter(nil, nil);
 end;
 
@@ -434,9 +439,11 @@ var
 begin
   if FSelectedGradientLayer = nil then
     Exit;
-  if (Document = nil) or (Document.SelectionCount <> 1) or
-    (Document.SelectedIndex <= 0) or
-    (Document[Document.SelectedIndex] <> FSelectedGradientLayer) or
+  if not DocumentContainsLayer(Document, FSelectedGradientLayer) or
+    not (((FOpenGroup <> nil) and (OpenGroupChildCount = 1) and
+      IsOpenGroupChildSelected(FSelectedGradientLayer)) or
+      ((FOpenGroup = nil) and (Document.SelectionCount = 1) and
+      (Document.SelectedIndex > 0) and (Document[Document.SelectedIndex] = FSelectedGradientLayer))) or
     (FSelectedGradientLayer.PaintStyle.Kind <> slpkGradient) then
   begin
     SelectGradientStop(nil, SCREEN_LAYOUT_GRADIENT_STOP_NONE);

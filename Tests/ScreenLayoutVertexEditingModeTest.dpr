@@ -13,7 +13,7 @@ uses
   ScreenLayoutEditHistory in
     '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutShapeInteraction in
-    '..\Source\Editor\Interaction\ScreenLayoutShapeInteraction.pas';
+    '..\Source\Editor\Interaction\Shape\ScreenLayoutShapeInteraction.pas';
 
 procedure Check(Condition: Boolean; const MessageText: string);
 begin

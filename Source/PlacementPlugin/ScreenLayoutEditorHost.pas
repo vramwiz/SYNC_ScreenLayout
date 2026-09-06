@@ -15,8 +15,33 @@ function EditScreenLayout(const SerializedData: string;
 implementation
 
 uses
-  Vcl.Forms, ScreenLayoutDocumentJson, ScreenLayoutPluginDocument,
+  Winapi.Windows, Vcl.Forms, ScreenLayoutDocumentJson, ScreenLayoutPluginDocument,
   ScreenLayoutMainForm;
+
+function EnterEditorDpiContext: DPI_AWARENESS_CONTEXT;
+begin
+  try
+    // 単独アプリと同じ96 DPI座標でForm全体をWindowsに拡大させ、固定描画部品も同じ寸法にする。
+    Result := SetThreadDpiAwarenessContext(
+      DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED);
+    if not IsValidDpiAwarenessContext(Result) then
+      Result := SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE);
+  except
+    // APIを持たない旧環境ではホストのDPIコンテキストを維持する。
+    Result := Default(DPI_AWARENESS_CONTEXT);
+  end;
+end;
+
+procedure RestoreEditorDpiContext(PreviousContext: DPI_AWARENESS_CONTEXT);
+begin
+  if not IsValidDpiAwarenessContext(PreviousContext) then
+    Exit;
+  try
+    SetThreadDpiAwarenessContext(PreviousContext);
+  except
+    // 編集Formは破棄済みのため、復元APIが失敗しても終了処理を継続する。
+  end;
+end;
 
 function EditScreenLayout(const SerializedData: string;
   const BackgroundPixels: TBytes; BackgroundWidth, BackgroundHeight: Integer;
@@ -24,11 +49,13 @@ function EditScreenLayout(const SerializedData: string;
   out UpdatedData, ErrorMessage: string): Boolean;
 var
   EditorForm: TMainForm;
+  PreviousDpiContext: DPI_AWARENESS_CONTEXT;
 begin
   Result := False;
   UpdatedData := SerializedData;
   ErrorMessage := '';
   EditorForm := nil;
+  PreviousDpiContext := EnterEditorDpiContext;
   try
     try
       EditorForm := TMainForm.Create(nil);
@@ -51,6 +78,7 @@ begin
     end;
   finally
     EditorForm.Free;
+    RestoreEditorDpiContext(PreviousDpiContext);
   end;
 end;
 

@@ -1,4 +1,4 @@
-﻿// 線形グラデーションの方向ガイドを描画し、点編集とドラッグ操作をUndo履歴へ確定する。
+﻿// グラデーションの方向ガイドを描画し、点編集とドラッグ操作をUndo履歴へ確定する。
 unit ScreenLayoutGradientInteraction;
 
 interface
@@ -10,10 +10,10 @@ uses
 
 type
   TScreenLayoutGradientGuideHit = (slgghNone, slgghLine,
-    slgghStartPoint, slgghMiddlePoint, slgghEndPoint);
+    slgghStartPoint, slgghMiddlePoint, slgghEndPoint, slgghAspect);
 
   TScreenLayoutGradientDragKind = (slgdkNone, slgdkPendingLine,
-    slgdkLine, slgdkStartPoint, slgdkMiddlePoint, slgdkEndPoint);
+    slgdkLine, slgdkStartPoint, slgdkMiddlePoint, slgdkEndPoint, slgdkAspect);
 
   TScreenLayoutGradientInteraction = class
   private
@@ -57,7 +57,7 @@ type
     procedure Configure(Document: TVectArtDocument;
       EditHistory: TVectArtEditHistory; EditorState: TVectArtEditorState;
       const CanvasBounds: TRect; Zoom: Single);
-    // 単一選択中の線形グラデーションをGDIまたはDirect2Dへ描画する。
+    // 単一選択中のグラデーションガイドをGDIまたはDirect2Dへ描画する。
     procedure Draw(ACanvas: TCanvas); overload;
     procedure Draw(ACanvas: TDirect2DCanvas); overload;
     // クライアント座標にあるガイド要素を返し、詳細版では中間点IDも返す。
@@ -80,15 +80,18 @@ type
 implementation
 
 uses
-  System.Math, ScreenLayoutGeometry, ScreenLayoutLayerGeometry,
-  ScreenLayoutOverlayHandles, ScreenLayoutOverlayPrimitives,
-  ScreenLayoutPaintCommands;
+  System.Math, ScreenLayoutGeometry, ScreenLayoutGradientOverlay,
+  ScreenLayoutLayerGeometry, ScreenLayoutPaintCommands;
 
 const
-  GRADIENT_GUIDE_COLOR = TColor($000080FF);
   GRADIENT_HANDLE_RADIUS = 6;
   GRADIENT_LINE_HIT_RADIUS = 6;
   GRADIENT_DRAG_THRESHOLD = 4;
+
+function GradientAspectPoint(const A, B: TPoint; Aspect: Single): TPoint;
+begin
+  Result := Point(Round(A.X - (B.Y - A.Y) * Aspect), Round(A.Y + (B.X - A.X) * Aspect));
+end;
 
 procedure TScreenLayoutGradientInteraction.AddAppliedStyleCommand(
   Layer: TVectArtLayer; const OldStyle,
@@ -125,6 +128,7 @@ function TScreenLayoutGradientInteraction.ActiveLayer(
   out Layer: TVectArtLayer): Boolean;
 var
   Selected: TArray<Integer>;
+  Children: TArray<TVectArtLayer>;
 begin
   Layer := nil;
   Result := (FDocument <> nil) and (FDocument.CanvasLayer <> nil) and
@@ -132,6 +136,15 @@ begin
     (FEditorState.SelectedFilter = nil);
   if not Result then
     Exit;
+  if FEditorState.OpenGroup <> nil then
+  begin
+    Children := FEditorState.GetOpenGroupChildren;
+    if Length(Children) = 1 then
+      Layer := Children[0];
+    Result := (Layer <> nil) and (Layer.PaintStyle.Kind = slpkGradient) and
+      not (Layer.PaintStyle.GradientKind in [slgkAlongStroke, slgkAcrossStroke]);
+    Exit;
+  end;
   Selected := FDocument.GetSelectedLayerIndices;
   Result := (Length(Selected) = 1) and (Selected[0] > 0) and
     (Selected[0] < FDocument.LayerCount);
@@ -140,7 +153,7 @@ begin
   Layer := FDocument[Selected[0]];
   Result := (Layer <> nil) and
     (Layer.PaintStyle.Kind = slpkGradient) and
-    (Layer.PaintStyle.GradientKind = slgkLinear);
+    not (Layer.PaintStyle.GradientKind in [slgkAlongStroke, slgkAcrossStroke]);
   if not Result then
     Layer := nil;
 end;
@@ -199,7 +212,7 @@ begin
     Exit(crSizeAll);
   end;
   case HitTest(X, Y) of
-    slgghStartPoint, slgghMiddlePoint, slgghEndPoint: Result := crSizeAll;
+    slgghStartPoint, slgghMiddlePoint, slgghEndPoint, slgghAspect: Result := crSizeAll;
     slgghLine: Result := crCross;
   else
     Result := crDefault;
@@ -271,45 +284,12 @@ var
   EndPoint: TPoint;
   Layer: TVectArtLayer;
   StartPoint: TPoint;
-  Stop: TScreenLayoutGradientStop;
-  PointValue: TPoint;
 begin
   if not ActiveLayer(Layer) or
     not TryGetGuidePoints(StartPoint, EndPoint) then
     Exit;
-  DrawOverlayLine(ACanvas, StartPoint, EndPoint, GRADIENT_GUIDE_COLOR);
-  DrawOverlayHandleEllipse(ACanvas,
-    Rect(StartPoint.X - GRADIENT_HANDLE_RADIUS,
-      StartPoint.Y - GRADIENT_HANDLE_RADIUS,
-      StartPoint.X + GRADIENT_HANDLE_RADIUS + 1,
-      StartPoint.Y + GRADIENT_HANDLE_RADIUS + 1),
-    Layer.PaintStyle.GradientStartColor,
-    IfThen((FEditorState.SelectedGradientLayer = Layer) and
-      (FEditorState.SelectedGradientStopId =
-        SCREEN_LAYOUT_GRADIENT_START_STOP_ID), clWhite,
-      GRADIENT_GUIDE_COLOR));
-  for Stop in Layer.PaintStyle.GetGradientStops do
-  begin
-    PointValue := StopPoint(Stop.Offset, StartPoint, EndPoint);
-    DrawOverlayHandleEllipse(ACanvas,
-      Rect(PointValue.X - GRADIENT_HANDLE_RADIUS,
-        PointValue.Y - GRADIENT_HANDLE_RADIUS,
-        PointValue.X + GRADIENT_HANDLE_RADIUS + 1,
-        PointValue.Y + GRADIENT_HANDLE_RADIUS + 1),
-      Stop.Color, IfThen((FEditorState.SelectedGradientLayer = Layer) and
-        (FEditorState.SelectedGradientStopId = Stop.Id), clWhite,
-        GRADIENT_GUIDE_COLOR));
-  end;
-  DrawOverlayHandleEllipse(ACanvas,
-    Rect(EndPoint.X - GRADIENT_HANDLE_RADIUS,
-      EndPoint.Y - GRADIENT_HANDLE_RADIUS,
-      EndPoint.X + GRADIENT_HANDLE_RADIUS + 1,
-      EndPoint.Y + GRADIENT_HANDLE_RADIUS + 1),
-    Layer.PaintStyle.GradientEndColor,
-    IfThen((FEditorState.SelectedGradientLayer = Layer) and
-      (FEditorState.SelectedGradientStopId =
-        SCREEN_LAYOUT_GRADIENT_END_STOP_ID), clWhite,
-      GRADIENT_GUIDE_COLOR));
+  DrawScreenLayoutGradientGuide(ACanvas, Layer, FEditorState,
+    StartPoint, EndPoint);
 end;
 
 procedure TScreenLayoutGradientInteraction.Draw(ACanvas: TDirect2DCanvas);
@@ -317,45 +297,12 @@ var
   EndPoint: TPoint;
   Layer: TVectArtLayer;
   StartPoint: TPoint;
-  Stop: TScreenLayoutGradientStop;
-  PointValue: TPoint;
 begin
   if not ActiveLayer(Layer) or
     not TryGetGuidePoints(StartPoint, EndPoint) then
     Exit;
-  DrawOverlayLine(ACanvas, StartPoint, EndPoint, GRADIENT_GUIDE_COLOR);
-  DrawOverlayHandleEllipse(ACanvas,
-    Rect(StartPoint.X - GRADIENT_HANDLE_RADIUS,
-      StartPoint.Y - GRADIENT_HANDLE_RADIUS,
-      StartPoint.X + GRADIENT_HANDLE_RADIUS + 1,
-      StartPoint.Y + GRADIENT_HANDLE_RADIUS + 1),
-    Layer.PaintStyle.GradientStartColor,
-    IfThen((FEditorState.SelectedGradientLayer = Layer) and
-      (FEditorState.SelectedGradientStopId =
-        SCREEN_LAYOUT_GRADIENT_START_STOP_ID), clWhite,
-      GRADIENT_GUIDE_COLOR));
-  for Stop in Layer.PaintStyle.GetGradientStops do
-  begin
-    PointValue := StopPoint(Stop.Offset, StartPoint, EndPoint);
-    DrawOverlayHandleEllipse(ACanvas,
-      Rect(PointValue.X - GRADIENT_HANDLE_RADIUS,
-        PointValue.Y - GRADIENT_HANDLE_RADIUS,
-        PointValue.X + GRADIENT_HANDLE_RADIUS + 1,
-        PointValue.Y + GRADIENT_HANDLE_RADIUS + 1),
-      Stop.Color, IfThen((FEditorState.SelectedGradientLayer = Layer) and
-        (FEditorState.SelectedGradientStopId = Stop.Id), clWhite,
-        GRADIENT_GUIDE_COLOR));
-  end;
-  DrawOverlayHandleEllipse(ACanvas,
-    Rect(EndPoint.X - GRADIENT_HANDLE_RADIUS,
-      EndPoint.Y - GRADIENT_HANDLE_RADIUS,
-      EndPoint.X + GRADIENT_HANDLE_RADIUS + 1,
-      EndPoint.Y + GRADIENT_HANDLE_RADIUS + 1),
-    Layer.PaintStyle.GradientEndColor,
-    IfThen((FEditorState.SelectedGradientLayer = Layer) and
-      (FEditorState.SelectedGradientStopId =
-        SCREEN_LAYOUT_GRADIENT_END_STOP_ID), clWhite,
-      GRADIENT_GUIDE_COLOR));
+  DrawScreenLayoutGradientGuide(ACanvas, Layer, FEditorState,
+    StartPoint, EndPoint);
 end;
 
 function TScreenLayoutGradientInteraction.HitTest(X,
@@ -386,6 +333,12 @@ begin
   if Hypot(X - EndPoint.X, Y - EndPoint.Y) <=
     GRADIENT_HANDLE_RADIUS + 2 then
     Exit(slgghEndPoint);
+  if Layer.PaintStyle.GradientKind in [slgkRadial, slgkRectangle, slgkSweep] then
+  begin
+    PointValue := GradientAspectPoint(StartPoint, EndPoint, Layer.PaintStyle.GradientAspect);
+    if Hypot(X - PointValue.X, Y - PointValue.Y) <= GRADIENT_HANDLE_RADIUS + 2 then
+      Exit(slgghAspect);
+  end;
   for Stop in Layer.PaintStyle.GetGradientStops do
   begin
     PointValue := StopPoint(Stop.Offset, StartPoint, EndPoint);
@@ -431,6 +384,8 @@ begin
           SCREEN_LAYOUT_GRADIENT_END_STOP_ID);
     end;
     case Hit of
+      slgghAspect:
+        BeginDrag(slgdkAspect, Layer, X, Y, 0);
       slgghLine:
         BeginDrag(slgdkPendingLine, Layer, X, Y, 0);
       slgghStartPoint:
@@ -488,6 +443,16 @@ begin
   end;
   NewStyle := FDragOldStyle;
   case FDragKind of
+    slgdkAspect:
+    begin
+      if not GuidePointsForStyle(FDragLayer, FDragOldStyle, StartPoint, EndPoint) then
+        Exit;
+      Offset := Sqr(EndPoint.X - StartPoint.X) + Sqr(EndPoint.Y - StartPoint.Y);
+      if Offset < 1 then
+        Exit;
+      NewStyle.GradientAspect := EnsureRange(Abs((X - StartPoint.X) * (StartPoint.Y - EndPoint.Y) +
+        (Y - StartPoint.Y) * (EndPoint.X - StartPoint.X)) / Offset, 0.01, 100.0);
+    end;
     slgdkLine:
     begin
       Value := TPointF.Create(
@@ -522,7 +487,12 @@ begin
       Value := TPointF.Create((Value.X - Bounds.Left) / Bounds.Width,
         (Value.Y - Bounds.Top) / Bounds.Height);
       if FDragKind = slgdkStartPoint then
-        NewStyle.LinearStart := Value
+      begin
+        if NewStyle.GradientKind <> slgkLinear then
+          NewStyle.LinearEnd := TPointF.Create(FDragOldStyle.LinearEnd.X + Value.X -
+            FDragOldStyle.LinearStart.X, FDragOldStyle.LinearEnd.Y + Value.Y - FDragOldStyle.LinearStart.Y);
+        NewStyle.LinearStart := Value;
+      end
       else
         NewStyle.LinearEnd := Value;
     end;

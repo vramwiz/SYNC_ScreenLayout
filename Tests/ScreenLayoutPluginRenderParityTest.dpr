@@ -1,4 +1,4 @@
-program ScreenLayoutPluginRenderParityTest;
+﻿program ScreenLayoutPluginRenderParityTest;
 
 {$APPTYPE CONSOLE}
 
@@ -7,6 +7,8 @@ uses
   System.SysUtils,
   System.Types,
   Vcl.Graphics,
+  ScreenLayoutPaintStyles,
+  System.NetEncoding, ScreenLayoutTextureStyle, ScreenLayoutPatternStyle,
   Vcl.Imaging.pngimage,
   AviUtl2FilterTypes in '..\Lib\AviUtl2\AviUtl2FilterTypes.pas',
   PluginFilterContextManager in
@@ -244,16 +246,61 @@ var
   ReadError: string;
   Serialized: string;
   Video: TFILTER_PROC_VIDEO;
+  PassIndex: Integer;
+  Style: TScreenLayoutPaintStyle;
+  Texture: TScreenLayoutTextureStyle;
 begin
+  for PassIndex := 0 to 3 do
+  begin
   Document := TVectArtDocument.Create;
   ExpectedDocument := TVectArtDocument.Create;
   DirectBuffer := TVectArtRenderBuffer.Create;
   ExpectedBuffer := TVectArtRenderBuffer.Create;
   FilterContext := nil;
+  TTextRendererSkiaRuntime.Acquire(ExtractFilePath(ParamStr(0)) + 'sk4d.dll');
   try
     Document.SetCanvasSize(OUTPUT_WIDTH, OUTPUT_HEIGHT);
     Document.CanvasLayer.Transparent := True;
     AddCurrentLayerTypes(Document);
+    if PassIndex = 1 then
+      for I := 1 to Document.LayerCount - 1 do
+      begin
+        Style := TScreenLayoutPaintStyle.Solid(clRed);
+        Style.PrepareLinearGradient(clRed);
+        Style.Kind := slpkGradient;
+        Style.GradientKind := TScreenLayoutGradientKind((I - 1) mod 6);
+        Style.GradientEndColor := clBlue;
+        Style.GradientStartOpacity := 0.15;
+        Style.GradientEndOpacity := 0.9;
+        Style.GradientAspect := 0.6;
+        Style.AddGradientStop(0.4);
+        Document[I].PaintStyle := Style;
+      end;
+    if PassIndex = 2 then
+    begin
+      Texture := TScreenLayoutTextureStyle.DefaultStyle;
+      Texture.Data := TNetEncoding.Base64.EncodeBytesToString(CreateTestPng);
+      Texture.FileName := 'parity.png';
+      Texture.RepeatMode := sltrMirror;
+      Texture.Scale := 0.35;
+      Texture.Angle := 27;
+      Texture.OffsetX := 0.1;
+      for I := 1 to Document.LayerCount - 1 do
+      begin
+        Style := TScreenLayoutPaintStyle.Solid(clRed);
+        Style.Kind := slpkTexture;
+        Style.Texture := Texture;
+        Document[I].PaintStyle := Style;
+      end;
+    end;
+    if PassIndex = 3 then
+      for I := 1 to Document.LayerCount - 1 do
+      begin
+        Style := TScreenLayoutPaintStyle.Solid(clRed);
+        Style.Kind := slpkPattern;
+        Style.Pattern := TScreenLayoutPatternStyle.Create(TScreenLayoutPatternKind((I - 1) mod 6), clBlue);
+        Document[I].PaintStyle := Style;
+      end;
     Serialized := SerializeVectArtDocument(Document);
     Check(TryDeserializeVectArtDocument(Serialized, ExpectedDocument,
       ReadError), 'Expected document load failed: ' + ReadError);
@@ -268,8 +315,6 @@ begin
         Format('Text path attachment %d was not restored for plugin input',
           [Ord(Attachment)]));
 
-    TTextRendererSkiaRuntime.Acquire(
-      ExtractFilePath(ParamStr(0)) + 'sk4d.dll');
     try
       RenderVectArtDocument(ExpectedDocument, DirectBuffer,
         OUTPUT_WIDTH, OUTPUT_HEIGHT);
@@ -293,18 +338,27 @@ begin
         'Plugin returned unexpected dimensions');
       Check(Length(ReturnedPixels) = ExpectedBuffer.PixelCount *
         SizeOf(TVectArtRgbaPixel), 'Plugin returned unexpected byte count');
+      for I := 0 to ExpectedBuffer.PixelCount - 1 do
+        if not CompareMem(@ExpectedBuffer.Pixels[I], @ReturnedPixels[I * 4], 4) then
+        begin
+          Writeln('DIFF ', I mod OUTPUT_WIDTH, ',', I div OUTPUT_WIDTH, ' expected ',
+            ExpectedBuffer.Pixels[I].R, ',', ExpectedBuffer.Pixels[I].G, ',', ExpectedBuffer.Pixels[I].B,
+            ' actual ', ReturnedPixels[I * 4], ',', ReturnedPixels[I * 4 + 1], ',', ReturnedPixels[I * 4 + 2]);
+          Break;
+        end;
       Check(CompareMem(ExpectedBuffer.Data, @ReturnedPixels[0],
         Length(ReturnedPixels)),
         'Plugin RGBA differs from the shared renderer output');
     finally
       FilterContext.Free;
-      TTextRendererSkiaRuntime.Release;
     end;
   finally
     ExpectedBuffer.Free;
     DirectBuffer.Free;
     ExpectedDocument.Free;
     Document.Free;
+    TTextRendererSkiaRuntime.Release;
+  end;
   end;
   Writeln('PASS');
 end.

@@ -6,15 +6,17 @@ interface
 
 uses
   System.Classes, System.Types, Vcl.Controls, Vcl.ExtCtrls, Vcl.Forms,
-  Vcl.Graphics, Vcl.Menus, Vcl.StdCtrls, ScreenLayoutContext,
+  Vcl.Graphics, Vcl.StdCtrls, ScreenLayoutContext,
   ScreenLayoutDocument, ScreenLayoutFilterDetailsFrame,
-  ScreenLayoutFilterListControl, ScreenLayoutFilters;
+  ScreenLayoutFilterListControl, ScreenLayoutFilters, VectArtDarkMenuGroup,
+  VectArtDarkPopupMenu;
 
 type
   TScreenLayoutFilterFrame = class(TFrame)
   private
     FAddButton: TPanel;
-    FAddMenu: TPopupMenu;
+    FAddMenu: TVectArtDarkPopupMenu;
+    FAddMenuGroup: TVectArtDarkMenuGroup;
     FCaptionLabel: TLabel;
     FContext: IVectArtDesignerContext;
     FDeleteButton: TPanel;
@@ -27,6 +29,7 @@ type
     procedure AddButtonClick(Sender: TObject);
     procedure AddFilterClick(Sender: TObject);
     procedure DeleteButtonClick(Sender: TObject);
+    procedure EnsureAddMenu;
     procedure FilterMoved(Sender: TObject; FromIndex, ToIndex: Integer);
     procedure FilterSelectionChanged(Sender: TObject);
     procedure FilterToggleEnabled(Sender: TObject; Index: Integer);
@@ -64,14 +67,92 @@ const
   DETAIL_HEIGHT          = 88;
   HEADER_HEIGHT          = 58;
 
+type
+  TFilterToolbarButtonKind = (ftbkAdd, ftbkDelete);
+
+  TFilterToolbarButton = class(TPanel)
+  private
+    FKind: TFilterToolbarButtonKind; // 追加または削除の描画種別。
+  protected
+    // DPIと有効状態に合わせ、追加記号またはゴミ箱を線画で描く。
+    procedure Paint; override;
+  public
+    // 操作種別を保持するダークテーマのツールバーボタンを生成する。
+    constructor CreateButton(AOwner: TComponent; Kind: TFilterToolbarButtonKind);
+  end;
+
+constructor TFilterToolbarButton.CreateButton(AOwner: TComponent;
+  Kind: TFilterToolbarButtonKind);
+begin
+  inherited Create(AOwner);
+  FKind := Kind;
+  BevelOuter := bvNone;
+  Caption := '';
+  Color := COLOR_BUTTON;
+  Font.Color := COLOR_TEXT_PRIMARY;
+  ParentBackground := False;
+  Cursor := crHandPoint;
+end;
+
+procedure TFilterToolbarButton.Paint;
+var
+  CenterX: Integer;
+  CenterY: Integer;
+  GlyphColor: TColor;
+  HalfSize: Integer;
+  Left: Integer;
+  PenWidth: Integer;
+  Top: Integer;
+begin
+  Canvas.Brush.Color := Color;
+  Canvas.FillRect(ClientRect);
+  if Enabled then GlyphColor := COLOR_TEXT_PRIMARY
+  else GlyphColor := COLOR_DISABLED;
+  Canvas.Pen.Color := GlyphColor;
+  PenWidth := Max(MulDiv(2, CurrentPPI, 96), 1);
+  Canvas.Pen.Width := PenWidth;
+  CenterX := ClientWidth div 2;
+  CenterY := ClientHeight div 2;
+  if FKind = ftbkAdd then
+  begin
+    HalfSize := MulDiv(8, CurrentPPI, 96);
+    Canvas.MoveTo(CenterX - HalfSize, CenterY);
+    Canvas.LineTo(CenterX + HalfSize + 1, CenterY);
+    Canvas.MoveTo(CenterX, CenterY - HalfSize);
+    Canvas.LineTo(CenterX, CenterY + HalfSize + 1);
+  end
+  else
+  begin
+    Left := CenterX - MulDiv(6, CurrentPPI, 96);
+    Top := CenterY - MulDiv(6, CurrentPPI, 96);
+    Canvas.MoveTo(Left, Top + MulDiv(3, CurrentPPI, 96));
+    Canvas.LineTo(Left + MulDiv(1, CurrentPPI, 96), Top + MulDiv(12, CurrentPPI, 96));
+    Canvas.LineTo(Left + MulDiv(11, CurrentPPI, 96), Top + MulDiv(12, CurrentPPI, 96));
+    Canvas.LineTo(Left + MulDiv(12, CurrentPPI, 96), Top + MulDiv(3, CurrentPPI, 96));
+    Canvas.MoveTo(Left - MulDiv(1, CurrentPPI, 96), Top + MulDiv(2, CurrentPPI, 96));
+    Canvas.LineTo(Left + MulDiv(13, CurrentPPI, 96), Top + MulDiv(2, CurrentPPI, 96));
+    Canvas.MoveTo(Left + MulDiv(4, CurrentPPI, 96), Top);
+    Canvas.LineTo(Left + MulDiv(8, CurrentPPI, 96), Top);
+  end;
+  Canvas.Pen.Width := 1;
+end;
+
 procedure TScreenLayoutFilterFrame.AddButtonClick(Sender: TObject);
 var
   PopupPoint: TPoint;
 begin
   if not FAddButton.Enabled then
     Exit;
+  EnsureAddMenu;
+  if FAddMenu = nil then
+    Exit;
+  if FAddMenu.Visible then
+  begin
+    FAddMenu.Close;
+    Exit;
+  end;
   PopupPoint := FAddButton.ClientToScreen(Point(0, FAddButton.Height));
-  FAddMenu.Popup(PopupPoint.X, PopupPoint.Y);
+  FAddMenu.OpenAtScreenPoint(PopupPoint);
 end;
 
 procedure TScreenLayoutFilterFrame.AddFilterClick(Sender: TObject);
@@ -81,12 +162,14 @@ var
   Kind: TScreenLayoutFilterKind;
   Layer: TVectArtLayer;
 begin
-  if not (Sender is TMenuItem) or (FContext = nil) then
+  if not (Sender is TPanel) or (FContext = nil) then
     Exit;
+  if FAddMenu <> nil then
+    FAddMenu.Close;
   Layer := ScreenLayoutSelectedSingleLayer(FContext);
   if (Layer = nil) or Layer.Locked then
     Exit;
-  Kind := TScreenLayoutFilterKind(TMenuItem(Sender).Tag);
+  Kind := TScreenLayoutFilterKind(TPanel(Sender).Tag);
   Filter := CreateDefaultScreenLayoutFilter(Kind);
   Command := TScreenLayoutAddFilterCommand.Create(FContext.Document, Layer,
     Layer.FilterCount, Filter);
@@ -100,19 +183,6 @@ begin
 end;
 
 constructor TScreenLayoutFilterFrame.Create(AOwner: TComponent);
-
-  procedure AddMenuItem(const Caption: string;
-    Kind: TScreenLayoutFilterKind);
-  var
-    Item: TMenuItem;
-  begin
-    Item := TMenuItem.Create(FAddMenu);
-    Item.Caption := Caption;
-    Item.Tag := Ord(Kind);
-    Item.OnClick := AddFilterClick;
-    FAddMenu.Items.Add(Item);
-  end;
-
 begin
   inherited Create(AOwner);
   Align := alClient;
@@ -149,12 +219,10 @@ begin
   FToolbarPanel.Color := COLOR_HEADER;
   FToolbarPanel.ParentBackground := False;
 
-  FAddButton := TPanel.Create(Self);
+  FAddButton := TFilterToolbarButton.CreateButton(Self, ftbkAdd);
   FAddButton.Parent := FToolbarPanel;
   FAddButton.SetBounds(MulDiv(5, CurrentPPI, 96), 2,
-    MulDiv(26, CurrentPPI, 96), MulDiv(24, CurrentPPI, 96));
-  FAddButton.BevelOuter := bvNone;
-  FAddButton.Caption := '+';
+    MulDiv(32, CurrentPPI, 96), MulDiv(26, CurrentPPI, 96));
   FAddButton.Hint := 'フィルターを追加';
   FAddButton.ShowHint := True;
   FAddButton.Color := COLOR_BUTTON;
@@ -162,23 +230,16 @@ begin
   FAddButton.ParentBackground := False;
   FAddButton.OnClick := AddButtonClick;
 
-  FDeleteButton := TPanel.Create(Self);
+  FDeleteButton := TFilterToolbarButton.CreateButton(Self, ftbkDelete);
   FDeleteButton.Parent := FToolbarPanel;
-  FDeleteButton.SetBounds(MulDiv(35, CurrentPPI, 96), 2,
-    MulDiv(26, CurrentPPI, 96), MulDiv(24, CurrentPPI, 96));
-  FDeleteButton.BevelOuter := bvNone;
-  FDeleteButton.Caption := 'x';
+  FDeleteButton.SetBounds(MulDiv(41, CurrentPPI, 96), 2,
+    MulDiv(28, CurrentPPI, 96), MulDiv(26, CurrentPPI, 96));
   FDeleteButton.Hint := '選択したフィルターを削除';
   FDeleteButton.ShowHint := True;
   FDeleteButton.Color := COLOR_BUTTON;
   FDeleteButton.Font.Color := COLOR_TEXT_PRIMARY;
   FDeleteButton.ParentBackground := False;
   FDeleteButton.OnClick := DeleteButtonClick;
-
-  FAddMenu := TPopupMenu.Create(Self);
-  AddMenuItem('縁取り', slfkOutline);
-  AddMenuItem('影', slfkShadow);
-  AddMenuItem('ぼかし', slfkBlur);
 
   FDetailsFrame := TScreenLayoutFilterDetailsFrame.Create(Self);
   FDetailsFrame.Parent := Self;
@@ -196,6 +257,37 @@ begin
   FFilterList.OnValueGestureStart := FilterValueGestureStart;
   FDetailsFrame.OnChanged := FilterSelectionChanged;
   UpdateControlState;
+end;
+
+procedure TScreenLayoutFilterFrame.EnsureAddMenu;
+const
+  ITEM_HEIGHT = 32;
+  MENU_WIDTH = 140;
+var
+  Host: TCustomForm;
+  Item: TPanel;
+
+  procedure AddMenuItem(const Caption: string;
+    Kind: TScreenLayoutFilterKind; Top: Integer);
+  begin
+    Item := FAddMenu.AddItem(Caption, Top, AddFilterClick);
+    Item.Tag := Ord(Kind);
+  end;
+
+begin
+  if FAddMenu <> nil then
+    Exit;
+  Host := GetParentForm(Self);
+  if Host = nil then
+    Exit;
+  FAddMenuGroup := TVectArtDarkMenuGroup.Create(Self);
+  FAddMenu := TVectArtDarkPopupMenu.CreatePopup(Self, Host,
+    MulDiv(MENU_WIDTH, CurrentPPI, 96),
+    MulDiv(ITEM_HEIGHT * 3, CurrentPPI, 96));
+  FAddMenuGroup.RegisterMenu(FAddMenu);
+  AddMenuItem('縁取り', slfkOutline, 0);
+  AddMenuItem('影', slfkShadow, MulDiv(ITEM_HEIGHT, CurrentPPI, 96));
+  AddMenuItem('ぼかし', slfkBlur, MulDiv(ITEM_HEIGHT * 2, CurrentPPI, 96));
 end;
 
 destructor TScreenLayoutFilterFrame.Destroy;
@@ -412,6 +504,8 @@ var
 begin
   Layer := FFilterList.Layer;
   Editable := (Layer <> nil) and not Layer.Locked;
+  if not Editable and (FAddMenu <> nil) then
+    FAddMenu.Close;
   FAddButton.Enabled := Editable;
   if Editable then
     FAddButton.Font.Color := COLOR_TEXT_PRIMARY

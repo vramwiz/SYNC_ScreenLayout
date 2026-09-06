@@ -57,7 +57,7 @@ uses
   TextRendererSkiaRuntime, Winapi.Windows,
   ScreenLayoutEllipseGeometry, ScreenLayoutGeometry,
   ScreenLayoutFilters, ScreenLayoutLayerGeometry, ScreenLayoutPathOperations,
-  ScreenLayoutPaintRenderer,
+  ScreenLayoutPaintRenderer, ScreenLayoutPatternRenderer,
   ScreenLayoutShapePath, ScreenLayoutTextGeometry,
   ScreenLayoutTextPathGeometry;
 
@@ -504,6 +504,7 @@ var
   I: Integer;
   LogicalBounds: TRectF;
   LayerBuffer: TVectArtRenderBuffer;
+  PatternScope: IInterface; // この文書描画だけでタイルを共有し、終了時に全画像を解放する。
 begin
   if Document = nil then
     raise EArgumentNilException.Create('Document');
@@ -516,6 +517,8 @@ begin
   if Target = nil then
     raise EArgumentNilException.Create('Target');
   HasVisibleGroup := False;
+  PatternScope := BeginScreenLayoutPatternRender(Max(Width / Max(LogicalBounds.Width, 1),
+    Height / Max(LogicalBounds.Height, 1)));
   FlatLayers := TList<TVectArtLayer>.Create;
   try
     for I := 1 to Document.LayerCount - 1 do
@@ -597,6 +600,7 @@ var
   LogicalBounds: TRectF;
   OpacityMultiplier: Single;
   Scale: Single;
+  PatternScope: IInterface; // サムネイル倍率で生成した一時画像の所有者。
 begin
   if Layer = nil then
     raise EArgumentNilException.Create('Layer');
@@ -612,6 +616,7 @@ begin
     OpacityMultiplier := 1.0
   else
     OpacityMultiplier := 0.35;
+  PatternScope := BeginScreenLayoutPatternRender(Scale);
   RenderVectArtLayerTree(Layer, Target, Width, Height, LogicalBounds,
     THUMBNAIL_MINIMUM_STROKE_WIDTH / Scale, OpacityMultiplier, nil, clNone);
 end;
@@ -952,6 +957,8 @@ begin
         ApplyScreenLayoutPaintStyle(StrokePaint, RectangleLine,
           RectangleLine.StrokeColor,
           RectangleLine.Opacity * OpacityMultiplier);
+      ApplyScreenLayoutStrokeGradient(StrokePaint, RectangleLine, Path,
+        RectangleLine.Opacity * OpacityMultiplier, StrokeWidth);
       StrokePaint.StrokeWidth := StrokeWidth;
       StrokePaint.StrokeCap := TSkStrokeCap.Butt;
       DashIntervals := VectArtStrokeDashIntervals(RectangleLine.StrokeStyle,
@@ -983,6 +990,8 @@ begin
       StrokeWidth := Max(ArcLayer.StrokeWidth, MinimumStrokeWidth);
       ApplyScreenLayoutPaintStyle(StrokePaint, ArcLayer, ArcLayer.StrokeColor,
         ArcLayer.Opacity * OpacityMultiplier);
+      ApplyScreenLayoutStrokeGradient(StrokePaint, ArcLayer, Path,
+        ArcLayer.Opacity * OpacityMultiplier, StrokeWidth);
       StrokePaint.StrokeWidth := StrokeWidth;
       DashIntervals := VectArtStrokeDashIntervals(ArcLayer.StrokeStyle,
         StrokeWidth);
@@ -1056,6 +1065,8 @@ begin
       StrokeWidth := Max(PathLayer.StrokeWidth, MinimumStrokeWidth);
       ApplyScreenLayoutPaintStyle(StrokePaint, PathLayer,
         PathLayer.StrokeColor, PathLayer.Opacity * OpacityMultiplier);
+      ApplyScreenLayoutStrokeGradient(StrokePaint, PathLayer, Path,
+        PathLayer.Opacity * OpacityMultiplier, StrokeWidth);
       StrokePaint.StrokeWidth := StrokeWidth;
       DashIntervals := VectArtStrokeDashIntervals(PathLayer.MifStrokeStyle,
         StrokeWidth);

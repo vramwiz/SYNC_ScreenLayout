@@ -1,9 +1,11 @@
-program ScreenLayoutGradientInteractionTest;
+﻿program ScreenLayoutGradientInteractionTest;
 
 {$APPTYPE CONSOLE}
 
 uses
   System.SysUtils,
+  System.Classes,
+  Vcl.Imaging.pngimage,
   System.Types,
   Winapi.Windows,
   Vcl.Controls,
@@ -14,7 +16,7 @@ uses
   ScreenLayoutEditHistory in
     '..\Source\Core\Commands\ScreenLayoutEditHistory.pas',
   ScreenLayoutGradientInteraction in
-    '..\Source\Editor\Interaction\ScreenLayoutGradientInteraction.pas',
+    '..\Source\Editor\Interaction\Gradient\ScreenLayoutGradientInteraction.pas',
   ScreenLayoutPaintStyles in
     '..\Source\Core\Model\ScreenLayoutPaintStyles.pas';
 
@@ -27,6 +29,11 @@ end;
 procedure Run;
 var
   Bitmap: TBitmap;
+  Png: TPngImage;
+  Background: TColor;
+  X, Y, BlackCount, WhiteCount: Integer;
+  Group: TScreenLayoutGroupLayer;
+  Child: TVectArtLayer;
   Data: TVectArtRectangleData;
   Document: TVectArtDocument;
   EndPoint: TPoint;
@@ -200,6 +207,65 @@ begin
       Rect(0, 0, 200, 200), 1.0);
 
     Bitmap.SetSize(200, 200);
+    Interaction.Draw(Bitmap.Canvas);
+
+    TVectArtRectangleLayer(Document[1]).RotationDegrees := 0;
+    State.SelectGradientStop(Document[1], SCREEN_LAYOUT_GRADIENT_START_STOP_ID);
+    for Background in [clBlack, clWhite] do
+    begin
+      Bitmap.Canvas.Brush.Color := Background;
+      Bitmap.Canvas.FillRect(Rect(0, 0, 200, 200));
+      Interaction.Draw(Bitmap.Canvas);
+      BlackCount := 0;
+      WhiteCount := 0;
+      for Y := 88 to 112 do
+        for X := 38 to 62 do
+        begin
+          if ColorToRGB(Bitmap.Canvas.Pixels[X, Y]) = ColorToRGB(clBlack) then
+            Inc(BlackCount);
+          if ColorToRGB(Bitmap.Canvas.Pixels[X, Y]) = ColorToRGB(clWhite) then
+            Inc(WhiteCount);
+        end;
+      Check((BlackCount > 10) and (WhiteCount > 10), 'selected gradient handle lost black/white contrast');
+      Png := TPngImage.Create;
+      try
+        Png.Assign(Bitmap);
+        Png.SaveToFile(ExtractFilePath(ParamStr(0)) + 'GradientGuide' + IntToStr(Background) + '.png');
+      finally
+        Png.Free;
+      end;
+    end;
+    Style := Document[1].PaintStyle;
+    Style.GradientKind := slgkRadial;
+    Style.LinearStart := TPointF.Create(0.5, 0.5);
+    Style.LinearEnd := TPointF.Create(1, 0.5);
+    Document[1].PaintStyle := Style;
+    Check(Interaction.TryGetGuidePoints(StartPoint, EndPoint), 'radial guide unavailable');
+    Check(Interaction.MouseDown(mbLeft, StartPoint.X, StartPoint.Y), 'center drag unavailable');
+    Interaction.MouseMove([ssLeft], StartPoint.X + 10, StartPoint.Y + 10);
+    Interaction.MouseUp(StartPoint.X + 10, StartPoint.Y + 10);
+    Check(Abs(Document[1].PaintStyle.LinearEnd.X - Style.LinearEnd.X - 0.1) < 0.001,
+      'moving center changed radius instead of translating');
+    History.Undo;
+    Check(Document[1].PaintStyle.SameAs(Style), 'center Undo did not restore style');
+    Check(Interaction.HitTest(100, 150) = slgghAspect, 'secondary radius handle missing');
+    Interaction.MouseDown(mbLeft, 100, 150);
+    Interaction.MouseMove([ssLeft], 100, 125);
+    Interaction.MouseUp(100, 125);
+    Check(Abs(Document[1].PaintStyle.GradientAspect - 0.5) < 0.001, 'secondary radius did not resize');
+    History.Undo;
+    Check(Document[1].PaintStyle.SameAs(Style), 'secondary radius Undo did not restore');
+    Child := Document.ExtractLayer(1);
+    Group := TScreenLayoutGroupLayer.Create('Group');
+    Group.AddChild(Child);
+    Document.InsertLayer(1, Group);
+    Document.SetSelectedLayers([1]);
+    State.OpenGroup := Group;
+    State.SetOpenGroupChildren([Child]);
+    State.SelectGradientStop(Child, SCREEN_LAYOUT_GRADIENT_END_STOP_ID);
+    State.ValidateSelectedGradientStop(Document);
+    Check(State.SelectedGradientLayer = Child, 'group child lost selected stop');
+    Check(Interaction.TryGetGuidePoints(StartPoint, EndPoint), 'group child guide unavailable');
     Interaction.Draw(Bitmap.Canvas);
 
     State.CurrentTool := vetRectangle;

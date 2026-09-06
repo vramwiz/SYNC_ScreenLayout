@@ -14,7 +14,7 @@ implementation
 uses
   System.Generics.Collections, System.IOUtils, System.JSON, System.Math,
   System.SysUtils, System.Types, Vcl.Graphics, ScreenLayoutFilters,
-  ScreenLayoutPaintStyles;
+  ScreenLayoutPaintStyles, ScreenLayoutTextureJson, ScreenLayoutPatternJson;
 
 const
   DOCUMENT_FORMAT_VERSION = 15;
@@ -54,10 +54,17 @@ var
   StopsJson: TJSONArray;
 begin
   PaintStyle := Layer.PaintStyle;
+  if PaintStyle.Kind = slpkPattern then
+    LayerJson.AddPair('paint', WriteScreenLayoutPattern(PaintStyle.Pattern));
+  if PaintStyle.Kind = slpkTexture then
+    LayerJson.AddPair('paint', WriteScreenLayoutTexture(PaintStyle.Texture));
   if PaintStyle.Kind = slpkGradient then
   begin
     PaintJson := TJSONObject.Create;
-    PaintJson.AddPair('type', 'linearGradient');
+    PaintJson.AddPair('type', SCREEN_LAYOUT_GRADIENT_KIND_NAMES[PaintStyle.GradientKind]);
+    PaintJson.AddPair('startOpacity', TJSONNumber.Create(PaintStyle.GradientStartOpacity));
+    PaintJson.AddPair('endOpacity', TJSONNumber.Create(PaintStyle.GradientEndOpacity));
+    PaintJson.AddPair('aspect', TJSONNumber.Create(PaintStyle.GradientAspect));
     PaintJson.AddPair('startColor',
       TJSONNumber.Create(Integer(PaintStyle.GradientStartColor)));
     PaintJson.AddPair('endColor',

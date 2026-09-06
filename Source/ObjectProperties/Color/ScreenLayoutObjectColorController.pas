@@ -7,11 +7,12 @@ interface
 uses
   System.Classes, Vcl.Graphics, ScreenLayoutColorPickerFrame,
   ScreenLayoutContext, ScreenLayoutDocument, ScreenLayoutFilters,
-  ScreenLayoutObjectPropertyCommands, ScreenLayoutPaintStyles;
+  ScreenLayoutObjectPropertyCommands, ScreenLayoutPaintStyles, ScreenLayoutPaintStyleGesture;
 
 type
   TScreenLayoutObjectColorController = class
   private
+    FPaintGesture: TScreenLayoutPaintStyleGesture; // 共通塗りの複数選択履歴。
     FColorDocumentUpdateActive: Boolean;
     FColorGestureActive: Boolean;
     FColorGestureFilter: TScreenLayoutFilter;
@@ -28,12 +29,16 @@ type
     FOnChanged: TNotifyEvent;
     FOpacityDocumentUpdateActive: Boolean;
     FOpacityGestureActive: Boolean;
+    FOpacityGestureGradientLayer: TVectArtLayer;
+    FOpacityGestureOldPaintStyle: TScreenLayoutPaintStyle;
     FOpacityGestureFilter: TScreenLayoutFilter;
     FOpacityGestureOldParameters: TScreenLayoutFilter;
     FOpacityStartLayers: TArray<TVectArtLayer>;
     FOpacityStartValues: TArray<Single>;
     FRefreshing: Boolean;
     FUpdatingColor: Boolean;
+    procedure PaintGestureStart(Sender: TObject);
+    procedure PaintGestureEnd(Sender: TObject);
     procedure ColorChanged(Sender: TObject);
     procedure ColorGestureEnd(Sender: TObject);
     procedure ColorGestureStart(Sender: TObject);
@@ -78,6 +83,9 @@ constructor TScreenLayoutObjectColorController.Create(
 begin
   inherited Create;
   FFrame := AFrame;
+  FPaintGesture := TScreenLayoutPaintStyleGesture.Create;
+  FFrame.OnPaintGestureStart := PaintGestureStart;
+  FFrame.OnPaintGestureEnd := PaintGestureEnd;
   FFrame.OnChange := ColorChanged;
   FFrame.OnColorGestureEnd := ColorGestureEnd;
   FFrame.OnColorGestureStart := ColorGestureStart;
@@ -88,6 +96,16 @@ begin
   FFrame.OnPaintStyleChange := PaintStyleChanged;
 end;
 
+procedure TScreenLayoutObjectColorController.PaintGestureStart(Sender: TObject);
+begin
+  FPaintGesture.Start(FContext);
+end;
+
+procedure TScreenLayoutObjectColorController.PaintGestureEnd(Sender: TObject);
+begin
+  FPaintGesture.Finish;
+end;
+
 procedure TScreenLayoutObjectColorController.AdoptVisiblePickerAsCreationPaint;
 begin
   if (FContext = nil) or (FContext.EditorState = nil) then
@@ -95,7 +113,7 @@ begin
   // 無効な対象（画像やぼかしなど）は表示値を作成既定へ上書きしない。
   if FFrame.ColorEnabled then
     FContext.EditorState.CreationPaintStyle := FFrame.PaintStyle;
-  if FFrame.OpacityEnabled then
+  if FFrame.OpacityEnabled and (not (FFrame.PaintStyle.Kind in [slpkGradient, slpkPattern])) then
     FContext.EditorState.RectangleOpacity := FFrame.Opacity / 100.0;
 end;
 
@@ -112,7 +130,7 @@ begin
     (FContext.Document = nil) then
     Exit;
   NewStyle := FFrame.PaintStyle;
-  if not ScreenLayoutUsesCreationPaint(FContext) and
+  if not FPaintGesture.Apply(NewStyle) and not ScreenLayoutUsesCreationPaint(FContext) and
     not ScreenLayoutSelectedFilter(FContext, Layer, Filter) then
   begin
     Command := TVectArtCompoundCommand.Create;
@@ -122,8 +140,6 @@ begin
         if not Layer.Locked then
         begin
           OldStyle := Layer.PaintStyle;
-          if OldStyle.Kind <> slpkGradient then
-            OldStyle := TScreenLayoutPaintStyle.Solid(FFrame.SelectedColor);
           if OldStyle.SameAs(NewStyle) then
             Continue;
           Command.Add(TScreenLayoutSetLayerPaintStyleCommand.Create(
@@ -147,6 +163,7 @@ end;
 
 destructor TScreenLayoutObjectColorController.Destroy;
 begin
+  FPaintGesture.Free;
   if FColorDocumentUpdateActive and (FContext <> nil) and
     (FContext.Document <> nil) then
     FContext.Document.EndInteractiveUpdate;
@@ -387,6 +404,9 @@ end;
 
 procedure TScreenLayoutObjectColorController.OpacityChanged(Sender: TObject);
 var
+  StopId: Integer;
+  Color: TColor;
+  OldStyle, NewStyle: TScreenLayoutPaintStyle;
   Command: TVectArtCompoundCommand;
   Document: TVectArtDocument;
   Filter: TScreenLayoutFilter;
@@ -428,10 +448,30 @@ begin
       end;
     end;
   end
+  else if ScreenLayoutSelectedGradientStop(FContext, Layer, StopId, Color) then
+  begin
+    if Layer.Locked then
+      Exit;
+    OldStyle := Layer.PaintStyle;
+    NewStyle := OldStyle;
+    if not NewStyle.SetGradientStopOpacity(StopId, NewValue) then
+      Exit;
+    Layer.PaintStyle := NewStyle;
+    Document.Changed;
+    if not FOpacityGestureActive then
+      AddAppliedCommand(FContext, TScreenLayoutSetLayerPaintStyleCommand.Create(
+        Document, Layer, OldStyle, NewStyle));
+    FContext.EditorState.CreationPaintStyle := NewStyle;
+  end
   else if ScreenLayoutUsesCreationPaint(FContext) then
   begin
     if FContext.EditorState <> nil then
-      FContext.EditorState.RectangleOpacity := NewValue;
+    begin
+      if FFrame.PaintStyle.Kind = slpkGradient then
+        FContext.EditorState.CreationPaintStyle := FFrame.PaintStyle
+      else
+        FContext.EditorState.RectangleOpacity := NewValue;
+    end;
   end
   else
   begin
@@ -475,7 +515,14 @@ begin
   if not FOpacityGestureActive then
     Exit;
   FOpacityGestureActive := False;
-  if (FOpacityGestureFilter is TScreenLayoutShadowFilter) and
+  if FOpacityGestureGradientLayer <> nil then
+  begin
+    if not FOpacityGestureOldPaintStyle.SameAs(FOpacityGestureGradientLayer.PaintStyle) then
+      AddAppliedCommand(FContext, TScreenLayoutSetLayerPaintStyleCommand.Create(
+        FContext.Document, FOpacityGestureGradientLayer, FOpacityGestureOldPaintStyle,
+        FOpacityGestureGradientLayer.PaintStyle));
+  end
+  else if (FOpacityGestureFilter is TScreenLayoutShadowFilter) and
     (FOpacityGestureOldParameters <> nil) then
   begin
     if not SameValue(
@@ -501,6 +548,7 @@ begin
     else
       Command.Free;
   end;
+  FOpacityGestureGradientLayer := nil;
   FOpacityGestureFilter := nil;
   FOpacityGestureOldParameters.Free;
   FOpacityGestureOldParameters := nil;
@@ -516,6 +564,8 @@ end;
 procedure TScreenLayoutObjectColorController.OpacityGestureStart(
   Sender: TObject);
 var
+  Color: TColor;
+  StopId: Integer;
   Filter: TScreenLayoutFilter;
   I: Integer;
   Layer: TVectArtLayer;
@@ -529,6 +579,13 @@ begin
       Exit;
     FOpacityGestureFilter := Filter;
     FOpacityGestureOldParameters := Filter.Clone;
+  end
+  else if ScreenLayoutSelectedGradientStop(FContext, Layer, StopId, Color) then
+  begin
+    if Layer.Locked then
+      Exit;
+    FOpacityGestureGradientLayer := Layer;
+    FOpacityGestureOldPaintStyle := Layer.PaintStyle;
   end
   else if ScreenLayoutUsesCreationPaint(FContext) then
     Exit
@@ -554,6 +611,8 @@ end;
 
 procedure TScreenLayoutObjectColorController.Refresh;
 var
+  DisplayStyle: TScreenLayoutPaintStyle;
+  StopOpacity: Single;
   ColorEnabled: Boolean;
   ColorLayers: TArray<TVectArtLayer>;
   ColorValue: TColor;
@@ -616,8 +675,8 @@ begin
       finally
         FUpdatingColor := False;
       end;
-      FFrame.Opacity := Round(EnsureRange(
-        FContext.EditorState.RectangleOpacity, 0.0, 1.0) * 100);
+      if not (FFrame.PaintStyle.Kind in [slpkGradient, slpkPattern]) then
+        FFrame.Opacity := Round(EnsureRange(FContext.EditorState.RectangleOpacity, 0.0, 1.0) * 100);
       Exit;
     end;
 
@@ -637,8 +696,8 @@ begin
       finally
         FUpdatingColor := False;
       end;
-      FFrame.Opacity := Round(EnsureRange(
-        FContext.EditorState.RectangleOpacity, 0.0, 1.0) * 100);
+      if not (FFrame.PaintStyle.Kind in [slpkGradient, slpkPattern]) then
+        FFrame.Opacity := Round(EnsureRange(FContext.EditorState.RectangleOpacity, 0.0, 1.0) * 100);
       Exit;
     end;
     ColorEnabled := Length(ColorLayers) > 0;
@@ -662,7 +721,11 @@ begin
           end;
         end
         else
-          FFrame.PaintStyle := TScreenLayoutPaintStyle.Solid(ColorValue);
+        begin
+          DisplayStyle := ColorLayers[0].PaintStyle;
+          DisplayStyle.SolidColor := ColorValue;
+          FFrame.PaintStyle := DisplayStyle;
+        end;
       finally
         FUpdatingColor := False;
       end;
@@ -672,7 +735,13 @@ begin
     for I := 0 to High(OpacityLayers) do
       OpacityEnabled := OpacityEnabled and not OpacityLayers[I].Locked;
     FFrame.OpacityEnabled := OpacityEnabled;
-    if Length(OpacityLayers) > 0 then
+    if ScreenLayoutSelectedGradientStop(FContext, Layer, StopId, ColorValue) and
+      Layer.PaintStyle.GetGradientStopOpacity(StopId, StopOpacity) then
+    begin
+      FFrame.OpacityEnabled := not Layer.Locked;
+      FFrame.Opacity := Round(StopOpacity * 100);
+    end
+    else if (Length(OpacityLayers) > 0) and (FFrame.PaintStyle.Kind <> slpkPattern) then
       FFrame.Opacity := Round(EnsureRange(OpacityLayers[0].Opacity,
         0.0, 1.0) * 100);
   finally
@@ -687,6 +756,7 @@ begin
     ColorGestureEnd(Self);
   if FOpacityGestureActive then
     OpacityGestureEnd(Self);
+  FPaintGesture.Finish;
   FContext := Value;
   FCreationTargetStateKnown := False;
   FLastUsesCreationPaint := False;

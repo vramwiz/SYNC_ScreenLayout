@@ -26,7 +26,7 @@ uses
   ScreenLayoutSelectionGeometry in
     '..\Source\Editor\Interaction\ScreenLayoutSelectionGeometry.pas',
   ScreenLayoutGroupInteraction in
-    '..\Source\Editor\Interaction\ScreenLayoutGroupInteraction.pas';
+    '..\Source\Editor\Interaction\Group\ScreenLayoutGroupInteraction.pas';
 
 procedure Check(Condition: Boolean; const MessageText: string);
 begin

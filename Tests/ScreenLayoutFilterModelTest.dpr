@@ -33,6 +33,7 @@ var
   Outline: TScreenLayoutOutlineFilter;
   Shadow: TScreenLayoutShadowFilter;
   State: TVectArtEditorState;
+  TextData: TScreenLayoutTextData;
   RemovedFilter: TScreenLayoutFilter;
 begin
   Document := TVectArtDocument.Create;
@@ -121,10 +122,32 @@ begin
     History.Redo;
     Check(Layer.FilterCount = 2, 'remove redo failed');
 
+    Document.SelectedIndex := 1;
     State.SelectFilter(Layer, Shadow);
     State.ValidateSelectedFilter(Document);
     Check(State.SelectedFilter = Shadow,
       'valid filter selection was cleared');
+    TextData := Default(TScreenLayoutTextData);
+    TextData.Alignment := sltaTopLeft;
+    TextData.Bounds := TRectF.Create(-30, -20, 30, 20);
+    TextData.FontFamily := 'Segoe UI';
+    TextData.FontSize := 20;
+    TextData.Name := 'Text';
+    TextData.Opacity := 1;
+    TextData.Text := 'Text';
+    TextData.TextColor := clRed;
+    TextData.TransformMode := slttmUniformScale;
+    TextData.Visible := True;
+    TextData.WrapWidth := 60;
+    Document.InsertText(Document.LayerCount, TextData);
+    Document.SelectedIndex := Document.LayerCount - 1;
+    State.ValidateSelectedFilter(Document);
+    Check((State.SelectedFilter = nil) and
+      (State.SelectedFilterLayer = nil),
+      'selecting text did not clear the previous filter selection');
+
+    Document.SelectedIndex := 1;
+    State.SelectFilter(Layer, Shadow);
     RemovedFilter := Layer.ExtractFilter(1);
     try
       State.ValidateSelectedFilter(Document);

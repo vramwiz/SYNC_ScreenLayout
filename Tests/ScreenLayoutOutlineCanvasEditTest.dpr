@@ -23,6 +23,7 @@ uses
 type
   TTestCanvasControl = class(TVectArtCanvasControl)
   public
+    procedure ClickAt(const Point: TPoint);
     procedure Drag(const StartPoint, EndPoint: TPoint);
   end;
 
@@ -30,6 +31,12 @@ procedure Check(Condition: Boolean; const MessageText: string);
 begin
   if not Condition then
     raise Exception.Create(MessageText);
+end;
+
+procedure TTestCanvasControl.ClickAt(const Point: TPoint);
+begin
+  MouseDown(mbLeft, [], Point.X, Point.Y);
+  MouseUp(mbLeft, [], Point.X, Point.Y);
 end;
 
 procedure TTestCanvasControl.Drag(const StartPoint, EndPoint: TPoint);
@@ -50,6 +57,9 @@ var
   Layer: TVectArtLayer;
   Outline: TScreenLayoutOutlineFilter;
   RightHandle: TPoint;
+  TextData: TScreenLayoutTextData;
+  TextLayer: TScreenLayoutTextLayer;
+  TextOutline: TScreenLayoutOutlineFilter;
 begin
   Document := TVectArtDocument.Create;
   EditorState := TVectArtEditorState.Create;
@@ -100,6 +110,34 @@ begin
       Point(RightHandle.X + 100, RightHandle.Y));
     Check(SameValue(Outline.Width, 40.0),
       'outline width was not clamped to slider maximum');
+
+    TextData := Default(TScreenLayoutTextData);
+    TextData.Alignment := sltaTopLeft;
+    TextData.Bounds := TRectF.Create(-50, -20, 50, 20);
+    TextData.FontFamily := 'Segoe UI';
+    TextData.FontSize := 20;
+    TextData.Name := 'Blue text';
+    TextData.Opacity := 1;
+    TextData.Text := 'Text';
+    TextData.TextColor := clBlue;
+    TextData.TransformMode := slttmUniformScale;
+    TextData.Visible := True;
+    TextData.WrapWidth := 100;
+    Document.InsertText(Document.LayerCount, TextData);
+    Document.SelectedIndex := Document.LayerCount - 1;
+    TextLayer := TScreenLayoutTextLayer(Document[Document.SelectedIndex]);
+    TextOutline := TScreenLayoutOutlineFilter.Create;
+    TextOutline.Color := clRed;
+    TextOutline.Width := 4;
+    TextLayer.AddFilter(TextOutline);
+    EditorState.SelectFilter(TextLayer, TextOutline);
+    CanvasControl.ClickAt(Point(CanvasControl.CanvasBounds.Left + 100,
+      CanvasControl.CanvasBounds.Top + 100));
+    Check((EditorState.SelectedFilter = nil) and
+      (EditorState.SelectedFilterLayer = nil),
+      'clicking selected text did not leave outline color editing');
+    Check(TextLayer.FillColor = clBlue,
+      'clicking selected text changed its own color');
   finally
     CanvasControl.Free;
     Form.Free;

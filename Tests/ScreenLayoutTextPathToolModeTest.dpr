@@ -16,9 +16,9 @@ uses
   ScreenLayoutSelectionGeometry in
     '..\Source\Editor\Interaction\ScreenLayoutSelectionGeometry.pas',
   ScreenLayoutTextPathCharacterInteraction in
-    '..\Source\Editor\Interaction\ScreenLayoutTextPathCharacterInteraction.pas',
+    '..\Source\Editor\Interaction\Text\ScreenLayoutTextPathCharacterInteraction.pas',
   ScreenLayoutTextPathGeometry in
-    '..\Source\Core\Geometry\ScreenLayoutTextPathGeometry.pas',
+    '..\Source\Core\Geometry\Text\ScreenLayoutTextPathGeometry.pas',
   ScreenLayoutShapeCreation in
     '..\Source\Editor\Creation\ScreenLayoutShapeCreation.pas',
   ScreenLayoutDocument in '..\Source\Core\Model\ScreenLayoutDocument.pas',

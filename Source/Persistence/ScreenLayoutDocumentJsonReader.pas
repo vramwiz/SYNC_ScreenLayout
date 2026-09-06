@@ -19,7 +19,7 @@ implementation
 uses
   System.Generics.Collections, System.IOUtils, System.JSON, System.Math,
   System.SysUtils, System.Types, Vcl.Graphics, ScreenLayoutFilters,
-  ScreenLayoutPaintStyles;
+  ScreenLayoutPaintStyles, ScreenLayoutTextureJson, ScreenLayoutPatternJson;
 
 const
   DOCUMENT_FORMAT_VERSION = 15;
@@ -68,6 +68,8 @@ function ReadSingle(Parent: TJSONObject; const Name: string): Single;
 begin
   Result := TJSONNumber(RequireValue(Parent, Name,
     TJSONNumber)).AsDouble;
+  if IsNan(Result) or IsInfinite(Result) then
+    raise EConvertError.CreateFmt('JSON field "%s" must be finite', [Name]);
 end;
 
 function ReadOptionalSingle(Parent: TJSONObject; const Name: string;
@@ -189,12 +191,103 @@ begin
   end;
 end;
 
+function ReadLayerPaintStyle(LayerJson: TJSONObject; out PaintStyle: TScreenLayoutPaintStyle): Boolean;
+var
+  I, J: Integer;
+  PaintJson: TJSONObject;
+  PaintValue: TJSONValue;
+  StopJson: TJSONObject;
+  Stops: TArray<TScreenLayoutGradientStop>;
+  StopsJson: TJSONArray;
+begin
+  Result := False;
+  PaintValue := LayerJson.GetValue('paint');
+  if PaintValue <> nil then
+  begin
+    if not (PaintValue is TJSONObject) then
+      raise EConvertError.Create('JSON field "paint" has an invalid type');
+    PaintJson := TJSONObject(PaintValue);
+    if ReadString(PaintJson, 'type') = 'pattern' then
+    begin
+      PaintStyle := TScreenLayoutPaintStyle.Solid(clWhite);
+      PaintStyle.Kind := slpkPattern;
+      PaintStyle.Pattern := ReadScreenLayoutPattern(PaintJson);
+      Exit(True);
+    end;
+    if ReadString(PaintJson, 'type') = 'texture' then
+    begin
+      PaintStyle := TScreenLayoutPaintStyle.Solid(clWhite);
+      PaintStyle.Kind := slpkTexture;
+      PaintStyle.Texture := ReadScreenLayoutTexture(PaintJson);
+      Exit(True);
+    end;
+    PaintStyle := TScreenLayoutPaintStyle.Solid(
+      TColor(ReadInteger(PaintJson, 'startColor')));
+    PaintStyle.PrepareLinearGradient(PaintStyle.SolidColor);
+    PaintStyle.Kind := slpkGradient;
+    for I := Ord(Low(TScreenLayoutGradientKind)) to Ord(High(TScreenLayoutGradientKind)) do
+      if ReadString(PaintJson, 'type') = SCREEN_LAYOUT_GRADIENT_KIND_NAMES[TScreenLayoutGradientKind(I)] then
+      begin
+        PaintStyle.GradientKind := TScreenLayoutGradientKind(I);
+        Break;
+      end;
+    if ReadString(PaintJson, 'type') <> SCREEN_LAYOUT_GRADIENT_KIND_NAMES[PaintStyle.GradientKind] then
+      raise EConvertError.Create('Unsupported gradient type');
+    if PaintJson.GetValue('startOpacity') <> nil then
+      PaintStyle.SetGradientStopOpacity(SCREEN_LAYOUT_GRADIENT_START_STOP_ID,
+        ReadSingle(PaintJson, 'startOpacity'));
+    if PaintJson.GetValue('endOpacity') <> nil then
+      PaintStyle.SetGradientStopOpacity(SCREEN_LAYOUT_GRADIENT_END_STOP_ID,
+        ReadSingle(PaintJson, 'endOpacity'));
+    if PaintJson.GetValue('aspect') <> nil then
+    begin
+      PaintStyle.GradientAspect := ReadSingle(PaintJson, 'aspect');
+      if (PaintStyle.GradientAspect < 0.01) or (PaintStyle.GradientAspect > 100) then
+        raise EConvertError.Create('Invalid gradient aspect');
+    end;
+    PaintStyle.GradientStartColor := TColor(ReadInteger(PaintJson,
+      'startColor'));
+    PaintStyle.GradientEndColor := TColor(ReadInteger(PaintJson,
+      'endColor'));
+    PaintStyle.LinearStart := TPointF.Create(
+      ReadSingle(PaintJson, 'startX'), ReadSingle(PaintJson, 'startY'));
+    PaintStyle.LinearEnd := TPointF.Create(
+      ReadSingle(PaintJson, 'endX'), ReadSingle(PaintJson, 'endY'));
+    if (PaintJson.GetValue('stops') <> nil) and not (PaintJson.GetValue('stops') is TJSONArray) then
+      raise EConvertError.Create('Invalid gradient stops array');
+    if PaintJson.GetValue('stops') is TJSONArray then
+    begin
+      StopsJson := TJSONArray(PaintJson.GetValue('stops'));
+      SetLength(Stops, StopsJson.Count);
+      for I := 0 to StopsJson.Count - 1 do
+      begin
+        if not (StopsJson.Items[I] is TJSONObject) then
+          raise EConvertError.Create('Gradient stop is not a JSON object');
+        StopJson := TJSONObject(StopsJson.Items[I]);
+        Stops[I].Id := ReadInteger(StopJson, 'id');
+        if (Stops[I].Id <= 0) or (Stops[I].Id = MaxInt) then
+          raise EConvertError.Create('Invalid gradient stop id');
+        for J := 0 to I - 1 do
+          if Stops[I].Id = Stops[J].Id then
+            raise EConvertError.Create('Duplicate gradient stop id');
+        Stops[I].Offset := ReadSingle(StopJson, 'offset');
+        Stops[I].Color := TColor(ReadInteger(StopJson, 'color'));
+        Stops[I].Opacity := ReadSingle(StopJson, 'opacity');
+      end;
+      PaintStyle.SetGradientStops(Stops);
+    end;
+    Result := True;
+  end;
+end;
+
 procedure ValidateLayerFilters(LayerJson: TJSONObject);
 var
   Filter: TScreenLayoutFilter;
   FiltersJson: TJSONArray;
   I: Integer;
+  PaintStyle: TScreenLayoutPaintStyle;
 begin
+  ReadLayerPaintStyle(LayerJson, PaintStyle);
   FiltersJson := TJSONArray(RequireValue(LayerJson, 'filters', TJSONArray));
   for I := 0 to FiltersJson.Count - 1 do
   begin
@@ -208,12 +301,7 @@ var
   Filter: TScreenLayoutFilter;
   FiltersJson: TJSONArray;
   I: Integer;
-  PaintJson: TJSONObject;
   PaintStyle: TScreenLayoutPaintStyle;
-  PaintValue: TJSONValue;
-  StopJson: TJSONObject;
-  Stops: TArray<TScreenLayoutGradientStop>;
-  StopsJson: TJSONArray;
 begin
   FiltersJson := TJSONArray(RequireValue(LayerJson, 'filters', TJSONArray));
   Layer.ClearFilters;
@@ -227,44 +315,8 @@ begin
       raise;
     end;
   end;
-  PaintValue := LayerJson.GetValue('paint');
-  if PaintValue <> nil then
-  begin
-    if not (PaintValue is TJSONObject) then
-      raise EConvertError.Create('JSON field "paint" has an invalid type');
-    PaintJson := TJSONObject(PaintValue);
-    if ReadString(PaintJson, 'type') <> 'linearGradient' then
-      raise EConvertError.Create('Unsupported paint type');
-    PaintStyle := TScreenLayoutPaintStyle.Solid(
-      TColor(ReadInteger(PaintJson, 'startColor')));
-    PaintStyle.PrepareLinearGradient(PaintStyle.SolidColor);
-    PaintStyle.Kind := slpkGradient;
-    PaintStyle.GradientStartColor := TColor(ReadInteger(PaintJson,
-      'startColor'));
-    PaintStyle.GradientEndColor := TColor(ReadInteger(PaintJson,
-      'endColor'));
-    PaintStyle.LinearStart := TPointF.Create(
-      ReadSingle(PaintJson, 'startX'), ReadSingle(PaintJson, 'startY'));
-    PaintStyle.LinearEnd := TPointF.Create(
-      ReadSingle(PaintJson, 'endX'), ReadSingle(PaintJson, 'endY'));
-    if PaintJson.GetValue('stops') is TJSONArray then
-    begin
-      StopsJson := TJSONArray(PaintJson.GetValue('stops'));
-      SetLength(Stops, StopsJson.Count);
-      for I := 0 to StopsJson.Count - 1 do
-      begin
-        if not (StopsJson.Items[I] is TJSONObject) then
-          raise EConvertError.Create('Gradient stop is not a JSON object');
-        StopJson := TJSONObject(StopsJson.Items[I]);
-        Stops[I].Id := ReadInteger(StopJson, 'id');
-        Stops[I].Offset := ReadSingle(StopJson, 'offset');
-        Stops[I].Color := TColor(ReadInteger(StopJson, 'color'));
-        Stops[I].Opacity := ReadSingle(StopJson, 'opacity');
-      end;
-      PaintStyle.SetGradientStops(Stops);
-    end;
+  if ReadLayerPaintStyle(LayerJson, PaintStyle) then
     Layer.PaintStyle := PaintStyle;
-  end;
 end;
 
 function ParseTextPathAttachment(
@@ -499,6 +551,19 @@ begin
       SetLength(TextData, LayersJson.Count);
       SetLength(TextPathVerticesData, LayersJson.Count);
       SetLength(GroupData, LayersJson.Count);
+      // 管理対象フィールド以外も初期化し、paint省略時の種別へスタック上の値を混入させない。
+      Data := Default(TVectArtRectangleData);
+      ArcValue := Default(TScreenLayoutArcData);
+      ArcShapeValue := Default(TScreenLayoutEllipseArcShapeData);
+      EllipseValue := Default(TScreenLayoutEllipseData);
+      EllipseLineValue := Default(TScreenLayoutEllipseLineData);
+      RectangleLineValue := Default(TScreenLayoutRectangleLineData);
+      RoundedRectangleValue := Default(TScreenLayoutRoundedRectangleData);
+      RoundedRectangleLineValue := Default(TScreenLayoutRoundedRectangleLineData);
+      PathValue := Default(TVectArtPathData);
+      ShapeValue := Default(TScreenLayoutShapeData);
+      TextValue := Default(TScreenLayoutTextData);
+      ImageValue := Default(TVectArtImageData);
       SetLength(LayerTypes, LayersJson.Count);
       for I := 0 to LayersJson.Count - 1 do
       begin

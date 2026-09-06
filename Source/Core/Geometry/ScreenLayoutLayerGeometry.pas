@@ -154,6 +154,20 @@ begin
     Exit(True);
   end;
   Result := TryGetScreenLayoutLayerBounds(Layer, Bounds);
+  // 水平・垂直のPathにも編集可能な正規化座標を与える。
+  if Result then
+  begin
+    if Abs(Bounds.Width) < 0.0001 then
+    begin
+      Bounds.Left := Bounds.Left - 0.5;
+      Bounds.Right := Bounds.Right + 0.5;
+    end;
+    if Abs(Bounds.Height) < 0.0001 then
+    begin
+      Bounds.Top := Bounds.Top - 0.5;
+      Bounds.Bottom := Bounds.Bottom + 0.5;
+    end;
+  end;
 end;
 
 function ScreenLayoutLayerPaintPoint(const Bounds: TRectF;

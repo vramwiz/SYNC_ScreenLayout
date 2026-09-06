@@ -1,4 +1,4 @@
-program ScreenLayoutFilterRenderTest;
+﻿program ScreenLayoutFilterRenderTest;
 
 {$APPTYPE CONSOLE}
 
@@ -141,7 +141,9 @@ begin
       (MiddlePixel.G > MiddlePixel.R) and
       (MiddlePixel.G > MiddlePixel.B) and
       (RightPixel.B > RightPixel.R),
-      'linear gradient endpoints were not rendered in the requested direction');
+      Format('linear gradient direction: left=%d,%d,%d,%d middle=%d,%d,%d,%d right=%d,%d,%d,%d',
+      [LeftPixel.R, LeftPixel.G, LeftPixel.B, LeftPixel.A, MiddlePixel.R, MiddlePixel.G, MiddlePixel.B,
+      MiddlePixel.A, RightPixel.R, RightPixel.G, RightPixel.B, RightPixel.A]));
     Layer.RotationDegrees := 90.0;
     RenderVectArtDocument(Document, Buffer, 200, 200);
     TopPixel := Buffer.Pixels[45 * Buffer.Width + 100];

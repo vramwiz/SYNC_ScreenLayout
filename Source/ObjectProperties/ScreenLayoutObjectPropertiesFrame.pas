@@ -1,4 +1,4 @@
-// フィルターUIと色・不透明度UIを同階層の独立Frameとして提供する。
+﻿// フィルターUIと色・不透明度UIを同階層の独立Frameとして提供する。
 unit ScreenLayoutObjectPropertiesFrame;
 
 interface
@@ -37,7 +37,7 @@ uses
 
 const
   COLOR_PANEL_BACKGROUND       = TColor($00212121);
-  COLOR_PICKER_PANEL_HEIGHT    = 241; // モード列を含め下端に固定する高さ。
+  COLOR_PICKER_PANEL_HEIGHT    = 538; // 最大のモード設定を含めても切り替え時に動かさない高さ。
   OBJECT_PROPERTIES_DOCK_WIDTH = 160;
 
 constructor TObjectPropertiesFrame.Create(AOwner: TComponent);

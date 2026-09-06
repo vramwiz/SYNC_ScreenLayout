@@ -15,7 +15,7 @@ uses
   ScreenLayoutEditHistory in
     '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutGroupInteraction in
-    '..\Source\Editor\Interaction\ScreenLayoutGroupInteraction.pas',
+    '..\Source\Editor\Interaction\Group\ScreenLayoutGroupInteraction.pas',
   ScreenLayoutSelectionGeometry in
     '..\Source\Editor\Interaction\ScreenLayoutSelectionGeometry.pas';
 

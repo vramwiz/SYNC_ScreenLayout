@@ -4,13 +4,20 @@ unit ScreenLayoutColorPickerFrame;
 interface
 
 uses
-  System.Classes, Vcl.Controls, Vcl.ExtCtrls, Vcl.Forms, Vcl.Graphics,
+  System.Classes, System.Types, Vcl.Controls, Vcl.ExtCtrls, Vcl.Forms, Vcl.Graphics,
   Vcl.StdCtrls, ColorPickerHueBar, ColorPickerSVArea,
-  HorizontalTrackBarControl, ScreenLayoutPaintStyles;
+  HorizontalTrackBarControl, ScreenLayoutGradientKindCombo,
+  ScreenLayoutPaintStyles, ScreenLayoutTextureControl, ScreenLayoutPaintModeSelector,
+  ScreenLayoutColorTargetSelector, ScreenLayoutPatternControl, ScreenLayoutPatternStyle;
 
 type
   TScreenLayoutColorPickerFrame = class(TFrame)
   private
+    FPatternControl: TScreenLayoutPatternControl; // パターン専用の定義別編集UI。
+    FOnPaintGestureStart: TNotifyEvent; // 共通塗り連続編集の開始。
+    FOnPaintGestureEnd: TNotifyEvent;   // 共通塗り連続編集の終了。
+    FTextureControl: TScreenLayoutTextureControl; // テクスチャモードだけで表示する画像設定。
+    FGradientKindSelector: TScreenLayoutGradientKindCombo;
     FColor: TColor;
     FColorEnabled: Boolean;
     FCurrentHue: Double;
@@ -25,15 +32,21 @@ type
     FOpacityLabel: TLabel;
     FOpacityEnabled: Boolean;
     FOpacityTrackBar: THorizontalTrackBarControl;
-    FColorTargetSelector: TPaintBox;
+    FColorTargetSelector: TScreenLayoutColorTargetSelector; // 色見本とグラデーション点操作を委譲する。
     FGradientStop: Integer;
-    FModeSelector: TPaintBox;
+    FModeSelector: TScreenLayoutPaintModeSelector; // 塗り方式の表示とクリック判定を委譲する。
     FPaintModeEnabled: Boolean;
     FPaintStyle: TScreenLayoutPaintStyle;
     FOnPaintStyleChange: TNotifyEvent;
     FSVArea: TColorPickerSVArea;
     FTitleLabel: TLabel;
     FUpdating: Boolean;
+    procedure PatternChanged(Sender: TObject);
+    procedure PatternSlotSelected(Sender: TObject);
+    procedure PaintGestureStart(Sender: TObject);
+    procedure PaintGestureEnd(Sender: TObject);
+    procedure UpdatePatternColor;
+    procedure GradientKindChanged(Sender: TObject);
     procedure HueBarChange(Sender: TObject);
     procedure ColorMouseDown(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
@@ -44,12 +57,9 @@ type
       Shift: TShiftState; X, Y: Integer);
     procedure OpacityMouseUp(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
-    procedure PaintColorTargetSelector(Sender: TObject);
-    procedure ModeSelectorMouseDown(Sender: TObject; Button: TMouseButton;
-      Shift: TShiftState; X, Y: Integer);
-    procedure PaintModeSelector(Sender: TObject);
-    procedure ColorTargetMouseDown(Sender: TObject; Button: TMouseButton;
-      Shift: TShiftState; X, Y: Integer);
+    procedure ColorTargetPaintStyleChanged(Sender: TObject);
+    procedure ColorTargetStopSelected(Sender: TObject);
+    procedure PaintModeSelected(Sender: TObject; Kind: TScreenLayoutPaintKind);
     procedure SetPaintStyle(const Value: TScreenLayoutPaintStyle);
     procedure SetGradientStopId(Value: Integer);
     procedure SetPaintModeEnabled(Value: Boolean);
@@ -61,9 +71,13 @@ type
     procedure SetOpacityEnabled(Value: Boolean);
     procedure SVAreaChange(Sender: TObject);
     procedure SyncControls;
+    procedure TextureChanged(Sender: TObject);
   protected
     procedure Resize; override;
+    procedure SetParent(AParent: TWinControl); override;
   public
+    property OnPaintGestureStart: TNotifyEvent read FOnPaintGestureStart write FOnPaintGestureStart;
+    property OnPaintGestureEnd: TNotifyEvent read FOnPaintGestureEnd write FOnPaintGestureEnd;
     // 色選択、選択色表示、不透明度トラックバーを埋め込み可能な状態で生成する。
     constructor Create(AOwner: TComponent); override;
     // 有効な描画モードへ切り替え、保持済みの各モード設定を復元する。
@@ -122,9 +136,8 @@ const
   COLOR_PICKER_MARGIN = 6;
   COLOR_SELECTOR_SIZE = 26;
   HUE_BAR_WIDTH = 16;
+  MODE_CONTENT_TOP = 122; // この位置より下だけをモード切り替えで変更する。
   PICKER_GAP = 4;
-  MODE_BUTTON_SIZE = 26;
-  MODE_BUTTON_GAP = 4;
 
 constructor TScreenLayoutColorPickerFrame.Create(AOwner: TComponent);
 begin
@@ -132,7 +145,7 @@ begin
   Color := COLOR_BACKGROUND;
   ParentBackground := False;
   DoubleBuffered := True;
-  Height := 205;
+  Height := MulDiv(538, CurrentPPI, 96);
 
   FTitleLabel := TLabel.Create(Self);
   FTitleLabel.Parent := Self;
@@ -147,19 +160,24 @@ begin
   FTitleLabel.ParentFont := False;
   FTitleLabel.Layout := tlCenter;
 
-  FColorTargetSelector := TPaintBox.Create(Self);
+  FColorTargetSelector := TScreenLayoutColorTargetSelector.Create(Self);
   FColorTargetSelector.Parent := Self;
   FColorTargetSelector.Hint := '塗りの色';
   FColorTargetSelector.ShowHint := True;
-  FColorTargetSelector.OnPaint := PaintColorTargetSelector;
-  FColorTargetSelector.OnMouseDown := ColorTargetMouseDown;
+  FColorTargetSelector.OnPaintStyleChange := ColorTargetPaintStyleChanged;
+  FColorTargetSelector.OnStopSelect := ColorTargetStopSelected;
 
-  FModeSelector := TPaintBox.Create(Self);
+  FModeSelector := TScreenLayoutPaintModeSelector.Create(Self);
   FModeSelector.Parent := Self;
-  FModeSelector.Hint := '単色 / グラデーション / パターン / テクスチャ';
-  FModeSelector.ShowHint := True;
-  FModeSelector.OnPaint := PaintModeSelector;
-  FModeSelector.OnMouseDown := ModeSelectorMouseDown;
+  FModeSelector.OnSelect := PaintModeSelected;
+
+  FGradientKindSelector := TScreenLayoutGradientKindCombo.Create(Self);
+  FGradientKindSelector.Parent := Self;
+  FGradientKindSelector.Visible := False;
+  FGradientKindSelector.OnChange := GradientKindChanged;
+  FGradientKindSelector.Hint := '線方向・線幅方向は線オブジェクト用。図形では線形として表示';
+  FGradientKindSelector.ShowHint := True;
+  FColorTargetSelector.Hint := '点を選択 / Ctrl+クリックで追加 / 右クリックで中間点削除';
 
   FOpacityLabel := TLabel.Create(Self);
   FOpacityLabel.Parent := Self;
@@ -168,6 +186,7 @@ begin
   FOpacityLabel.Font.Height := -11;
   FOpacityLabel.Font.Color := COLOR_TEXT;
   FOpacityLabel.ParentFont := False;
+  FOpacityLabel.Caption := '透明度：';
 
   FOpacityTrackBar := THorizontalTrackBarControl.Create(Self);
   FOpacityTrackBar.Parent := Self;
@@ -203,46 +222,106 @@ begin
   FColorEnabled := True;
   FCurrentHue := 0;
   FOpacityEnabled := True;
+  FTextureControl := TScreenLayoutTextureControl.Create(Self);
+  FTextureControl.Parent := Self;
+  FTextureControl.Visible := False;
+  FTextureControl.OnChange := TextureChanged;
+  FPatternControl := TScreenLayoutPatternControl.Create(Self);
+  FPatternControl.Parent := Self;
+  FPatternControl.Visible := False;
+  FPatternControl.OnChange := PatternChanged;
+  FPatternControl.OnSlotSelect := PatternSlotSelected;
+  FPatternControl.OnGestureStart := PaintGestureStart;
+  FPatternControl.OnGestureEnd := PaintGestureEnd;
   SyncControls;
 end;
 
-procedure TScreenLayoutColorPickerFrame.ColorTargetMouseDown(Sender: TObject;
-  Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
-var
-  BestDistance: Single;
-  CandidateDistance: Single;
-  Ratio: Single;
-  Stop: TScreenLayoutGradientStop;
+procedure TScreenLayoutColorPickerFrame.PaintGestureStart(Sender: TObject);
 begin
-  if (Button <> mbLeft) or (FPaintStyle.Kind <> slpkGradient) then
-    Exit;
-  Ratio := EnsureRange(X / Max(FColorTargetSelector.ClientWidth - 1, 1),
-    0.0, 1.0);
-  FGradientStop := SCREEN_LAYOUT_GRADIENT_START_STOP_ID;
-  BestDistance := Ratio;
-  CandidateDistance := Abs(1.0 - Ratio);
-  if CandidateDistance < BestDistance then
-  begin
-    BestDistance := CandidateDistance;
-    FGradientStop := SCREEN_LAYOUT_GRADIENT_END_STOP_ID;
-  end;
-  for Stop in FPaintStyle.GetGradientStops do
-  begin
-    CandidateDistance := Abs(Stop.Offset - Ratio);
-    if CandidateDistance < BestDistance then
-    begin
-      BestDistance := CandidateDistance;
-      FGradientStop := Stop.Id;
-    end;
-  end;
-  SetGradientStopId(FGradientStop);
+  if Assigned(FOnPaintGestureStart) then FOnPaintGestureStart(Self);
+end;
+
+procedure TScreenLayoutColorPickerFrame.PaintGestureEnd(Sender: TObject);
+begin
+  if Assigned(FOnPaintGestureEnd) then FOnPaintGestureEnd(Self);
+end;
+
+procedure TScreenLayoutColorPickerFrame.PatternChanged(Sender: TObject);
+begin
+  if FUpdating or not FColorEnabled or not FPaintModeEnabled then Exit;
+  FPaintStyle.Pattern := FPatternControl.Pattern;
+  SetPaintStyle(FPaintStyle);
+  if Assigned(FOnPaintStyleChange) then FOnPaintStyleChange(Self);
+end;
+
+procedure TScreenLayoutColorPickerFrame.PatternSlotSelected(Sender: TObject);
+var Slot: TScreenLayoutPatternColor;
+begin
+  Slot := FPaintStyle.Pattern.Slot(FPatternControl.SlotId);
+  SetSelectedColor(Slot.Color);
+  SetOpacity(Round(Slot.Opacity * 100));
+end;
+
+procedure TScreenLayoutColorPickerFrame.UpdatePatternColor;
+var Pattern: TScreenLayoutPatternStyle; Slot: TScreenLayoutPatternColor;
+begin
+  Pattern := FPaintStyle.Pattern;
+  Slot := Pattern.Slot(FPatternControl.SlotId);
+  Slot.Color := FColor;
+  Pattern.SetSlot(Slot);
+  FPaintStyle.Pattern := Pattern;
+  FPatternControl.Pattern := Pattern;
+end;
+
+procedure TScreenLayoutColorPickerFrame.TextureChanged(Sender: TObject);
+begin
+  if FUpdating or not FColorEnabled or not FPaintModeEnabled then Exit;
+  FPaintStyle.Texture := FTextureControl.Texture;
+  if Assigned(FOnPaintStyleChange) then FOnPaintStyleChange(Self);
+end;
+
+procedure TScreenLayoutColorPickerFrame.ColorTargetPaintStyleChanged(Sender: TObject);
+begin
+  FPaintStyle := FColorTargetSelector.PaintStyle;
+  FGradientStop := FColorTargetSelector.SelectedStopId;
+  if Assigned(FOnPaintStyleChange) then
+    FOnPaintStyleChange(Self);
+end;
+
+procedure TScreenLayoutColorPickerFrame.ColorTargetStopSelected(Sender: TObject);
+begin
+  SetGradientStopId(FColorTargetSelector.SelectedStopId);
   if Assigned(FOnGradientStopSelect) then
     FOnGradientStopSelect(Self);
+end;
+
+procedure TScreenLayoutColorPickerFrame.GradientKindChanged(Sender: TObject);
+begin
+  if FUpdating or not FGradientKindSelector.Enabled or (FGradientKindSelector.ItemIndex < 0) then
+    Exit;
+  if FPaintStyle.GradientKind = TScreenLayoutGradientKind(FGradientKindSelector.ItemIndex) then
+    Exit;
+  FPaintStyle.GradientKind := TScreenLayoutGradientKind(FGradientKindSelector.ItemIndex);
+  FGradientKindSelector.SetPendingItemIndex(FGradientKindSelector.ItemIndex);
+  if FPaintStyle.GradientKind in [slgkRadial, slgkRectangle, slgkSweep] then
+  begin
+    FPaintStyle.LinearStart := TPointF.Create(0.5, 0.5);
+    FPaintStyle.LinearEnd := TPointF.Create(1, 0.5);
+    FPaintStyle.GradientAspect := 1;
+  end;
+  FGradientKindSelector.Invalidate;
+  if Assigned(FOnPaintStyleChange) then
+    FOnPaintStyleChange(Self);
 end;
 
 procedure TScreenLayoutColorPickerFrame.ColorMouseDown(Sender: TObject;
   Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 begin
+  if (FPaintStyle.Kind = slpkPattern) and (Button = mbLeft) then
+  begin
+    PaintGestureStart(Self);
+    Exit;
+  end;
   if (Button = mbLeft) and FColorEnabled and
     Assigned(FOnColorGestureStart) then
     FOnColorGestureStart(Self);
@@ -251,6 +330,11 @@ end;
 procedure TScreenLayoutColorPickerFrame.ColorMouseUp(Sender: TObject;
   Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 begin
+  if (FPaintStyle.Kind = slpkPattern) and (Button = mbLeft) then
+  begin
+    PaintGestureEnd(Self);
+    Exit;
+  end;
   if (Button = mbLeft) and Assigned(FOnColorGestureEnd) then
     FOnColorGestureEnd(Self);
 end;
@@ -265,12 +349,18 @@ begin
   FCurrentHue := ColorHue(FHueBar.Color);
   ColorToSv(FColor, Saturation, Value);
   FColor := HsvToColor(FCurrentHue, Saturation, Value);
-  if FPaintStyle.Kind = slpkGradient then
+  if FPaintStyle.Kind = slpkPattern then
+    UpdatePatternColor
+  else if FPaintStyle.Kind = slpkGradient then
     FPaintStyle.SetGradientStopColor(FGradientStop, FColor)
   else
     FPaintStyle.SolidColor := FColor;
   SyncControls;
-  if Assigned(FOnChange) then
+  if FPaintStyle.Kind = slpkPattern then
+  begin
+    if Assigned(FOnPaintStyleChange) then FOnPaintStyleChange(Self);
+  end
+  else if Assigned(FOnChange) then
     FOnChange(Self);
 end;
 
@@ -280,15 +370,37 @@ begin
 end;
 
 procedure TScreenLayoutColorPickerFrame.OpacityChanged(Sender: TObject);
+var Pattern: TScreenLayoutPatternStyle; Slot: TScreenLayoutPatternColor;
 begin
-  FOpacityLabel.Caption := Format('透明度  %d%%', [FOpacityTrackBar.Position]);
-  if not FUpdating and Assigned(FOnOpacityChange) then
-    FOnOpacityChange(Self);
+  if not FUpdating then
+  begin
+    if FPaintStyle.Kind = slpkPattern then
+    begin
+      Pattern := FPaintStyle.Pattern;
+      Slot := Pattern.Slot(FPatternControl.SlotId);
+      Slot.Opacity := FOpacityTrackBar.Position / 100.0;
+      Pattern.SetSlot(Slot);
+      FPaintStyle.Pattern := Pattern;
+      FPatternControl.Pattern := Pattern;
+      if Assigned(FOnPaintStyleChange) then FOnPaintStyleChange(Self);
+      Exit;
+    end;
+    if FPaintStyle.Kind = slpkGradient then
+      FPaintStyle.SetGradientStopOpacity(FGradientStop, FOpacityTrackBar.Position / 100.0);
+    FColorTargetSelector.PaintStyle := FPaintStyle;
+    if Assigned(FOnOpacityChange) then
+      FOnOpacityChange(Self);
+  end;
 end;
 
 procedure TScreenLayoutColorPickerFrame.OpacityMouseDown(Sender: TObject;
   Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 begin
+  if (FPaintStyle.Kind = slpkPattern) and (Button = mbLeft) then
+  begin
+    PaintGestureStart(Self);
+    Exit;
+  end;
   if (Button = mbLeft) and FOpacityTrackBar.Enabled and
     Assigned(FOnOpacityGestureStart) then
     FOnOpacityGestureStart(Self);
@@ -297,166 +409,52 @@ end;
 procedure TScreenLayoutColorPickerFrame.OpacityMouseUp(Sender: TObject;
   Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 begin
+  if (FPaintStyle.Kind = slpkPattern) and (Button = mbLeft) then
+  begin
+    PaintGestureEnd(Self);
+    Exit;
+  end;
   if (Button = mbLeft) and Assigned(FOnOpacityGestureEnd) then
     FOnOpacityGestureEnd(Self);
 end;
 
-procedure TScreenLayoutColorPickerFrame.PaintColorTargetSelector(
-  Sender: TObject);
-var
-  IconRect: TRect;
-  I: Integer;
-  Ratio: Single;
-  SelectedOffset: Single;
-  SelectorRect: TRect;
-  Stop: TScreenLayoutGradientStop;
+procedure TScreenLayoutColorPickerFrame.PaintModeSelected(Sender: TObject;
+  Kind: TScreenLayoutPaintKind);
 begin
-  SelectorRect := FColorTargetSelector.ClientRect;
-  FColorTargetSelector.Canvas.Brush.Style := bsSolid;
-  FColorTargetSelector.Canvas.Brush.Color := TColor($00443820);
-  FColorTargetSelector.Canvas.Pen.Color := TColor($00D77800);
-  FColorTargetSelector.Canvas.Rectangle(SelectorRect);
-  IconRect := SelectorRect;
-  InflateRect(IconRect, -5, -5);
-  if FPaintStyle.Kind = slpkGradient then
-  begin
-    for I := IconRect.Left to IconRect.Right - 1 do
-    begin
-      Ratio := (I - IconRect.Left) / Max(IconRect.Width - 1, 1);
-      FColorTargetSelector.Canvas.Pen.Color :=
-        FPaintStyle.GradientColorAt(Ratio);
-      FColorTargetSelector.Canvas.MoveTo(I, IconRect.Top);
-      FColorTargetSelector.Canvas.LineTo(I, IconRect.Bottom);
-    end;
-    FColorTargetSelector.Canvas.Brush.Style := bsClear;
-    FColorTargetSelector.Canvas.Pen.Color := COLOR_TEXT;
-    FColorTargetSelector.Canvas.Rectangle(IconRect);
-    FColorTargetSelector.Canvas.Brush.Style := bsSolid;
-    SelectedOffset := 0.0;
-    if FGradientStop = SCREEN_LAYOUT_GRADIENT_END_STOP_ID then
-      SelectedOffset := 1.0
-    else
-      for Stop in FPaintStyle.GetGradientStops do
-        if Stop.Id = FGradientStop then
-        begin
-          SelectedOffset := Stop.Offset;
-          Break;
-        end;
-    I := IconRect.Left + Round(SelectedOffset * Max(IconRect.Width - 1, 1));
-    FColorTargetSelector.Canvas.Pen.Color := clWhite;
-    FColorTargetSelector.Canvas.MoveTo(I, IconRect.Top);
-    FColorTargetSelector.Canvas.LineTo(I, IconRect.Bottom);
-  end
-  else
-  begin
-    FColorTargetSelector.Canvas.Brush.Color := FColor;
-    FColorTargetSelector.Canvas.Pen.Color := COLOR_TEXT;
-    FColorTargetSelector.Canvas.Rectangle(IconRect);
-  end;
-end;
-
-procedure TScreenLayoutColorPickerFrame.ModeSelectorMouseDown(Sender: TObject;
-  Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
-var
-  ButtonSize: Integer;
-  Gap: Integer;
-  Index: Integer;
-begin
-  if (Button <> mbLeft) or not FPaintModeEnabled then
-    Exit;
-  ButtonSize := MulDiv(MODE_BUTTON_SIZE, CurrentPPI, 96);
-  Gap := MulDiv(MODE_BUTTON_GAP, CurrentPPI, 96);
-  Index := X div (ButtonSize + Gap);
-  // パターンとテクスチャは入口だけ先に示し、実装までは選択させない。
-  if (Index < 0) or (Index > 1) then
-    Exit;
-  SelectPaintKind(TScreenLayoutPaintKind(Index));
+  SelectPaintKind(Kind);
 end;
 
 procedure TScreenLayoutColorPickerFrame.SelectPaintKind(
   Value: TScreenLayoutPaintKind);
 begin
-  if not FPaintModeEnabled or (Value > slpkGradient) or
+  if not FPaintModeEnabled or
     (FPaintStyle.Kind = Value) then
     Exit;
   FPaintStyle.Kind := Value;
+  if Value = slpkPattern then FPaintStyle.PreparePattern;
+  if Value = slpkTexture then FPaintStyle.PrepareTexture;
   if Value = slpkGradient then
   begin
     FPaintStyle.PrepareLinearGradient(FColor);
     FGradientStop := SCREEN_LAYOUT_GRADIENT_START_STOP_ID;
     SelectedColor := FPaintStyle.GradientStartColor;
   end
-  else
+  else if Value <> slpkPattern then
     SelectedColor := FPaintStyle.SolidColor;
-  FModeSelector.Invalidate;
+  SetPaintStyle(FPaintStyle);
+  FModeSelector.PaintStyle := FPaintStyle;
   FColorTargetSelector.Invalidate;
   if Assigned(FOnPaintStyleChange) then
     FOnPaintStyleChange(Self);
 end;
 
-procedure TScreenLayoutColorPickerFrame.PaintModeSelector(Sender: TObject);
-var
-  ButtonSize: Integer;
-  Gap: Integer;
-  I, X, J: Integer;
-  R: TRect;
-  C: TCanvas;
+procedure TScreenLayoutColorPickerFrame.SetParent(AParent: TWinControl);
 begin
-  C := FModeSelector.Canvas;
-  C.Brush.Color := COLOR_BACKGROUND;
-  C.FillRect(FModeSelector.ClientRect);
-  ButtonSize := MulDiv(MODE_BUTTON_SIZE, CurrentPPI, 96);
-  Gap := MulDiv(MODE_BUTTON_GAP, CurrentPPI, 96);
-  for I := 0 to 3 do
+  inherited SetParent(AParent);
+  if (AParent <> nil) and (FGradientKindSelector <> nil) then
   begin
-    X := I * (ButtonSize + Gap);
-    R := Rect(X, 0, X + ButtonSize, ButtonSize);
-    C.Brush.Color := IfThen(I = Ord(FPaintStyle.Kind),
-      TColor($00443820), TColor($002E2E2E));
-    C.Pen.Color := IfThen(I = Ord(FPaintStyle.Kind),
-      TColor($00D77800), TColor($00585858));
-    C.Rectangle(R);
-    InflateRect(R, -6, -6);
-    if (I >= 2) or not FPaintModeEnabled then
-      C.Pen.Color := TColor($00666666)
-    else
-      C.Pen.Color := COLOR_TEXT;
-    case I of
-      0:
-        begin
-          C.Brush.Color := FPaintStyle.SolidColor;
-          C.Rectangle(R);
-        end;
-      1:
-        for J := R.Left to R.Right - 1 do
-        begin
-          C.Pen.Color := RGB(255 - MulDiv(190, J - R.Left,
-            Max(R.Width - 1, 1)), 255 - MulDiv(190, J - R.Left,
-            Max(R.Width - 1, 1)), 255 - MulDiv(190, J - R.Left,
-            Max(R.Width - 1, 1)));
-          C.MoveTo(J, R.Top);
-          C.LineTo(J, R.Bottom);
-        end;
-      2:
-        begin
-          C.Brush.Style := bsClear;
-          C.Rectangle(R);
-          C.MoveTo(R.Left, (R.Top + R.Bottom) div 2);
-          C.LineTo(R.Right, (R.Top + R.Bottom) div 2);
-          C.MoveTo((R.Left + R.Right) div 2, R.Top);
-          C.LineTo((R.Left + R.Right) div 2, R.Bottom);
-          C.Brush.Style := bsSolid;
-        end;
-      3:
-        begin
-          C.Brush.Style := bsClear;
-          C.Rectangle(R);
-          C.MoveTo(R.Left, R.Bottom);
-          C.LineTo((R.Left + R.Right) div 2, R.Top);
-          C.LineTo(R.Right, R.Bottom);
-          C.Brush.Style := bsSolid;
-        end;
-    end;
+    FGradientKindSelector.SetPendingItemIndex(Ord(FPaintStyle.GradientKind));
+    Resize;
   end;
 end;
 
@@ -468,30 +466,44 @@ var
   PickerGap: Integer;
   PickerHeight: Integer;
   PickerTop: Integer;
+  ContentTop: Integer;
 begin
   inherited Resize;
+  if FSVArea = nil then
+    Exit;
   Margin := MulDiv(COLOR_PICKER_MARGIN, CurrentPPI, 96);
   PickerGap := MulDiv(PICKER_GAP, CurrentPPI, 96);
   HueWidth := MulDiv(HUE_BAR_WIDTH, CurrentPPI, 96);
   SelectorSize := MulDiv(COLOR_SELECTOR_SIZE, CurrentPPI, 96);
+  ContentTop := MulDiv(MODE_CONTENT_TOP, CurrentPPI, 96);
   PickerHeight := Min(MulDiv(COLOR_PICKER_HEIGHT, CurrentPPI, 96),
-    Max(ClientHeight - MulDiv(107, CurrentPPI, 96), 1));
+    Max(ClientHeight - ContentTop - Margin - PickerGap, 1));
   FTitleLabel.SetBounds(0, 0, ClientWidth, MulDiv(26, CurrentPPI, 96));
   FOpacityLabel.SetBounds(Margin, MulDiv(28, CurrentPPI, 96),
-    Max(ClientWidth - Margin * 2, 1), MulDiv(15, CurrentPPI, 96));
-  FOpacityTrackBar.SetBounds(Margin, MulDiv(42, CurrentPPI, 96),
-    Max(ClientWidth - Margin * 2, 1), MulDiv(24, CurrentPPI, 96));
-  FColorTargetSelector.SetBounds(Margin, MulDiv(72, CurrentPPI, 96),
-    Max(MulDiv(72, CurrentPPI, 96), SelectorSize), SelectorSize);
-  FModeSelector.SetBounds(Margin, MulDiv(106, CurrentPPI, 96),
+    MulDiv(48, CurrentPPI, 96), MulDiv(24, CurrentPPI, 96));
+  FOpacityTrackBar.SetBounds(Margin + MulDiv(48, CurrentPPI, 96),
+    MulDiv(28, CurrentPPI, 96),
+    Max(ClientWidth - Margin * 2 - MulDiv(48, CurrentPPI, 96), 1), MulDiv(24, CurrentPPI, 96));
+  FColorTargetSelector.SetBounds(Margin, MulDiv(58, CurrentPPI, 96),
+    Max(ClientWidth - Margin * 2, SelectorSize), SelectorSize);
+  FModeSelector.SetBounds(Margin, MulDiv(90, CurrentPPI, 96),
     Min(ClientWidth - Margin * 2,
-      MulDiv(MODE_BUTTON_SIZE * 4 + MODE_BUTTON_GAP * 3, CurrentPPI, 96)),
-    MulDiv(MODE_BUTTON_SIZE, CurrentPPI, 96));
+      MulDiv(SCREEN_LAYOUT_PAINT_MODE_BUTTON_SIZE * 4 +
+      SCREEN_LAYOUT_PAINT_MODE_BUTTON_GAP * 3, CurrentPPI, 96)),
+    MulDiv(SCREEN_LAYOUT_PAINT_MODE_BUTTON_SIZE, CurrentPPI, 96));
+  FGradientKindSelector.SetBounds(Margin, ContentTop,
+    Max(ClientWidth - Margin * 2, 1), MulDiv(24, CurrentPPI, 96));
   PickerTop := ClientHeight - Margin - PickerHeight;
   FHueBar.SetBounds(Max(ClientWidth - Margin - HueWidth, Margin),
     PickerTop, HueWidth, PickerHeight);
   FSVArea.SetBounds(Margin, PickerTop,
     Max(FHueBar.Left - PickerGap - Margin, 1), PickerHeight);
+  if FTextureControl <> nil then
+    FTextureControl.SetBounds(Margin, ContentTop,
+      Max(ClientWidth - Margin * 2, 1), Max(PickerTop - ContentTop - PickerGap, 1));
+  if FPatternControl <> nil then
+    FPatternControl.SetBounds(Margin, ContentTop,
+      Max(ClientWidth - Margin * 2, 1), Max(PickerTop - ContentTop - PickerGap, 1));
 end;
 
 procedure TScreenLayoutColorPickerFrame.SetOpacity(Value: Integer);
@@ -499,8 +511,7 @@ begin
   FUpdating := True;
   try
     FOpacityTrackBar.Position := EnsureRange(Value, 0, 100);
-    FOpacityLabel.Caption := Format('透明度  %d%%',
-      [FOpacityTrackBar.Position]);
+    FOpacityLabel.Caption := '透明度：';
   finally
     FUpdating := False;
   end;
@@ -509,9 +520,13 @@ end;
 procedure TScreenLayoutColorPickerFrame.SetColorEnabled(Value: Boolean);
 begin
   FColorEnabled := Value;
-  FHueBar.Enabled := Value;
-  FSVArea.Enabled := Value;
-  FColorTargetSelector.Enabled := Value;
+  FTextureControl.Enabled := Value and FPaintModeEnabled;
+  FPatternControl.Enabled := Value and FPaintModeEnabled;
+  FGradientKindSelector.Enabled := Value and FPaintModeEnabled and (FPaintStyle.Kind = slpkGradient);
+  FGradientKindSelector.Visible := FPaintStyle.Kind = slpkGradient;
+  FHueBar.Enabled := Value and (FPaintStyle.Kind <> slpkTexture);
+  FSVArea.Enabled := Value and (FPaintStyle.Kind <> slpkTexture);
+  FColorTargetSelector.Enabled := Value and (FPaintStyle.Kind <> slpkTexture);
   FColorTargetSelector.Invalidate;
 end;
 
@@ -519,6 +534,15 @@ procedure TScreenLayoutColorPickerFrame.SetPaintStyle(
   const Value: TScreenLayoutPaintStyle);
 begin
   FPaintStyle := Value;
+  if FPaintStyle.Kind = slpkPattern then FPaintStyle.PreparePattern;
+  FModeSelector.PaintStyle := FPaintStyle;
+  FPatternControl.Pattern := FPaintStyle.Pattern;
+  FPatternControl.Visible := Value.Kind = slpkPattern;
+  FTextureControl.Texture := Value.Texture;
+  FTextureControl.Visible := Value.Kind = slpkTexture;
+  FHueBar.Visible := True;
+  FSVArea.Visible := True;
+  FColorTargetSelector.Visible := True;
   if FPaintStyle.Kind = slpkGradient then
   begin
     FPaintStyle.PrepareLinearGradient(FPaintStyle.SolidColor);
@@ -530,20 +554,35 @@ begin
   end
   else
     FColor := FPaintStyle.SolidColor;
+  if Parent <> nil then
+    FGradientKindSelector.SetPendingItemIndex(Ord(FPaintStyle.GradientKind));
+  FGradientKindSelector.Enabled := FPaintModeEnabled and FColorEnabled and (FPaintStyle.Kind = slpkGradient);
+  FGradientKindSelector.Visible := FPaintStyle.Kind = slpkGradient;
+  FHueBar.Enabled := FColorEnabled and (FPaintStyle.Kind <> slpkTexture);
+  FSVArea.Enabled := FColorEnabled and (FPaintStyle.Kind <> slpkTexture);
+  FColorTargetSelector.Enabled := FColorEnabled and (FPaintStyle.Kind <> slpkTexture);
+  if FPaintStyle.Kind = slpkGradient then
+    SetGradientStopId(FGradientStop);
+  if FPaintStyle.Kind = slpkPattern then PatternSlotSelected(Self);
   SyncControls;
-  FModeSelector.Invalidate;
+  FModeSelector.PaintStyle := FPaintStyle;
 end;
 
 procedure TScreenLayoutColorPickerFrame.SetGradientStopId(Value: Integer);
 var
   ColorValue: TColor;
+  OpacityValue: Single;
 begin
   if (FPaintStyle.Kind <> slpkGradient) or
     not FPaintStyle.GetGradientStopColor(Value, ColorValue) then
     Value := SCREEN_LAYOUT_GRADIENT_START_STOP_ID;
   FGradientStop := Value;
+  FColorTargetSelector.SelectedStopId := FGradientStop;
   if FPaintStyle.GetGradientStopColor(FGradientStop, ColorValue) then
     SetSelectedColor(ColorValue);
+  if (FPaintStyle.Kind = slpkGradient) and
+    FPaintStyle.GetGradientStopOpacity(FGradientStop, OpacityValue) then
+    SetOpacity(Round(OpacityValue * 100));
   FColorTargetSelector.Invalidate;
 end;
 
@@ -552,6 +591,11 @@ begin
   if FPaintModeEnabled = Value then
     Exit;
   FPaintModeEnabled := Value;
+  FModeSelector.Enabled := Value;
+  FTextureControl.Enabled := Value and FColorEnabled;
+  FPatternControl.Enabled := Value and FColorEnabled;
+  FGradientKindSelector.Enabled := Value and FColorEnabled and (FPaintStyle.Kind = slpkGradient);
+  FGradientKindSelector.Visible := FPaintStyle.Kind = slpkGradient;
   FModeSelector.Invalidate;
 end;
 
@@ -576,7 +620,9 @@ var
   Saturation: Double;
 begin
   FColor := ColorToRGB(Value);
-  if FPaintStyle.Kind = slpkGradient then
+  if FPaintStyle.Kind = slpkPattern then
+    UpdatePatternColor
+  else if FPaintStyle.Kind = slpkGradient then
     FPaintStyle.SetGradientStopColor(FGradientStop, FColor)
   else
     FPaintStyle.SolidColor := FColor;
@@ -591,12 +637,18 @@ begin
   if FUpdating then
     Exit;
   FColor := FSVArea.Color;
-  if FPaintStyle.Kind = slpkGradient then
+  if FPaintStyle.Kind = slpkPattern then
+    UpdatePatternColor
+  else if FPaintStyle.Kind = slpkGradient then
     FPaintStyle.SetGradientStopColor(FGradientStop, FColor)
   else
     FPaintStyle.SolidColor := FColor;
   SyncControls;
-  if Assigned(FOnChange) then
+  if FPaintStyle.Kind = slpkPattern then
+  begin
+    if Assigned(FOnPaintStyleChange) then FOnPaintStyleChange(Self);
+  end
+  else if Assigned(FOnChange) then
     FOnChange(Self);
 end;
 
@@ -609,7 +661,9 @@ begin
     FHueBar.Color := HsvToColor(FCurrentHue, 1, 1);
     FSVArea.BaseColor := HsvToColor(FCurrentHue, 1, 1);
     FSVArea.Color := FColor;
-    FColorTargetSelector.Invalidate;
+    FColorTargetSelector.ColorValue := FColor;
+    FColorTargetSelector.PaintStyle := FPaintStyle;
+    FColorTargetSelector.SelectedStopId := FGradientStop;
   finally
     FUpdating := False;
   end;

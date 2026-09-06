@@ -1,25 +1,29 @@
-﻿// 塗り、線、文字、フィルターで共有する描画スタイルの最小モデルを定義する。
+﻿// 塗り、線、文字の単色、グラデーション、パターン、画像テクスチャを共通スタイルとして保持する。
 // 各モードの値を同時保持し、切替後も以前の設定を復元できるようにする。
 unit ScreenLayoutPaintStyles;
 
 interface
 
 uses
-  System.Types, Vcl.Graphics;
+  System.Types, Vcl.Graphics, ScreenLayoutTextureStyle, ScreenLayoutPatternStyle;
 
 type
   TScreenLayoutPaintKind = (slpkSolid, slpkGradient, slpkPattern,
     slpkTexture);
-  TScreenLayoutGradientKind = (slgkLinear, slgkRadial, slgkRectangle);
+  TScreenLayoutGradientKind = (slgkLinear, slgkRadial, slgkRectangle,
+    slgkSweep, slgkAlongStroke, slgkAcrossStroke);
 
   TScreenLayoutGradientStop = record
     Id: Integer;       // 選択とUndo後も同じ中間点を識別する正のID。
     Offset: Single;    // 始点を0、終点を1とする線上の比率。
     Color: TColor;     // この中間点で使用するVCL色。
-    Opacity: Single;   // 将来の点別透明度に使う0..1の保持値。
+    Opacity: Single;   // この点の不透明度。0は透明、1は不透明。
   end;
 
 const
+  SCREEN_LAYOUT_GRADIENT_KIND_NAMES: array[TScreenLayoutGradientKind] of string =
+    ('linearGradient', 'radialGradient', 'rectangleGradient', 'sweepGradient',
+     'alongStrokeGradient', 'acrossStrokeGradient');
   SCREEN_LAYOUT_GRADIENT_STOP_NONE = 0;
   SCREEN_LAYOUT_GRADIENT_START_STOP_ID = -1;
   SCREEN_LAYOUT_GRADIENT_END_STOP_ID = -2;
@@ -28,12 +32,17 @@ type
 
   TScreenLayoutPaintStyle = record
   private
+    FPattern: TScreenLayoutPatternStyle; // 内蔵定義、数値、可変個数の色。
+    FTexture: TScreenLayoutTextureStyle; // 埋め込み画像とローカル配置。
     FKind: TScreenLayoutPaintKind;       // 現在採用している描画モード。
     FSolidColor: TColor;                 // 単色モードへ戻した場合に復元する色。
     FGradientKind: TScreenLayoutGradientKind; // 保持中のグラデーション種別。
     FGradientInitialized: Boolean;       // グラデーション値を初期化済みならTrue。
     FGradientStartColor: TColor;         // 始点の色。
     FGradientEndColor: TColor;           // 終点の色。
+    FGradientStartOpacity: Single;      // 始点の不透明度（0..1）。
+    FGradientEndOpacity: Single;        // 終点の不透明度（0..1）。
+    FGradientAspect: Single;            // 放射・矩形の副軸半径 / 主軸半径。
     FGradientStops: TArray<TScreenLayoutGradientStop>; // 比率順の中間点。
     FNextGradientStopId: Integer;        // 次に割り当てる中間点ID。
     FLinearStart: TPointF;               // ローカル範囲に対する始点の正規化座標。
@@ -50,6 +59,10 @@ type
     function SameAs(const Value: TScreenLayoutPaintStyle): Boolean;
     // 未初期化の場合だけ、BaseColorから既定の左から右への線形グラデーションを準備する。
     procedure PrepareLinearGradient(const BaseColor: TColor);
+    // ゼロ初期化された旧レコードでも、画像未設定時の配置倍率を等倍に揃える。
+    procedure PrepareTexture;
+    // 初回だけ現在色を使って斜線パターンを準備する。
+    procedure PreparePattern;
     // 現在の見た目を変えない補間色で中間点を追加し、安定した正のIDを返す。
     function AddGradientStop(Offset: Single): Integer;
     // 端点と中間点を補間し、指定比率で描画される色を返す。
@@ -64,9 +77,17 @@ type
     function RemoveGradientStop(Id: Integer): Boolean;
     // 指定した端点または中間点だけの色を変更する。
     function SetGradientStopColor(Id: Integer; Value: TColor): Boolean;
+    // 点の不透明度を取得し、無効なIDならFalseを返す。
+    function GetGradientStopOpacity(Id: Integer; out Value: Single): Boolean;
+    // 点の不透明度を0..1へ制限して変更する。
+    function SetGradientStopOpacity(Id: Integer; Value: Single): Boolean;
+    // 指定比率の不透明度を補間する。
+    function GradientOpacityAt(Offset: Single): Single;
     // JSON復元などで受け取った中間点を複製し、比率順と次回IDを正規化する。
     procedure SetGradientStops(const Value: TArray<TScreenLayoutGradientStop>);
     property Kind: TScreenLayoutPaintKind read FKind write FKind;
+    property Texture: TScreenLayoutTextureStyle read FTexture write FTexture;
+    property Pattern: TScreenLayoutPatternStyle read FPattern write FPattern;
     property SolidColor: TColor read FSolidColor write SetSolidColor;
     property GradientKind: TScreenLayoutGradientKind read FGradientKind
       write FGradientKind;
@@ -74,6 +95,9 @@ type
       write SetGradientStartColor;
     property GradientEndColor: TColor read FGradientEndColor
       write SetGradientEndColor;
+    property GradientStartOpacity: Single read FGradientStartOpacity write FGradientStartOpacity;
+    property GradientEndOpacity: Single read FGradientEndOpacity write FGradientEndOpacity;
+    property GradientAspect: Single read FGradientAspect write FGradientAspect;
     property LinearStart: TPointF read FLinearStart write FLinearStart;
     property LinearEnd: TPointF read FLinearEnd write FLinearEnd;
   end;
@@ -82,6 +106,16 @@ implementation
 
 uses
   System.Math, Winapi.Windows;
+
+procedure TScreenLayoutPaintStyle.PreparePattern;
+begin
+  if FPattern.Id = '' then FPattern := TScreenLayoutPatternStyle.Create(slptHatch, FSolidColor);
+end;
+
+procedure TScreenLayoutPaintStyle.PrepareTexture;
+begin
+  if FTexture.Scale <= 0 then FTexture := TScreenLayoutTextureStyle.DefaultStyle;
+end;
 
 function InterpolateColor(Color1, Color2: TColor; Ratio: Single): TColor;
 var
@@ -108,7 +142,7 @@ begin
   Inc(FNextGradientStopId);
   Stop.Offset := Offset;
   Stop.Color := GradientColorAt(Offset);
-  Stop.Opacity := 1.0;
+  Stop.Opacity := GradientOpacityAt(Offset);
   FGradientStops := Copy(FGradientStops);
   SetLength(FGradientStops, Length(FGradientStops) + 1);
   FGradientStops[High(FGradientStops)] := Stop;
@@ -176,6 +210,79 @@ begin
     Exit(LeftColor);
   Result := InterpolateColor(LeftColor, RightColor,
     (Offset - LeftOffset) / (RightOffset - LeftOffset));
+end;
+
+function TScreenLayoutPaintStyle.GetGradientStopOpacity(Id: Integer; out Value: Single): Boolean;
+var
+  Stop: TScreenLayoutGradientStop;
+begin
+  Value := 1;
+  if Id = SCREEN_LAYOUT_GRADIENT_START_STOP_ID then
+    Value := FGradientStartOpacity
+  else if Id = SCREEN_LAYOUT_GRADIENT_END_STOP_ID then
+    Value := FGradientEndOpacity
+  else
+  begin
+    for Stop in FGradientStops do
+      if Stop.Id = Id then
+      begin
+        Value := Stop.Opacity;
+        Exit(True);
+      end;
+    Exit(False);
+  end;
+  Result := True;
+end;
+
+function TScreenLayoutPaintStyle.SetGradientStopOpacity(Id: Integer; Value: Single): Boolean;
+var
+  I: Integer;
+  OldValue: Single;
+begin
+  Result := False;
+  Value := EnsureRange(Value, 0.0, 1.0);
+  if not GetGradientStopOpacity(Id, OldValue) or SameValue(OldValue, Value) then
+    Exit;
+  if Id = SCREEN_LAYOUT_GRADIENT_START_STOP_ID then
+    FGradientStartOpacity := Value
+  else if Id = SCREEN_LAYOUT_GRADIENT_END_STOP_ID then
+    FGradientEndOpacity := Value
+  else
+    for I := 0 to High(FGradientStops) do
+      if FGradientStops[I].Id = Id then
+      begin
+        FGradientStops := Copy(FGradientStops);
+        FGradientStops[I].Opacity := Value;
+        Break;
+      end;
+  Result := True;
+end;
+
+function TScreenLayoutPaintStyle.GradientOpacityAt(Offset: Single): Single;
+var
+  Stop: TScreenLayoutGradientStop;
+  A, B, X, Y: Single;
+begin
+  Offset := EnsureRange(Offset, 0.0, 1.0);
+  A := FGradientStartOpacity;
+  B := FGradientEndOpacity;
+  X := 0;
+  Y := 1;
+  for Stop in FGradientStops do
+    if Stop.Offset <= Offset then
+    begin
+      A := Stop.Opacity;
+      X := Stop.Offset;
+    end
+    else
+    begin
+      B := Stop.Opacity;
+      Y := Stop.Offset;
+      Break;
+    end;
+  if SameValue(X, Y) then
+    Exit(A);
+  Result := A + (B - A) * (Offset - X) / (Y - X);
 end;
 
 function TScreenLayoutPaintStyle.MoveGradientStop(Id: Integer;
@@ -272,9 +379,12 @@ function TScreenLayoutPaintStyle.SameAs(
 var
   I: Integer;
 begin
-  Result := (FKind = Value.FKind) and
+  Result := FPattern.SameAs(Value.FPattern) and FTexture.SameAs(Value.FTexture) and (FKind = Value.FKind) and
     (ColorToRGB(FSolidColor) = ColorToRGB(Value.FSolidColor)) and
     (FGradientKind = Value.FGradientKind) and
+    SameValue(FGradientStartOpacity, Value.FGradientStartOpacity) and
+    SameValue(FGradientEndOpacity, Value.FGradientEndOpacity) and
+    SameValue(FGradientAspect, Value.FGradientAspect) and
     (FGradientInitialized = Value.FGradientInitialized) and
     (ColorToRGB(FGradientStartColor) =
       ColorToRGB(Value.FGradientStartColor)) and
@@ -303,6 +413,9 @@ procedure TScreenLayoutPaintStyle.PrepareLinearGradient(
 begin
   if not FGradientInitialized then
   begin
+    FGradientStartOpacity := 1;
+    FGradientEndOpacity := 1;
+    FGradientAspect := 1;
     FLinearStart := TPointF.Create(0, 0.5);
     FLinearEnd := TPointF.Create(1, 0.5);
     FGradientStartColor := ColorToRGB(BaseColor);
@@ -310,16 +423,17 @@ begin
     FGradientInitialized := True;
     FNextGradientStopId := 1;
   end;
-  FGradientKind := slgkLinear;
 end;
 
 procedure TScreenLayoutPaintStyle.SetGradientEndColor(const Value: TColor);
 begin
+  FGradientInitialized := True;
   FGradientEndColor := ColorToRGB(Value);
 end;
 
 procedure TScreenLayoutPaintStyle.SetGradientStartColor(const Value: TColor);
 begin
+  FGradientInitialized := True;
   FGradientStartColor := ColorToRGB(Value);
 end;
 
@@ -354,9 +468,13 @@ class function TScreenLayoutPaintStyle.Solid(
   const Color: TColor): TScreenLayoutPaintStyle;
 begin
   Result := Default(TScreenLayoutPaintStyle);
+  Result.FTexture := TScreenLayoutTextureStyle.DefaultStyle;
   Result.FKind := slpkSolid;
   Result.FSolidColor := ColorToRGB(Color);
   Result.FGradientKind := slgkLinear;
+  Result.FGradientStartOpacity := 1;
+  Result.FGradientEndOpacity := 1;
+  Result.FGradientAspect := 1;
   Result.FGradientInitialized := False;
   Result.FNextGradientStopId := 1;
   Result.FGradientStartColor := ColorToRGB(Color);

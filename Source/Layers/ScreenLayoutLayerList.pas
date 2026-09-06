@@ -339,6 +339,9 @@ begin
       if (Layer is TScreenLayoutGroupLayer) and (FEditorState <> nil) and
         FEditorState.IsGroupInOpenPath(TScreenLayoutGroupLayer(Layer)) then
         Exit;
+      if (FEditorState <> nil) and
+        (FEditorState.SelectedFilter <> nil) then
+        FEditorState.SelectFilter(nil, nil);
       if Parent <> nil then
       begin
         if FEditorState.OpenGroup <> Parent then

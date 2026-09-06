@@ -11,6 +11,7 @@ uses
   ScreenLayoutDocument, ScreenLayoutEditHistory,
   ScreenLayoutEditorState, ScreenLayoutFilterInteraction,
   ScreenLayoutGradientInteraction,
+  ScreenLayoutTextureInteraction,
   ScreenLayoutGroupInteraction,
   ScreenLayoutPaintStyles,
   ScreenLayoutSelectionGeometry,
@@ -31,6 +32,7 @@ type
     FEditorState: TVectArtEditorState;
     FFilterInteraction: TScreenLayoutFilterInteraction;
     FGradientInteraction: TScreenLayoutGradientInteraction;
+    FTextureInteraction: TScreenLayoutTextureInteraction; // 画像の配置ハンドルとUndo操作。
     FGroupDrag: TScreenLayoutGroupDrag;
     FInteraction: TVectArtCanvasInteraction;
     FImeState: TWindowsImeState;
@@ -230,6 +232,7 @@ begin
   FDirect2DEnabled := TDirect2DCanvas.Supported;
   FFilterInteraction := TScreenLayoutFilterInteraction.Create;
   FGradientInteraction := TScreenLayoutGradientInteraction.Create;
+  FTextureInteraction := TScreenLayoutTextureInteraction.Create;
   FGroupDrag := TScreenLayoutGroupDrag.Create;
   FInteraction := TVectArtCanvasInteraction.Create;
   FReferenceBackground := Vcl.Graphics.TBitmap.Create;
@@ -270,6 +273,7 @@ begin
   FReferenceBackground.Free;
   FShapeCreation.Free;
   FGradientInteraction.Free;
+  FTextureInteraction.Free;
   FFilterInteraction.Free;
   FGroupDrag.Free;
   FInteraction.Free;
@@ -1457,6 +1461,15 @@ begin
     Exit;
   end;
   CalculateCanvasBounds;
+  FTextureInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
+  if FTextureInteraction.MouseDown(Button, X, Y) then
+  begin
+    if CanFocus then SetFocus;
+    MouseCapture := True;
+    Cursor := crSizeAll;
+    Invalidate;
+    Exit;
+  end;
   FGradientInteraction.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   if FGradientInteraction.MouseDown(Button, X, Y) then
@@ -1514,6 +1527,11 @@ begin
       Cursor := FFilterInteraction.CursorAt(X, Y);
       Exit;
     end;
+    ConfigureInteraction;
+    LayerIndex := FInteraction.LayerAt(X, Y);
+    if (LayerIndex > 0) and (FEditorState <> nil) and
+      (FEditorState.SelectedFilter <> nil) then
+      FEditorState.SelectFilter(nil, nil);
     if FTextEditing then
     begin
       CalculateCanvasBounds;
@@ -1716,6 +1734,13 @@ var
   SelectionGeometry: TVectArtSelectionGeometry;
 begin
   CalculateCanvasBounds;
+  FTextureInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
+  if FTextureInteraction.MouseMove(Shift, X, Y) then
+  begin
+    Cursor := crSizeAll;
+    Invalidate;
+    Exit;
+  end;
   FGradientInteraction.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   if FGradientInteraction.MouseMove(Shift, X, Y) then
@@ -1856,6 +1881,13 @@ begin
   if Button = mbLeft then
   begin
     CalculateCanvasBounds;
+    if FTextureInteraction.MouseUp(X, Y) then
+    begin
+      MouseCapture := False;
+      Cursor := crDefault;
+      Invalidate;
+      Exit;
+    end;
     FGradientInteraction.Configure(FDocument, EditHistory, FEditorState,
       FCanvasBounds, FZoom);
     if FGradientInteraction.MouseUp(X, Y) then
@@ -2667,6 +2699,8 @@ begin
       FGradientInteraction.Configure(FDocument, EditHistory, FEditorState,
         FCanvasBounds, FZoom);
       FGradientInteraction.Draw(Direct2DCanvas);
+      FTextureInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
+      FTextureInteraction.Draw(Direct2DCanvas);
       DrawTextEditingOverlayDirect2D(Direct2DCanvas);
     finally
       Direct2DCanvas.EndDraw;
@@ -3272,6 +3306,8 @@ begin
   FGradientInteraction.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   FGradientInteraction.Draw(Canvas);
+  FTextureInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
+  FTextureInteraction.Draw(Canvas);
   DrawTextEditingOverlay(Canvas);
 end;
 

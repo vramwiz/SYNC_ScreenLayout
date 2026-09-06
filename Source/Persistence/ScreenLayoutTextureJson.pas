@@ -1,0 +1,75 @@
+﻿// テクスチャの埋め込み画像と配置を保存し、Documentを変更する前に入力全体を検証する。
+unit ScreenLayoutTextureJson;
+
+interface
+
+uses System.JSON, ScreenLayoutTextureStyle;
+
+// 所有権を呼び出し側へ渡すJSONオブジェクトを生成する。
+function WriteScreenLayoutTexture(const Texture: TScreenLayoutTextureStyle): TJSONObject;
+// 型、範囲、画像データを検証して返す。不正入力はEConvertErrorを送出する。
+function ReadScreenLayoutTexture(Json: TJSONObject): TScreenLayoutTextureStyle;
+
+implementation
+
+uses System.SysUtils, System.Math, ScreenLayoutTextureRenderer;
+
+function TextureNumber(Json: TJSONObject; const Name: string; MinValue, MaxValue: Double): Double;
+var
+  Value: TJSONValue;
+begin
+  Value := Json.GetValue(Name);
+  if not (Value is TJSONNumber) then
+    raise EConvertError.Create('Invalid texture field: ' + Name);
+  Result := TJSONNumber(Value).AsDouble;
+  if IsNan(Result) or IsInfinite(Result) or (Result < MinValue) or (Result > MaxValue) then
+    raise EConvertError.Create('Texture field out of range: ' + Name);
+end;
+
+function TextureString(Json: TJSONObject; const Name: string): string;
+var
+  Value: TJSONValue;
+begin
+  Value := Json.GetValue(Name);
+  if not (Value is TJSONString) then
+    raise EConvertError.Create('Invalid texture field: ' + Name);
+  Result := Value.Value;
+end;
+
+function WriteScreenLayoutTexture(const Texture: TScreenLayoutTextureStyle): TJSONObject;
+begin
+  Result := TJSONObject.Create;
+  Result.AddPair('type', 'texture');
+  Result.AddPair('data', Texture.Data);
+  Result.AddPair('fileName', Texture.FileName);
+  Result.AddPair('fit', TJSONNumber.Create(Ord(Texture.Fit)));
+  Result.AddPair('repeat', TJSONNumber.Create(Ord(Texture.RepeatMode)));
+  Result.AddPair('scale', TJSONNumber.Create(Texture.Scale));
+  Result.AddPair('offsetX', TJSONNumber.Create(Texture.OffsetX));
+  Result.AddPair('offsetY', TJSONNumber.Create(Texture.OffsetY));
+  Result.AddPair('angle', TJSONNumber.Create(Texture.Angle));
+end;
+
+function ReadScreenLayoutTexture(Json: TJSONObject): TScreenLayoutTextureStyle;
+var
+  N: Double;
+begin
+  Result := TScreenLayoutTextureStyle.DefaultStyle;
+  Result.Data := TextureString(Json, 'data');
+  Result.FileName := TextureString(Json, 'fileName');
+  N := TextureNumber(Json, 'fit', 0, 3);
+  if Frac(N) <> 0 then
+    raise EConvertError.Create('Invalid texture fit');
+  Result.Fit := TScreenLayoutTextureFit(Trunc(N));
+  N := TextureNumber(Json, 'repeat', 0, 2);
+  if Frac(N) <> 0 then
+    raise EConvertError.Create('Invalid texture repeat');
+  Result.RepeatMode := TScreenLayoutTextureRepeat(Trunc(N));
+  Result.Scale := TextureNumber(Json, 'scale', 0.01, 100);
+  Result.OffsetX := TextureNumber(Json, 'offsetX', -1000, 1000);
+  Result.OffsetY := TextureNumber(Json, 'offsetY', -1000, 1000);
+  Result.Angle := TextureNumber(Json, 'angle', -360, 360);
+  DecodeScreenLayoutTexture(Result.Data);
+end;
+
+end.
