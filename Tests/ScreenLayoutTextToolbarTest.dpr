@@ -57,7 +57,7 @@ begin
     Check((Toolbar.StrokeWidthEdit.Left = 142) and
       (Toolbar.StrokeWidthEdit.Width = 48),
       'stroke width edit kept its unpositioned default bounds');
-    Check((Toolbar.DetailsButton.Left = 200) and
+    Check((Toolbar.DetailsButton.Left = 280) and
       (Toolbar.DetailsButton.Width = 60),
       'line details button kept its unpositioned default bounds');
 

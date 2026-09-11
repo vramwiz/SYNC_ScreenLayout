@@ -247,6 +247,10 @@ var
   VertexIndex: Integer;
   VertexJson: TJSONObject;
   VerticesJson: TJSONArray;
+  WidthPointIndex: Integer;
+  WidthPointJson: TJSONObject;
+  WidthPoints: TArray<TScreenLayoutStrokeWidthPoint>;
+  WidthPointsJson: TJSONArray;
 begin
   if Document = nil then
     raise EArgumentNilException.Create('Document');
@@ -457,6 +461,23 @@ begin
         PathJson.AddPair('locked', TJSONBool.Create(Path.Locked));
         AddLayerFilters(Path, PathJson);
         AddPathVertices(Path.Vertices, PathJson);
+        WidthPoints := Path.WidthPoints;
+        if Length(WidthPoints) > 0 then
+        begin
+          WidthPointsJson := TJSONArray.Create;
+          for WidthPointIndex := 0 to High(WidthPoints) do
+          begin
+            WidthPointJson := TJSONObject.Create;
+            WidthPointJson.AddPair('offset',
+              TJSONNumber.Create(WidthPoints[WidthPointIndex].Offset));
+            WidthPointJson.AddPair('leftScale',
+              TJSONNumber.Create(WidthPoints[WidthPointIndex].LeftScale));
+            WidthPointJson.AddPair('rightScale',
+              TJSONNumber.Create(WidthPoints[WidthPointIndex].RightScale));
+            WidthPointsJson.AddElement(WidthPointJson);
+          end;
+          PathJson.AddPair('widthPoints', WidthPointsJson);
+        end;
         LayersJson.AddElement(PathJson);
         if I = Document.SelectedIndex then
           SerializedSelectedIndex := LayersJson.Count;

@@ -1,4 +1,4 @@
-// 右上ツールバーの線属性変更をレイヤー種別へ振り分け、複数選択のUndo履歴を構築する。
+﻿// 右上ツールバーの線属性変更をレイヤー種別へ振り分け、複数選択のUndo履歴を構築する。
 unit ScreenLayoutLineToolbarOperations;
 
 interface
@@ -22,6 +22,10 @@ procedure ApplyScreenLayoutToolbarLineStyle(Document: TVectArtDocument;
 procedure ApplyScreenLayoutToolbarLineWidth(Document: TVectArtDocument;
   History: TVectArtEditHistory; const Indices: TArray<Integer>;
   Value: Single; RecordHistory: Boolean);
+// 選択済みの開いたPathを均一幅または初期100%の可変幅へ切り替える。
+procedure ApplyScreenLayoutToolbarWidthMode(Document: TVectArtDocument;
+  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  Value: TScreenLayoutStrokeWidthMode);
 
 implementation
 
@@ -182,6 +186,51 @@ begin
         Command.Add(TVectArtStrokeCommand.Create(Document, Indices[I], Color,
           Width, Style, Color, Value, Style));
       SetLineStroke(Document, Indices[I], Color, Value, Style);
+    end;
+  finally
+    Document.EndUpdate;
+  end;
+  AddAppliedCommand(History, Command);
+end;
+
+procedure ApplyScreenLayoutToolbarWidthMode(Document: TVectArtDocument;
+  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  Value: TScreenLayoutStrokeWidthMode);
+var
+  Command: TVectArtCompoundCommand;
+  I: Integer;
+  NewValue: TArray<TScreenLayoutStrokeWidthPoint>;
+  OldValue: TArray<TScreenLayoutStrokeWidthPoint>;
+  Path: TVectArtPathLayer;
+begin
+  if Document = nil then
+    Exit;
+  Command := TVectArtCompoundCommand.Create;
+  Document.BeginUpdate;
+  try
+    for I := 0 to High(Indices) do
+    begin
+      if not (Document[Indices[I]] is TVectArtPathLayer) then
+        Continue;
+      Path := TVectArtPathLayer(Document[Indices[I]]);
+      if Path.Closed then
+        Continue;
+      OldValue := Path.WidthPoints;
+      if Value = slwmVariable then
+      begin
+        if Length(OldValue) > 0 then
+          Continue;
+        NewValue := UniformScreenLayoutStrokeWidthPoints;
+      end
+      else
+      begin
+        if Length(OldValue) = 0 then
+          Continue;
+        NewValue := nil;
+      end;
+      Command.Add(TScreenLayoutPathWidthPointsCommand.Create(Document,
+        Indices[I], OldValue, NewValue));
+      Document.SetPathWidthPoints(Indices[I], NewValue);
     end;
   finally
     Document.EndUpdate;

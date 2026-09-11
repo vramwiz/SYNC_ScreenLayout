@@ -5,8 +5,9 @@ unit ScreenLayoutCanvas;
 interface
 
 uses
-  System.Classes, System.SysUtils, System.Types, Winapi.Windows, Vcl.Controls,
-  Vcl.Direct2D, Vcl.ExtCtrls, Vcl.Forms, Vcl.Graphics,
+  System.Classes, System.SysUtils, System.Types, Winapi.Messages,
+  Winapi.Windows, Vcl.Controls, Vcl.Direct2D, Vcl.ExtCtrls, Vcl.Forms,
+  Vcl.Graphics,
   ScreenLayoutCanvasInteraction,
   ScreenLayoutDocument, ScreenLayoutEditHistory,
   ScreenLayoutEditorState, ScreenLayoutFilterInteraction,
@@ -40,6 +41,11 @@ type
     FInteraction: TVectArtCanvasInteraction;
     FImeState: TWindowsImeState;
     FOnObjectContextMenu: TScreenLayoutObjectContextMenuEvent;
+    FPenPointerActive: Boolean;
+    FPenPressure: Single;
+    FPenPressureAvailable: Boolean;
+    FPointerInside: Boolean;
+    FPointerPosition: TPoint;
     FReferenceBackground: TBitmap;
     FRenderCache: TScreenLayoutCanvasRenderCache; // 文書画像、移動プレビュー、ズーム再利用を所有する。
     FShapeCreation: TVectArtShapeCreation;
@@ -118,6 +124,10 @@ type
     procedure UpdateTextEditorBounds;
     procedure UpdateTextLayerFromBuffer;
     procedure ZoomRenderTimerTick(Sender: TObject);
+    procedure CMMouseLeave(var Message: TMessage); message CM_MOUSELEAVE;
+    function StrokeWidthCursorVisible: Boolean;
+    function StrokeWidthCursorDiameter: Single;
+    procedure UpdatePenPressure(MessageId: Cardinal; WParam: WPARAM);
   protected
     procedure DblClick; override;
     function DoMouseWheel(Shift: TShiftState; WheelDelta: Integer;
@@ -130,6 +140,7 @@ type
       X, Y: Integer); override;
     procedure Paint; override;
     procedure Resize; override;
+    procedure WndProc(var Message: TMessage); override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -1497,6 +1508,61 @@ begin
   Cursor := crDefault;
 end;
 
+procedure TVectArtCanvasControl.CMMouseLeave(var Message: TMessage);
+begin
+  inherited;
+  if not FPointerInside then
+    Exit;
+  FPointerInside := False;
+  Invalidate;
+end;
+
+function TVectArtCanvasControl.StrokeWidthCursorVisible: Boolean;
+begin
+  Result := FPointerInside and (FEditorState <> nil) and
+    (FEditorState.CurrentTool = vetFreehand) and
+    PtInRect(FCanvasBounds, FPointerPosition) and not FPanning and
+    not FTextEditing;
+end;
+
+function TVectArtCanvasControl.StrokeWidthCursorDiameter: Single;
+begin
+  Result := FEditorState.LineStrokeWidth * FZoom;
+  if FPenPointerActive and FPenPressureAvailable and FShapeCreation.Active then
+    Result := Result * FPenPressure;
+end;
+
+procedure TVectArtCanvasControl.UpdatePenPressure(MessageId: Cardinal;
+  WParam: WPARAM);
+var
+  PenInfo: POINTER_PEN_INFO;
+  PointerId: UINT32;
+  PointerType: POINTER_INPUT_TYPE;
+begin
+  PointerId := GET_POINTERID_WPARAM(WParam);
+  if not GetPointerType(PointerId, @PointerType) or
+    (PointerType <> DWORD(Ord(PT_PEN))) then
+  begin
+    if MessageId = WM_POINTERDOWN then
+    begin
+      FPenPointerActive := False;
+      FPenPressureAvailable := False;
+    end;
+    Exit;
+  end;
+  PenInfo := Default(POINTER_PEN_INFO);
+  if not GetPointerPenInfo(PointerId, @PenInfo) then
+    Exit;
+  if (MessageId = WM_POINTERDOWN) or
+    ((PenInfo.pointerInfo.pointerFlags and POINTER_FLAG_INCONTACT) <> 0) then
+    FPenPointerActive := True;
+  FPenPressureAvailable := (PenInfo.penMask and PEN_MASK_PRESSURE) <> 0;
+  if FPenPressureAvailable then
+    FPenPressure := EnsureRange(PenInfo.pressure / 1024.0, 0.0, 1.0);
+  if FPenPointerActive then
+    Invalidate;
+end;
+
 procedure TVectArtCanvasControl.KeyDown(var Key: Word;
   Shift: TShiftState);
 begin
@@ -1552,6 +1618,8 @@ var
   VertexCaptureNeeded: Boolean;
   LogicalPointValid: Boolean;
 begin
+  FPointerPosition := Point(X, Y);
+  FPointerInside := PtInRect(ClientRect, FPointerPosition);
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   if (Button = mbRight) and (FEditorState <> nil) and
@@ -1688,6 +1756,8 @@ begin
     end;
     FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
       FCanvasBounds, FZoom);
+    FShapeCreation.SetInputPressure(FPenPressure,
+      FPenPointerActive and FPenPressureAvailable);
     if FShapeCreation.MouseDown(Button, Shift, X, Y) then
     begin
       BeginCreatedTextPathEdit;
@@ -1699,6 +1769,9 @@ begin
         MouseCapture := True;
       if FTextEditing then
         Cursor := crIBeam
+      else if (FEditorState <> nil) and
+        (FEditorState.CurrentTool = vetFreehand) then
+        Cursor := crNone
       else
         Cursor := crCross;
       Invalidate;
@@ -1856,6 +1929,8 @@ var
   Handle: TVectArtSelectionHandle;
   SelectionGeometry: TVectArtSelectionGeometry;
 begin
+  FPointerPosition := Point(X, Y);
+  FPointerInside := PtInRect(ClientRect, FPointerPosition);
   if FTransformInteraction.Active and FTransformInteraction.Moving and
     not FRenderCache.MoveAttempted then
     BeginMovePreview;
@@ -1965,11 +2040,17 @@ begin
   end;
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
+  FShapeCreation.SetInputPressure(FPenPressure,
+    FPenPointerActive and FPenPressureAvailable);
   if FShapeCreation.MouseMove(Shift, X, Y) then
   begin
     if not FShapeCreation.Active then
       MouseCapture := False;
-    Cursor := crCross;
+    if (FEditorState <> nil) and
+      (FEditorState.CurrentTool = vetFreehand) then
+      Cursor := crNone
+    else
+      Cursor := crCross;
     Invalidate;
     Exit;
   end;
@@ -1988,8 +2069,11 @@ begin
   begin
     if FEditorState.CurrentTool = vetText then
       Cursor := crIBeam
+    else if FEditorState.CurrentTool = vetFreehand then
+      Cursor := crNone
     else
       Cursor := crCross;
+    Invalidate;
     Exit;
   end;
   ConfigureInteraction;
@@ -2090,10 +2174,17 @@ begin
   end;
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
+  FShapeCreation.SetInputPressure(FPenPressure,
+    FPenPointerActive and FPenPressureAvailable);
   if FShapeCreation.MouseUp(Button, Shift, X, Y) then
   begin
+    FPenPointerActive := False;
     MouseCapture := False;
-    Cursor := crCross;
+    if (FEditorState <> nil) and
+      (FEditorState.CurrentTool = vetFreehand) then
+      Cursor := crNone
+    else
+      Cursor := crCross;
     Invalidate;
     Exit;
   end;
@@ -2196,6 +2287,9 @@ var
   LineStart: TPoint;
   PathGuidePoints: TArray<TPoint>;
   PathPreview: TArray<TPoint>;
+  PathWidthHandle: TScreenLayoutPathWidthHandle;
+  PathWidthHandles: TArray<TScreenLayoutPathWidthHandle>;
+  PathWidthScales: TArray<Single>;
   PathVertexRects: TArray<TRect>;
   PreviewRadius: Integer;
   SelectedShapeVertexRect: TRect;
@@ -2694,6 +2788,18 @@ begin
         DrawOverlayHandleRect(Direct2DCanvas, PathVertexRects[I],
           TColor($00F0C060), COLOR_SELECTION);
       end;
+      PathWidthHandles := FInteraction.SelectedPathWidthHandles;
+      for PathWidthHandle in PathWidthHandles do
+      begin
+        DrawOverlayLine(Direct2DCanvas, PathWidthHandle.LeftPoint,
+          PathWidthHandle.RightPoint, COLOR_SELECTION, psDot);
+        DrawOverlayHandleRect(Direct2DCanvas, PathWidthHandle.CenterRect,
+          TColor($0060D0A0), COLOR_SELECTION);
+        DrawOverlayHandleRect(Direct2DCanvas, PathWidthHandle.LeftRect,
+          TColor($00E0A060), COLOR_SELECTION);
+        DrawOverlayHandleRect(Direct2DCanvas, PathWidthHandle.RightRect,
+          TColor($00E0A060), COLOR_SELECTION);
+      end;
       ShapeVertexRects := FInteraction.SelectedShapeVertexRects;
       for I := 0 to High(ShapeVertexRects) do
       begin
@@ -2805,7 +2911,19 @@ begin
           FEditorState.LineMifStrokeStyle, FEditorState.LineCap);
       if FShapeCreation.PreviewPath(PathPreview) then
       begin
-        DrawOverlayPolyline(Direct2DCanvas, PathPreview);
+        PathWidthScales := FShapeCreation.PreviewWidthScales;
+        if Length(PathWidthScales) = Length(PathPreview) then
+          DrawVariableWidthPreview(Direct2DCanvas, PathPreview,
+            PathWidthScales, FEditorState.LineStrokeColor,
+            FEditorState.LineStrokeWidth * FZoom)
+        else if (FEditorState <> nil) and
+          (FEditorState.CurrentTool in [vetFreehand, vetPath]) then
+          DrawOverlayPolyline(Direct2DCanvas, PathPreview,
+            FEditorState.LineStrokeColor, psSolid,
+            Max(Round(FEditorState.LineStrokeWidth * FZoom), 1) + 2,
+            Max(Round(FEditorState.LineStrokeWidth * FZoom), 1))
+        else
+          DrawOverlayPolyline(Direct2DCanvas, PathPreview);
       end;
       DrawSnapGuides(Direct2DCanvas);
       FFilterInteraction.Configure(FDocument, EditHistory, FEditorState,
@@ -2817,6 +2935,10 @@ begin
       FTextureInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
       FTextureInteraction.Draw(Direct2DCanvas);
       DrawTextEditingOverlayDirect2D(Direct2DCanvas);
+      if StrokeWidthCursorVisible then
+        DrawStrokeWidthCursor(Direct2DCanvas, FPointerPosition,
+          StrokeWidthCursorDiameter,
+          Max(MulDiv(4, CurrentPPI, 96), 2));
     finally
       Direct2DCanvas.EndDraw;
     end;
@@ -2859,6 +2981,9 @@ var
   LineStart: TPoint;
   PathGuidePoints: TArray<TPoint>;
   PathPreview: TArray<TPoint>;
+  PathWidthHandle: TScreenLayoutPathWidthHandle;
+  PathWidthHandles: TArray<TScreenLayoutPathWidthHandle>;
+  PathWidthScales: TArray<Single>;
   PathVertexRects: TArray<TRect>;
   PreviewRadius: Integer;
   SelectedShapeVertexRect: TRect;
@@ -3314,6 +3439,18 @@ begin
     DrawOverlayHandleRect(Canvas, PathVertexRects[I],
       TColor($00F0C060), COLOR_SELECTION);
   end;
+  PathWidthHandles := FInteraction.SelectedPathWidthHandles;
+  for PathWidthHandle in PathWidthHandles do
+  begin
+    DrawOverlayLine(Canvas, PathWidthHandle.LeftPoint,
+      PathWidthHandle.RightPoint, COLOR_SELECTION, psDot);
+    DrawOverlayHandleRect(Canvas, PathWidthHandle.CenterRect,
+      TColor($0060D0A0), COLOR_SELECTION);
+    DrawOverlayHandleRect(Canvas, PathWidthHandle.LeftRect,
+      TColor($00E0A060), COLOR_SELECTION);
+    DrawOverlayHandleRect(Canvas, PathWidthHandle.RightRect,
+      TColor($00E0A060), COLOR_SELECTION);
+  end;
   ShapeVertexRects := FInteraction.SelectedShapeVertexRects;
   for I := 0 to High(ShapeVertexRects) do
   begin
@@ -3418,7 +3555,19 @@ begin
       FEditorState.LineMifStrokeStyle, FEditorState.LineCap);
   if FShapeCreation.PreviewPath(PathPreview) then
   begin
-    DrawOverlayPolyline(Canvas, PathPreview);
+    PathWidthScales := FShapeCreation.PreviewWidthScales;
+    if Length(PathWidthScales) = Length(PathPreview) then
+      DrawVariableWidthPreview(Canvas, PathPreview, PathWidthScales,
+        FEditorState.LineStrokeColor,
+        FEditorState.LineStrokeWidth * FZoom)
+    else if (FEditorState <> nil) and
+      (FEditorState.CurrentTool in [vetFreehand, vetPath]) then
+      DrawOverlayPolyline(Canvas, PathPreview,
+        FEditorState.LineStrokeColor, psSolid,
+        Max(Round(FEditorState.LineStrokeWidth * FZoom), 1) + 2,
+        Max(Round(FEditorState.LineStrokeWidth * FZoom), 1))
+    else
+      DrawOverlayPolyline(Canvas, PathPreview);
   end;
   DrawSnapGuides(Canvas);
   FFilterInteraction.Configure(FDocument, EditHistory, FEditorState,
@@ -3430,6 +3579,10 @@ begin
   FTextureInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
   FTextureInteraction.Draw(Canvas);
   DrawTextEditingOverlay(Canvas);
+  if StrokeWidthCursorVisible then
+    DrawStrokeWidthCursor(Canvas, FPointerPosition,
+      StrokeWidthCursorDiameter,
+      Max(MulDiv(4, CurrentPPI, 96), 2));
 end;
 
 procedure TVectArtCanvasControl.SetReferenceBackgroundRgba(
@@ -3502,6 +3655,14 @@ procedure TVectArtCanvasControl.SetEditorState(
 begin
   FEditorState := Value;
   Invalidate;
+end;
+
+procedure TVectArtCanvasControl.WndProc(var Message: TMessage);
+begin
+  if (Message.Msg = WM_POINTERDOWN) or
+    (Message.Msg = WM_POINTERUPDATE) or (Message.Msg = WM_POINTERUP) then
+    UpdatePenPressure(Message.Msg, Message.WParam);
+  inherited WndProc(Message);
 end;
 
 end.

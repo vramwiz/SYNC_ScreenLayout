@@ -8,6 +8,18 @@ uses
   ScreenLayoutEditHistory, ScreenLayoutShapeInteraction;
 
 type
+  TScreenLayoutPathWidthHandleSide = (slwhNone, slwhLeft, slwhRight);
+
+  TScreenLayoutPathWidthHandle = record
+    PointIndex: Integer; // WidthPoints内の編集対象番号。
+    CenterPoint: TPoint; // 中心Path上の幅点位置。
+    LeftPoint: TPoint;   // 進行方向左側の幅倍率ハンドル。
+    RightPoint: TPoint;  // 進行方向右側の幅倍率ハンドル。
+    CenterRect: TRect;   // 幅点の削除操作に使う中心範囲。
+    LeftRect: TRect;     // 左幅のドラッグ範囲。
+    RightRect: TRect;    // 右幅のドラッグ範囲。
+  end;
+
   TScreenLayoutPathInteraction = class
   private
     FCanvasBounds: TRect;
@@ -15,7 +27,10 @@ type
     FDragBezierHandle: TScreenLayoutBezierHandleKind;
     FDragLayerIndex: Integer;
     FDragStartVertices: TArray<TScreenLayoutVertex>;
+    FDragStartWidthPoints: TArray<TScreenLayoutStrokeWidthPoint>;
     FDragVertexIndex: Integer;
+    FDragWidthPointIndex: Integer;
+    FDragWidthSide: TScreenLayoutPathWidthHandleSide;
     FEditHistory: TVectArtEditHistory;
     FSelectedLayerIndex: Integer;
     FSelectedVertexIndex: Integer;
@@ -28,7 +43,12 @@ type
     function HitTestVertex(X, Y: Integer; out VertexIndex: Integer): Boolean;
     function HitTestVertexKindButton(X, Y: Integer;
       out Kind: TScreenLayoutVertexKind): Boolean;
+    function HitTestWidthHandle(X, Y: Integer; out PointIndex: Integer;
+      out Side: TScreenLayoutPathWidthHandleSide): Boolean;
     function SelectedPathLayer(out PathLayer: TVectArtLayer): Boolean;
+    function SelectedVariablePath(out PathLayer: TVectArtPathLayer): Boolean;
+    function WidthPointFrame(PointIndex: Integer; out Center,
+      Normal: TPointF): Boolean;
     function ToLogicalX(Value: Single): Single;
     function ToLogicalY(Value: Single): Single;
     function ToScreenX(Value: Single): Integer;
@@ -54,18 +74,30 @@ type
     function BeginBezierHandleDragAt(X, Y: Integer): Boolean;
     // 指定位置のアンカーを選択し、ドラッグを開始できた場合にTrueを返す。
     function BeginVertexDragAt(X, Y: Integer): Boolean;
+    // 可変幅Pathの左右ハンドルを捕捉し、幅倍率のドラッグを開始する。
+    function BeginWidthHandleDragAt(X, Y: Integer): Boolean;
     // 指定位置に最も近い区間を分割し、成功時はUndo履歴へ記録する。
     function InsertVertexAt(X, Y: Integer): Boolean;
+    // 中心線上へ現在幅を補間した幅点を追加する。
+    function InsertWidthPointAt(X, Y: Integer): Boolean;
+    // 両端以外の中心ハンドルにある幅点を削除する。
+    function DeleteWidthPointAt(X, Y: Integer): Boolean;
     // Path編集要素に対応するカーソルがあればCursorへ設定してTrueを返す。
     function CursorAt(X, Y: Integer; out Cursor: TCursor): Boolean;
     // 進行中のアンカーまたは制御点ドラッグをDocumentへ反映する。
     function DragTo(Shift: TShiftState; X, Y: Integer): Boolean;
+    // 捕捉中の左右幅倍率を現在位置へ更新する。
+    function DragWidthTo(X, Y: Integer): Boolean;
     // ドラッグ中のアンカー以外にある同一Path内の吸着候補を返す。
     function OtherDragVertexPositions: TArray<TPointF>;
     // 選択中Pathの全アンカーを画面座標の矩形列として返す。
     function SelectedVertexRects: TArray<TRect>;
     // 選択中Pathを直線・ベジェ共通の画面座標点列へ展開して返す。
     function SelectedPathPoints: TArray<TPoint>;
+    // 選択中の可変幅Pathについて中心、左、右の編集ハンドルを返す。
+    function SelectedWidthHandles: TArray<TScreenLayoutPathWidthHandle>;
+    // 幅ハンドルに対応するカーソルがあればCursorへ設定する。
+    function WidthCursorAt(X, Y: Integer; out Cursor: TCursor): Boolean;
     // 選択アンカーの外側へ表示する鋭角／ベジェ種別ボタンを返す。
     function SelectedVertexKindButtons:
       TArray<TScreenLayoutVertexKindButton>;
@@ -84,8 +116,8 @@ type
 implementation
 
 uses
-  System.Math, ScreenLayoutGeometry, ScreenLayoutShapeEditCommands,
-  ScreenLayoutPathOperations;
+  System.Math, ScreenLayoutEditCommands, ScreenLayoutGeometry,
+  ScreenLayoutShapeEditCommands, ScreenLayoutPathOperations;
 
 const
   VERTEX_HANDLE_SIZE           = 9;
@@ -96,6 +128,93 @@ const
   VERTEX_KIND_BUTTON_SIZE      = 22;
   SEGMENT_HIT_DISTANCE         = 6.0;
   BEZIER_HIT_SUBDIVISIONS      = 32;
+  WIDTH_HANDLE_SIZE            = 9;
+  WIDTH_CENTER_HANDLE_SIZE     = 7;
+
+function PolylineFrameAtOffset(const Points: TArray<TPointF>;
+  Offset: Single; out Center, Normal: TPointF): Boolean;
+var
+  Distance: Single;
+  I: Integer;
+  Ratio: Single;
+  SegmentLength: Single;
+  TargetDistance: Single;
+  TotalLength: Single;
+begin
+  Result := False;
+  Center := TPointF.Zero;
+  Normal := TPointF.Zero;
+  if Length(Points) < 2 then
+    Exit;
+  TotalLength := 0;
+  for I := 0 to High(Points) - 1 do
+    TotalLength := TotalLength + Hypot(Points[I + 1].X - Points[I].X,
+      Points[I + 1].Y - Points[I].Y);
+  if TotalLength <= 0.0001 then
+    Exit;
+  TargetDistance := EnsureRange(Offset, 0.0, 1.0) * TotalLength;
+  Distance := 0;
+  for I := 0 to High(Points) - 1 do
+  begin
+    SegmentLength := Hypot(Points[I + 1].X - Points[I].X,
+      Points[I + 1].Y - Points[I].Y);
+    if SegmentLength <= 0.0001 then
+      Continue;
+    if (Distance + SegmentLength >= TargetDistance) or
+      (I = High(Points) - 1) then
+    begin
+      Ratio := EnsureRange((TargetDistance - Distance) / SegmentLength,
+        0.0, 1.0);
+      Center := TPointF.Create(
+        Points[I].X + (Points[I + 1].X - Points[I].X) * Ratio,
+        Points[I].Y + (Points[I + 1].Y - Points[I].Y) * Ratio);
+      Normal := TPointF.Create(
+        -(Points[I + 1].Y - Points[I].Y) / SegmentLength,
+        (Points[I + 1].X - Points[I].X) / SegmentLength);
+      Exit(True);
+    end;
+    Distance := Distance + SegmentLength;
+  end;
+end;
+
+function WidthPointsEqual(const A,
+  B: TArray<TScreenLayoutStrokeWidthPoint>): Boolean;
+var
+  I: Integer;
+begin
+  Result := Length(A) = Length(B);
+  if not Result then
+    Exit;
+  for I := 0 to High(A) do
+    if not SameValue(A[I].Offset, B[I].Offset) or
+      not SameValue(A[I].LeftScale, B[I].LeftScale) or
+      not SameValue(A[I].RightScale, B[I].RightScale) then
+      Exit(False);
+end;
+
+procedure WidthScalesAt(const Points: TArray<TScreenLayoutStrokeWidthPoint>;
+  Offset: Single; out LeftScale, RightScale: Single);
+var
+  I: Integer;
+  Ratio: Single;
+begin
+  LeftScale := 1;
+  RightScale := 1;
+  if Length(Points) < 2 then
+    Exit;
+  I := 0;
+  while (I < High(Points) - 1) and (Offset > Points[I + 1].Offset) do
+    Inc(I);
+  if Points[I + 1].Offset <= Points[I].Offset then
+    Ratio := 0
+  else
+    Ratio := EnsureRange((Offset - Points[I].Offset) /
+      (Points[I + 1].Offset - Points[I].Offset), 0.0, 1.0);
+  LeftScale := Points[I].LeftScale +
+    (Points[I + 1].LeftScale - Points[I].LeftScale) * Ratio;
+  RightScale := Points[I].RightScale +
+    (Points[I + 1].RightScale - Points[I].RightScale) * Ratio;
+end;
 
 function DistanceToSegmentParameter(const PointValue, StartPoint,
   EndPoint: TPointF; out Parameter: Single): Single;
@@ -179,6 +298,37 @@ begin
     PathLayer := FDocument[FDocument.SelectedIndex];
     Result := not PathLayer.Locked;
   end;
+end;
+
+function TScreenLayoutPathInteraction.SelectedVariablePath(
+  out PathLayer: TVectArtPathLayer): Boolean;
+var
+  Layer: TVectArtLayer;
+begin
+  PathLayer := nil;
+  Result := SelectedPathLayer(Layer) and (Layer is TVectArtPathLayer) and
+    not TVectArtPathLayer(Layer).Closed and
+    (Length(TVectArtPathLayer(Layer).WidthPoints) >= 2);
+  if Result then
+    PathLayer := TVectArtPathLayer(Layer);
+end;
+
+function TScreenLayoutPathInteraction.WidthPointFrame(PointIndex: Integer;
+  out Center, Normal: TPointF): Boolean;
+var
+  LogicalPoints: TArray<TPointF>;
+  PathLayer: TVectArtPathLayer;
+  WidthPoints: TArray<TScreenLayoutStrokeWidthPoint>;
+begin
+  Result := SelectedVariablePath(PathLayer);
+  if not Result then
+    Exit;
+  WidthPoints := PathLayer.WidthPoints;
+  if not InRange(PointIndex, 0, High(WidthPoints)) then
+    Exit(False);
+  LogicalPoints := FlattenScreenLayoutPathVertices(PathLayer.Vertices);
+  Result := PolylineFrameAtOffset(LogicalPoints,
+    WidthPoints[PointIndex].Offset, Center, Normal);
 end;
 
 function TScreenLayoutPathInteraction.ToLogicalX(Value: Single): Single;
@@ -478,6 +628,172 @@ begin
   FDragBezierHandle := slbhNone;
 end;
 
+function TScreenLayoutPathInteraction.DeleteWidthPointAt(X,
+  Y: Integer): Boolean;
+var
+  Handle: TScreenLayoutPathWidthHandle;
+  I: Integer;
+  NewPoints: TArray<TScreenLayoutStrokeWidthPoint>;
+  OldPoints: TArray<TScreenLayoutStrokeWidthPoint>;
+  PathLayer: TVectArtPathLayer;
+begin
+  Result := False;
+  if not SelectedVariablePath(PathLayer) then
+    Exit;
+  OldPoints := PathLayer.WidthPoints;
+  for Handle in SelectedWidthHandles do
+  begin
+    if (Handle.PointIndex <= 0) or
+      (Handle.PointIndex >= High(OldPoints)) or
+      not PtInRect(Handle.CenterRect, Point(X, Y)) then
+      Continue;
+    SetLength(NewPoints, Length(OldPoints) - 1);
+    for I := 0 to High(NewPoints) do
+      if I < Handle.PointIndex then
+        NewPoints[I] := OldPoints[I]
+      else
+        NewPoints[I] := OldPoints[I + 1];
+    FDocument.SetPathWidthPoints(FDocument.SelectedIndex, NewPoints);
+    if FEditHistory <> nil then
+      FEditHistory.AddApplied(TScreenLayoutPathWidthPointsCommand.Create(
+        FDocument, FDocument.SelectedIndex, OldPoints, NewPoints));
+    Exit(True);
+  end;
+end;
+
+function TScreenLayoutPathInteraction.InsertWidthPointAt(X,
+  Y: Integer): Boolean;
+var
+  BestDistance: Single;
+  BestOffset: Single;
+  CurrentDistance: Single;
+  I: Integer;
+  InsertIndex: Integer;
+  LeftScale: Single;
+  LocalParameter: Single;
+  LogicalLength: Single;
+  LogicalPoints: TArray<TPointF>;
+  NewPoints: TArray<TScreenLayoutStrokeWidthPoint>;
+  OldPoints: TArray<TScreenLayoutStrokeWidthPoint>;
+  PathLayer: TVectArtPathLayer;
+  RightScale: Single;
+  SegmentLength: Single;
+  StartDistance: Single;
+  TotalLength: Single;
+begin
+  Result := False;
+  if not SelectedVariablePath(PathLayer) then
+    Exit;
+  LogicalPoints := FlattenScreenLayoutPathVertices(PathLayer.Vertices);
+  if Length(LogicalPoints) < 2 then
+    Exit;
+  TotalLength := 0;
+  for I := 0 to High(LogicalPoints) - 1 do
+    TotalLength := TotalLength + Hypot(
+      LogicalPoints[I + 1].X - LogicalPoints[I].X,
+      LogicalPoints[I + 1].Y - LogicalPoints[I].Y);
+  if TotalLength <= 0.0001 then
+    Exit;
+  BestDistance := MaxSingle;
+  BestOffset := 0;
+  StartDistance := 0;
+  for I := 0 to High(LogicalPoints) - 1 do
+  begin
+    SegmentLength := Hypot(LogicalPoints[I + 1].X - LogicalPoints[I].X,
+      LogicalPoints[I + 1].Y - LogicalPoints[I].Y);
+    CurrentDistance := DistanceToSegmentParameter(TPointF.Create(X, Y),
+      TPointF.Create(ToScreenX(LogicalPoints[I].X),
+        ToScreenY(LogicalPoints[I].Y)),
+      TPointF.Create(ToScreenX(LogicalPoints[I + 1].X),
+        ToScreenY(LogicalPoints[I + 1].Y)), LocalParameter);
+    if CurrentDistance < BestDistance then
+    begin
+      BestDistance := CurrentDistance;
+      LogicalLength := StartDistance + SegmentLength * LocalParameter;
+      BestOffset := LogicalLength / TotalLength;
+    end;
+    StartDistance := StartDistance + SegmentLength;
+  end;
+  if (BestDistance > SEGMENT_HIT_DISTANCE) or
+    (BestOffset <= 0.005) or (BestOffset >= 0.995) then
+    Exit;
+  OldPoints := PathLayer.WidthPoints;
+  InsertIndex := 1;
+  while (InsertIndex < Length(OldPoints)) and
+    (OldPoints[InsertIndex].Offset < BestOffset) do
+    Inc(InsertIndex);
+  if (InsertIndex < Length(OldPoints)) and
+    (Abs(OldPoints[InsertIndex].Offset - BestOffset) <= 0.005) then
+    Exit;
+  WidthScalesAt(OldPoints, BestOffset, LeftScale, RightScale);
+  SetLength(NewPoints, Length(OldPoints) + 1);
+  for I := 0 to High(NewPoints) do
+    if I < InsertIndex then
+      NewPoints[I] := OldPoints[I]
+    else if I = InsertIndex then
+    begin
+      NewPoints[I].Offset := BestOffset;
+      NewPoints[I].LeftScale := LeftScale;
+      NewPoints[I].RightScale := RightScale;
+    end
+    else
+      NewPoints[I] := OldPoints[I - 1];
+  FDocument.SetPathWidthPoints(FDocument.SelectedIndex, NewPoints);
+  if FEditHistory <> nil then
+    FEditHistory.AddApplied(TScreenLayoutPathWidthPointsCommand.Create(
+      FDocument, FDocument.SelectedIndex, OldPoints, NewPoints));
+  Result := True;
+end;
+
+function TScreenLayoutPathInteraction.BeginWidthHandleDragAt(X,
+  Y: Integer): Boolean;
+var
+  PathLayer: TVectArtPathLayer;
+begin
+  Result := HitTestWidthHandle(X, Y, FDragWidthPointIndex,
+    FDragWidthSide) and SelectedVariablePath(PathLayer);
+  if not Result then
+    Exit;
+  FDragLayerIndex := FDocument.SelectedIndex;
+  FDragStartWidthPoints := PathLayer.WidthPoints;
+end;
+
+function TScreenLayoutPathInteraction.DragWidthTo(X, Y: Integer): Boolean;
+var
+  Center: TPointF;
+  MousePoint: TPointF;
+  Normal: TPointF;
+  PathLayer: TVectArtPathLayer;
+  Scale: Single;
+  WidthPoints: TArray<TScreenLayoutStrokeWidthPoint>;
+begin
+  Result := (FDragLayerIndex > 0) and
+    (FDragWidthSide <> slwhNone) and
+    (FDocument[FDragLayerIndex] is TVectArtPathLayer);
+  if not Result then
+    Exit;
+  PathLayer := TVectArtPathLayer(FDocument[FDragLayerIndex]);
+  WidthPoints := PathLayer.WidthPoints;
+  if not InRange(FDragWidthPointIndex, 0, High(WidthPoints)) or
+    not WidthPointFrame(FDragWidthPointIndex, Center, Normal) then
+    Exit(False);
+  MousePoint := TPointF.Create(ToLogicalX(X), ToLogicalY(Y));
+  if FDragWidthSide = slwhLeft then
+    Scale := ((MousePoint.X - Center.X) * Normal.X +
+      (MousePoint.Y - Center.Y) * Normal.Y) /
+      Max(PathLayer.StrokeWidth * 0.5, 0.05)
+  else
+    Scale := -((MousePoint.X - Center.X) * Normal.X +
+      (MousePoint.Y - Center.Y) * Normal.Y) /
+      Max(PathLayer.StrokeWidth * 0.5, 0.05);
+  Scale := EnsureRange(Scale, 0.0, 1.0);
+  if FDragWidthSide = slwhLeft then
+    WidthPoints[FDragWidthPointIndex].LeftScale := Scale
+  else
+    WidthPoints[FDragWidthPointIndex].RightScale := Scale;
+  FDocument.SetPathWidthPoints(FDragLayerIndex, WidthPoints);
+end;
+
 function TScreenLayoutPathInteraction.DragTo(Shift: TShiftState;
   X, Y: Integer): Boolean;
 var
@@ -561,6 +877,18 @@ var
   PathLayer: TVectArtLayer;
 begin
   if (FEditHistory <> nil) and (FDragLayerIndex > 0) and
+    (FDragWidthSide <> slwhNone) and
+    (FDocument[FDragLayerIndex] is TVectArtPathLayer) then
+  begin
+    if not WidthPointsEqual(FDragStartWidthPoints,
+      TVectArtPathLayer(FDocument[FDragLayerIndex]).WidthPoints) then
+      FEditHistory.AddApplied(TScreenLayoutPathWidthPointsCommand.Create(
+        FDocument, FDragLayerIndex, FDragStartWidthPoints,
+        TVectArtPathLayer(FDocument[FDragLayerIndex]).WidthPoints));
+    EndDrag;
+    Exit;
+  end;
+  if (FEditHistory <> nil) and (FDragLayerIndex > 0) and
     FDocument[FDragLayerIndex].SupportsPathEditing then
   begin
     PathLayer := FDocument[FDragLayerIndex];
@@ -579,6 +907,9 @@ begin
   FDragVertexIndex := -1;
   FDragBezierHandle := slbhNone;
   FDragStartVertices := nil;
+  FDragWidthPointIndex := -1;
+  FDragWidthSide := slwhNone;
+  FDragStartWidthPoints := nil;
 end;
 
 function TScreenLayoutPathInteraction.CursorAt(X, Y: Integer;
@@ -665,6 +996,95 @@ begin
   for I := 0 to High(LogicalPoints) do
     Result[I] := Point(ToScreenX(LogicalPoints[I].X),
       ToScreenY(LogicalPoints[I].Y));
+end;
+
+function TScreenLayoutPathInteraction.SelectedWidthHandles:
+  TArray<TScreenLayoutPathWidthHandle>;
+var
+  Center: TPointF;
+  CenterHalf: Integer;
+  HandleHalf: Integer;
+  I: Integer;
+  LeftLogical: TPointF;
+  Normal: TPointF;
+  PathLayer: TVectArtPathLayer;
+  RightLogical: TPointF;
+  WidthPoints: TArray<TScreenLayoutStrokeWidthPoint>;
+begin
+  Result := nil;
+  if not SelectedVariablePath(PathLayer) then
+    Exit;
+  WidthPoints := PathLayer.WidthPoints;
+  SetLength(Result, Length(WidthPoints));
+  HandleHalf := WIDTH_HANDLE_SIZE div 2;
+  CenterHalf := WIDTH_CENTER_HANDLE_SIZE div 2;
+  for I := 0 to High(WidthPoints) do
+  begin
+    if not WidthPointFrame(I, Center, Normal) then
+      Continue;
+    LeftLogical := TPointF.Create(
+      Center.X + Normal.X * PathLayer.StrokeWidth * 0.5 *
+        WidthPoints[I].LeftScale,
+      Center.Y + Normal.Y * PathLayer.StrokeWidth * 0.5 *
+        WidthPoints[I].LeftScale);
+    RightLogical := TPointF.Create(
+      Center.X - Normal.X * PathLayer.StrokeWidth * 0.5 *
+        WidthPoints[I].RightScale,
+      Center.Y - Normal.Y * PathLayer.StrokeWidth * 0.5 *
+        WidthPoints[I].RightScale);
+    Result[I].PointIndex := I;
+    Result[I].CenterPoint := Point(ToScreenX(Center.X), ToScreenY(Center.Y));
+    Result[I].LeftPoint := Point(ToScreenX(LeftLogical.X),
+      ToScreenY(LeftLogical.Y));
+    Result[I].RightPoint := Point(ToScreenX(RightLogical.X),
+      ToScreenY(RightLogical.Y));
+    with Result[I] do
+    begin
+      CenterRect := Rect(CenterPoint.X - CenterHalf,
+        CenterPoint.Y - CenterHalf, CenterPoint.X + CenterHalf + 1,
+        CenterPoint.Y + CenterHalf + 1);
+      LeftRect := Rect(LeftPoint.X - HandleHalf, LeftPoint.Y - HandleHalf,
+        LeftPoint.X + HandleHalf + 1, LeftPoint.Y + HandleHalf + 1);
+      RightRect := Rect(RightPoint.X - HandleHalf,
+        RightPoint.Y - HandleHalf, RightPoint.X + HandleHalf + 1,
+        RightPoint.Y + HandleHalf + 1);
+    end;
+  end;
+end;
+
+function TScreenLayoutPathInteraction.HitTestWidthHandle(X, Y: Integer;
+  out PointIndex: Integer;
+  out Side: TScreenLayoutPathWidthHandleSide): Boolean;
+var
+  Handle: TScreenLayoutPathWidthHandle;
+begin
+  PointIndex := -1;
+  Side := slwhNone;
+  for Handle in SelectedWidthHandles do
+  begin
+    if PtInRect(Handle.LeftRect, Point(X, Y)) then
+      Side := slwhLeft
+    else if PtInRect(Handle.RightRect, Point(X, Y)) then
+      Side := slwhRight
+    else
+      Continue;
+    PointIndex := Handle.PointIndex;
+    Exit(True);
+  end;
+  Result := False;
+end;
+
+function TScreenLayoutPathInteraction.WidthCursorAt(X, Y: Integer;
+  out Cursor: TCursor): Boolean;
+var
+  PointIndex: Integer;
+  Side: TScreenLayoutPathWidthHandleSide;
+begin
+  Result := HitTestWidthHandle(X, Y, PointIndex, Side);
+  if Result then
+    Cursor := crSizeAll
+  else
+    Cursor := crDefault;
 end;
 
 function TScreenLayoutPathInteraction.SelectedVertexKindButtons:

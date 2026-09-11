@@ -448,6 +448,7 @@ begin
     TVectArtPathLayer(Result).MifStrokeStyle := Path.MifStrokeStyle;
     TVectArtPathLayer(Result).StrokeColor := Path.StrokeColor;
     TVectArtPathLayer(Result).StrokeWidth := Path.StrokeWidth;
+    TVectArtPathLayer(Result).WidthPoints := Path.WidthPoints;
   end
   else
     raise EArgumentException.Create('Unsupported group child layer type');

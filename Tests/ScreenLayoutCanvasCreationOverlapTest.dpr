@@ -40,6 +40,7 @@ type
     procedure DragCreate(const StartPoint, EndPoint: TPoint);
     procedure DragWithButton(Button: TMouseButton;
       const StartPoint, EndPoint: TPoint);
+    procedure MovePointer(const PointValue: TPoint);
   end;
 
 procedure Check(Condition: Boolean; const MessageText: string);
@@ -87,6 +88,11 @@ end;
 procedure TTestCanvasControl.DoubleClickSelected;
 begin
   DblClick;
+end;
+
+procedure TTestCanvasControl.MovePointer(const PointValue: TPoint);
+begin
+  MouseMove([], PointValue.X, PointValue.Y);
 end;
 
 procedure Run;
@@ -143,6 +149,12 @@ begin
     Form.SetBounds(-10000, -10000, 320, 340);
     Form.Show;
     Application.ProcessMessages;
+
+    EditorState.CurrentTool := vetFreehand;
+    CanvasControl.MovePointer(Point(150, 150));
+    Check(CanvasControl.Cursor = crNone,
+      'freehand tool did not replace the system cursor');
+    EditorState.CurrentTool := vetRectangle;
 
     CanvasControl.DragCreate(Point(120, 120), Point(180, 180));
     Check(EditorState.CurrentTool = vetRectangle,

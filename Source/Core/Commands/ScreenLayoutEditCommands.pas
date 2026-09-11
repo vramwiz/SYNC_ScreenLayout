@@ -144,6 +144,19 @@ type
     procedure Undo; override;
   end;
 
+  TScreenLayoutPathWidthPointsCommand = class(TVectArtEditCommand)
+  private
+    FDocument: TVectArtDocument;
+    FLayerIndex: Integer;
+    FNewValue: TArray<TScreenLayoutStrokeWidthPoint>;
+    FOldValue: TArray<TScreenLayoutStrokeWidthPoint>;
+  public
+    constructor Create(ADocument: TVectArtDocument; LayerIndex: Integer;
+      const OldValue, NewValue: TArray<TScreenLayoutStrokeWidthPoint>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
   TVectArtLayerBooleanCommand = class(TVectArtEditCommand)
   private
     FDocument: TVectArtDocument;
@@ -456,6 +469,29 @@ begin
       FDocument.SetArcLineCap(FLayerIndex, FOldValue)
     else
       FDocument.SetPathLineCap(FLayerIndex, FOldValue);
+end;
+
+constructor TScreenLayoutPathWidthPointsCommand.Create(
+  ADocument: TVectArtDocument; LayerIndex: Integer;
+  const OldValue, NewValue: TArray<TScreenLayoutStrokeWidthPoint>);
+begin
+  inherited Create;
+  FDocument := ADocument;
+  FLayerIndex := LayerIndex;
+  FOldValue := Copy(OldValue);
+  FNewValue := Copy(NewValue);
+end;
+
+procedure TScreenLayoutPathWidthPointsCommand.Execute;
+begin
+  if FDocument <> nil then
+    FDocument.SetPathWidthPoints(FLayerIndex, FNewValue);
+end;
+
+procedure TScreenLayoutPathWidthPointsCommand.Undo;
+begin
+  if FDocument <> nil then
+    FDocument.SetPathWidthPoints(FLayerIndex, FOldValue);
 end;
 
 procedure TVectArtLayerBooleanCommand.ApplyValue(Value: Boolean);

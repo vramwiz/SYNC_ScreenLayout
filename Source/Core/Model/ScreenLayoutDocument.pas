@@ -37,6 +37,8 @@ type
     vssLongDash);
   // 線端を四角、丸、先端角90度の三角から選ぶ。
   TVectArtLineCap = (vlcSquare, vlcRound, vlcTriangle);
+  // Path中心線の周囲を基準線幅一定または幅プロファイルで描く。
+  TScreenLayoutStrokeWidthMode = (slwmUniform, slwmVariable);
   // 各頂点から次頂点へ向かう閉輪郭区間の表現形式。
   TScreenLayoutSegmentKind = (slskLine, slskCubicBezier);
   // Shape編集時にユーザーが選ぶ頂点の接続形式。
@@ -50,6 +52,12 @@ type
     OutgoingControl: TPointF;       // 頂点から出力側制御点への相対座標。
     OutgoingSegment: TScreenLayoutSegmentKind; // 次頂点までの区間種別。
     Kind: TScreenLayoutVertexKind;  // 鋭角または滑らかなベジェ接続。
+  end;
+
+  TScreenLayoutStrokeWidthPoint = record
+    Offset: Single;     // 中心Path全長に対する0..1の位置。
+    LeftScale: Single;  // 基準線幅の半分に対する進行方向左側の倍率。
+    RightScale: Single; // 基準線幅の半分に対する進行方向右側の倍率。
   end;
 
   TScreenLayoutContour = record
@@ -474,8 +482,12 @@ type
     FMifStrokeStyle: TVectArtMifStrokeStyle;
     FStrokeWidth: Single;
     FVertices: TArray<TScreenLayoutVertex>;
+    FWidthPoints: TArray<TScreenLayoutStrokeWidthPoint>;
     function GetVertices: TArray<TScreenLayoutVertex>;
+    function GetWidthPoints: TArray<TScreenLayoutStrokeWidthPoint>;
     procedure SetVertices(const Value: TArray<TScreenLayoutVertex>);
+    procedure SetWidthPoints(
+      const Value: TArray<TScreenLayoutStrokeWidthPoint>);
   public
     constructor Create(const AName: string;
       const AVertices: TArray<TScreenLayoutVertex>; AClosed: Boolean);
@@ -491,6 +503,8 @@ type
     property StrokeWidth: Single read FStrokeWidth write FStrokeWidth;
     property Vertices: TArray<TScreenLayoutVertex> read GetVertices
       write SetVertices;
+    property WidthPoints: TArray<TScreenLayoutStrokeWidthPoint>
+      read GetWidthPoints write SetWidthPoints;
   end;
 
   TVectArtPathData = record
@@ -505,6 +519,7 @@ type
     MifStrokeStyle: TVectArtMifStrokeStyle; // 開いたPathの線パターン。
     StrokeWidth: Single;                    // 開いたPathの線幅。
     Vertices: TArray<TScreenLayoutVertex>;  // 開いたPathを構成するアンカーと区間情報。
+    WidthPoints: TArray<TScreenLayoutStrokeWidthPoint>; // 省略時は全区間が基準線幅。
     Visible: Boolean;                       // 描画対象に含める状態。
   end;
 
@@ -696,6 +711,8 @@ type
     // Pathのアンカー、制御点、区間種別を深いコピーで置換する。
     procedure SetPathVertices(Index: Integer;
       const Vertices: TArray<TScreenLayoutVertex>);
+    procedure SetPathWidthPoints(Index: Integer;
+      const WidthPoints: TArray<TScreenLayoutStrokeWidthPoint>);
     procedure SetPathStroke(Index: Integer; Color: TColor; Width: Single;
       Style: TVectArtMifStrokeStyle);
     // Shapeの輪郭群を深いコピーで置換し、Document変更を通知する。
@@ -730,6 +747,9 @@ const
 function VectArtStrokeDashIntervals(Style: TVectArtMifStrokeStyle;
   Width: Single): TArray<Single>;
 function VectArtStrokeUsesRoundCaps(Style: TVectArtMifStrokeStyle): Boolean;
+// 見た目を変えずにPathを可変幅へ切り替える両端100%の幅点を返す。
+function UniformScreenLayoutStrokeWidthPoints:
+  TArray<TScreenLayoutStrokeWidthPoint>;
 // 文字パスへ渡す文字列を改行を含まない単一行へ正規化する。
 function NormalizeScreenLayoutTextPathText(const Value: string): string;
 // 4隅へ同じ半径を設定した角丸値を返す。
@@ -785,6 +805,18 @@ begin
   if Layer = nil then
     raise EArgumentNilException.Create('Layer');
   FChildren.Insert(EnsureRange(Index, 0, FChildren.Count), Layer);
+end;
+
+function UniformScreenLayoutStrokeWidthPoints:
+  TArray<TScreenLayoutStrokeWidthPoint>;
+begin
+  SetLength(Result, 2);
+  Result[0].Offset := 0;
+  Result[0].LeftScale := 1;
+  Result[0].RightScale := 1;
+  Result[1].Offset := 1;
+  Result[1].LeftScale := 1;
+  Result[1].RightScale := 1;
 end;
 
 function UniformScreenLayoutCornerRadii(
@@ -1308,10 +1340,22 @@ begin
   Result := Copy(FVertices);
 end;
 
+function TVectArtPathLayer.GetWidthPoints:
+  TArray<TScreenLayoutStrokeWidthPoint>;
+begin
+  Result := Copy(FWidthPoints);
+end;
+
 procedure TVectArtPathLayer.SetVertices(
   const Value: TArray<TScreenLayoutVertex>);
 begin
   FVertices := Copy(Value);
+end;
+
+procedure TVectArtPathLayer.SetWidthPoints(
+  const Value: TArray<TScreenLayoutStrokeWidthPoint>);
+begin
+  FWidthPoints := Copy(Value);
 end;
 
 function TVectArtPathLayer.EditablePathVertices:
@@ -1755,6 +1799,7 @@ begin
   PathLayer.StrokeColor := Data.StrokeColor;
   PathLayer.MifStrokeStyle := Data.MifStrokeStyle;
   PathLayer.StrokeWidth := Max(Data.StrokeWidth, 0.0);
+  PathLayer.WidthPoints := Data.WidthPoints;
   PathLayer.Visible := Data.Visible;
   PathLayer.Transform := TScreenLayoutTransform.FromArray(Data.Transform);
   FLayers.Insert(Result, PathLayer);
@@ -2205,6 +2250,7 @@ begin
   Data.StrokeColor := PathLayer.StrokeColor;
   Data.MifStrokeStyle := PathLayer.MifStrokeStyle;
   Data.StrokeWidth := PathLayer.StrokeWidth;
+  Data.WidthPoints := PathLayer.WidthPoints;
   Data.Visible := PathLayer.Visible;
   Data.Transform := PathLayer.Transform.ToArray;
   FLayers.Delete(Index);
@@ -2905,6 +2951,21 @@ begin
   if PathLayer.LineCap = Value then
     Exit;
   PathLayer.LineCap := Value;
+  Changed;
+end;
+
+procedure TVectArtDocument.SetPathWidthPoints(Index: Integer;
+  const WidthPoints: TArray<TScreenLayoutStrokeWidthPoint>);
+var
+  PathLayer: TVectArtPathLayer;
+begin
+  if (Index <= 0) or (Index >= FLayers.Count) or
+    not (FLayers[Index] is TVectArtPathLayer) then
+    Exit;
+  PathLayer := TVectArtPathLayer(FLayers[Index]);
+  if PathLayer.Closed then
+    Exit;
+  PathLayer.WidthPoints := WidthPoints;
   Changed;
 end;
 

@@ -529,6 +529,9 @@ var
   VertexJson: TJSONObject;
   VertexKind: string;
   VerticesJson: TJSONArray;
+  WidthPointIndex: Integer;
+  WidthPointJson: TJSONObject;
+  WidthPointsJson: TJSONArray;
   LineCapValue: Integer;
   MifStrokeStyleValue: Integer;
   Version: Integer;
@@ -839,6 +842,7 @@ begin
         end;
         if LayerTypes[I] = 'path' then
         begin
+          PathValue.WidthPoints := nil;
           PathValue.Name := ReadString(LayerJson, 'name');
           PathValue.Closed := ReadBoolean(LayerJson, 'closed');
           PathValue.Opacity := ReadSingle(LayerJson, 'opacity');
@@ -863,6 +867,52 @@ begin
           PathValue.Visible := ReadBoolean(LayerJson, 'visible');
           PathValue.Locked := ReadBoolean(LayerJson, 'locked');
           PathValue.Vertices := ReadPathVertices(LayerJson, I, 'Path');
+          if LayerJson.GetValue('widthPoints') <> nil then
+          begin
+            WidthPointsJson := TJSONArray(RequireValue(LayerJson,
+              'widthPoints', TJSONArray));
+            if WidthPointsJson.Count < 2 then
+              raise EConvertError.CreateFmt(
+                'Path layer %d widthPoints must contain at least two points',
+                [I]);
+            SetLength(PathValue.WidthPoints, WidthPointsJson.Count);
+            for WidthPointIndex := 0 to WidthPointsJson.Count - 1 do
+            begin
+              if not (WidthPointsJson.Items[WidthPointIndex] is
+                TJSONObject) then
+                raise EConvertError.CreateFmt(
+                  'Path layer %d width point %d is invalid',
+                  [I, WidthPointIndex]);
+              WidthPointJson := TJSONObject(
+                WidthPointsJson.Items[WidthPointIndex]);
+              PathValue.WidthPoints[WidthPointIndex].Offset :=
+                ReadSingle(WidthPointJson, 'offset');
+              PathValue.WidthPoints[WidthPointIndex].LeftScale :=
+                ReadSingle(WidthPointJson, 'leftScale');
+              PathValue.WidthPoints[WidthPointIndex].RightScale :=
+                ReadSingle(WidthPointJson, 'rightScale');
+              if not InRange(
+                PathValue.WidthPoints[WidthPointIndex].Offset, 0.0, 1.0) or
+                not InRange(
+                  PathValue.WidthPoints[WidthPointIndex].LeftScale, 0.0, 1.0) or
+                not InRange(
+                  PathValue.WidthPoints[WidthPointIndex].RightScale, 0.0, 1.0)
+                then
+                raise EConvertError.CreateFmt(
+                  'Path layer %d width point %d is out of range',
+                  [I, WidthPointIndex]);
+              if (WidthPointIndex > 0) and
+                (PathValue.WidthPoints[WidthPointIndex].Offset <=
+                  PathValue.WidthPoints[WidthPointIndex - 1].Offset) then
+                raise EConvertError.CreateFmt(
+                  'Path layer %d width point offsets must increase', [I]);
+            end;
+            if not SameValue(PathValue.WidthPoints[0].Offset, 0.0) or
+              not SameValue(PathValue.WidthPoints[
+                High(PathValue.WidthPoints)].Offset, 1.0) then
+              raise EConvertError.CreateFmt(
+                'Path layer %d widthPoints must span 0 through 1', [I]);
+          end;
           if PathValue.Closed and (Length(PathValue.Vertices) < 3) then
             raise EConvertError.CreateFmt(
               'Closed path layer %d must contain at least three points', [I]);

@@ -162,6 +162,7 @@ var
   Texture: TScreenLayoutTextureStyle;
   Pattern: TScreenLayoutPatternStyle;
   Vertices: TArray<TScreenLayoutVertex>;
+  WidthPoints: TArray<TScreenLayoutStrokeWidthPoint>;
 begin
   Document := TVectArtDocument.Create;
   History := TVectArtEditHistory.Create;
@@ -251,6 +252,14 @@ begin
     Vertices[1].Position := TPointF.Create(40, 15);
     Vertices[1].IncomingControl := TPointF.Create(-3, -7);
     Path := TVectArtPathLayer.Create('Path', Vertices, False);
+    SetLength(WidthPoints, 2);
+    WidthPoints[0].Offset := 0;
+    WidthPoints[0].LeftScale := 0.25;
+    WidthPoints[0].RightScale := 0.75;
+    WidthPoints[1].Offset := 1;
+    WidthPoints[1].LeftScale := 0.5;
+    WidthPoints[1].RightScale := 1;
+    Path.WidthPoints := WidthPoints;
     Document.InsertLayer(5, Path);
     Document.SelectedIndex := 5;
     FlipScreenLayoutSelection(Document, History, State, slfdHorizontal);
@@ -259,6 +268,11 @@ begin
     CheckSame(Vertices[1].Position.X, -20, 'path end was not reflected');
     CheckSame(Vertices[0].OutgoingControl.X, -4,
       'path control vector was not reflected');
+    WidthPoints := Path.WidthPoints;
+    CheckSame(WidthPoints[0].LeftScale, 0.75,
+      'path left width was not swapped during reflection');
+    CheckSame(WidthPoints[1].RightScale, 0.5,
+      'path right width was not swapped during reflection');
 
     TextLayer := TScreenLayoutTextLayer.Create('Text',
       TRectF.Create(-60, -15, 60, 15), 'Mirror', 'Segoe UI', 24, 120,

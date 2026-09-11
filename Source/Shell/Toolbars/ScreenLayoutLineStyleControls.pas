@@ -42,6 +42,19 @@ type
     property Selected: Boolean read FSelected write SetSelected;
   end;
 
+  TScreenLayoutStrokeWidthModeButton = class(TVectArtDarkButton)
+  private
+    FMode: TScreenLayoutStrokeWidthMode;
+    FSelected: Boolean;
+    procedure SetMode(Value: TScreenLayoutStrokeWidthMode);
+    procedure SetSelected(Value: Boolean);
+  protected
+    procedure Paint; override;
+  public
+    property Mode: TScreenLayoutStrokeWidthMode read FMode write SetMode;
+    property Selected: Boolean read FSelected write SetSelected;
+  end;
+
   TScreenLayoutTextStyleButton = class(TVectArtDarkButton)
   private
     FSelected: Boolean;
@@ -288,6 +301,71 @@ begin
 end;
 
 procedure TVectArtLineCapButton.SetSelected(Value: Boolean);
+begin
+  if FSelected = Value then
+    Exit;
+  FSelected := Value;
+  Invalidate;
+end;
+
+{ TScreenLayoutStrokeWidthModeButton }
+
+procedure TScreenLayoutStrokeWidthModeButton.Paint;
+var
+  BackgroundColor: TColor;
+  Bounds: TRect;
+  CenterY: Integer;
+  HalfHeight: Integer;
+  Points: array[0..5] of TPoint;
+begin
+  inherited Paint;
+  Bounds := ClientRect;
+  Dec(Bounds.Right);
+  Dec(Bounds.Bottom);
+  if FSelected then
+  begin
+    if Enabled then
+      BackgroundColor := COLOR_BUTTON_SELECTED
+    else
+      BackgroundColor := COLOR_BUTTON_DISABLED;
+    Canvas.Brush.Style := bsSolid;
+    Canvas.Brush.Color := BackgroundColor;
+    Canvas.Pen.Color := COLOR_BUTTON_SELECTED_BORDER;
+    Canvas.Rectangle(Bounds);
+  end;
+  CenterY := Height div 2;
+  HalfHeight := Max(MulDiv(2, CurrentPPI, 96), 1);
+  Canvas.Brush.Style := bsSolid;
+  if Enabled then
+    Canvas.Brush.Color := COLOR_TEXT
+  else
+    Canvas.Brush.Color := COLOR_BUTTON_BORDER;
+  Canvas.Pen.Color := Canvas.Brush.Color;
+  if FMode = slwmUniform then
+    Canvas.FillRect(Rect(MulDiv(6, CurrentPPI, 96), CenterY - HalfHeight,
+      Width - MulDiv(6, CurrentPPI, 96), CenterY + HalfHeight + 1))
+  else
+  begin
+    Points[0] := Point(MulDiv(5, CurrentPPI, 96), CenterY - 1);
+    Points[1] := Point(Width div 2, CenterY - MulDiv(7, CurrentPPI, 96));
+    Points[2] := Point(Width - MulDiv(5, CurrentPPI, 96), CenterY - 1);
+    Points[3] := Point(Width - MulDiv(5, CurrentPPI, 96), CenterY + 2);
+    Points[4] := Point(Width div 2, CenterY + MulDiv(7, CurrentPPI, 96));
+    Points[5] := Point(MulDiv(5, CurrentPPI, 96), CenterY + 2);
+    Canvas.Polygon(Points);
+  end;
+end;
+
+procedure TScreenLayoutStrokeWidthModeButton.SetMode(
+  Value: TScreenLayoutStrokeWidthMode);
+begin
+  if FMode = Value then
+    Exit;
+  FMode := Value;
+  Invalidate;
+end;
+
+procedure TScreenLayoutStrokeWidthModeButton.SetSelected(Value: Boolean);
 begin
   if FSelected = Value then
     Exit;

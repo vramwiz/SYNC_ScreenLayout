@@ -31,6 +31,8 @@ type
     FTextPathAttachmentPanel: TPanel;
     FMifStrokeStyleCombo: TVectArtMifStrokeStyleCombo;
     FLineCapButtons: array[TVectArtLineCap] of TVectArtLineCapButton;
+    FWidthModeButtons: array[TScreenLayoutStrokeWidthMode] of
+      TScreenLayoutStrokeWidthModeButton;
     FStrokeWidthTrackBar: THorizontalTrackBarControl;
     FStrokeWidthEdit: TEdit;
     FTrackDocumentUpdateActive: Boolean;
@@ -57,7 +59,9 @@ type
     function IsTextPathAttachmentControl(Control: TControl): Boolean;
     function IsDetailsControl(Control: TControl): Boolean;
     procedure LineCapClick(Sender: TObject);
+    procedure WidthModeClick(Sender: TObject);
     function SelectedLineIndices: TArray<Integer>;
+    function SelectedPathIndices: TArray<Integer>;
     function SelectedTextIndices: TArray<Integer>;
     function SelectedTextPathIndices: TArray<Integer>;
     function SelectionHasLockedLine: Boolean;
@@ -80,6 +84,8 @@ type
     procedure ApplyMifStrokeStyle(Value: TVectArtMifStrokeStyle);
     // 作成初期値または選択中の全Lineへ線幅を適用する。
     procedure ApplyStrokeWidth(Value: Single);
+    // 作成初期値または選択中の開いたPathへ均一／可変幅を適用する。
+    procedure ApplyStrokeWidthMode(Value: TScreenLayoutStrokeWidthMode);
     // 選択中の全Textへフォントファミリーを適用する。
     procedure ApplyFontFamily(const Value: string);
     // 選択中の全Textへ1種類の文字装飾を追加または削除する。
@@ -99,6 +105,8 @@ type
     property Document: TVectArtDocument read FDocument write FDocument;
     // 指定した線端形状の選択ボタンを返す。戻り値の所有権はSelfが保持する。
     function LineCapButton(Value: TVectArtLineCap): TVectArtLineCapButton;
+    function StrokeWidthModeButton(Value: TScreenLayoutStrokeWidthMode):
+      TScreenLayoutStrokeWidthModeButton;
     // UIテストとHost側の配置確認に公開する所有Control。
     property DetailsButton: TVectArtDarkButton read FDetailsButton;
     property DetailsPanel: TPanel read FDetailsPanel;
@@ -143,7 +151,7 @@ const
   STROKE_WIDTH_SCALE = 10;
   STROKE_WIDTH_TRACK_MIN = 10;
   STROKE_WIDTH_TRACK_MAX = 1000;
-  LINE_TOOLBAR_WIDTH = 270;
+  LINE_TOOLBAR_WIDTH = 350;
   TEXT_TOOLBAR_WIDTH = 420;
 
 function UnicodeText(const CodePoints: array of Word): string;
@@ -235,6 +243,7 @@ var
   ParentForm: TCustomForm;
   Style: TFontStyle;
   TextAlignment: TScreenLayoutTextAlignment;
+  WidthMode: TScreenLayoutStrokeWidthMode;
   function Logical(Value: Integer): Integer;
   begin
     Result := MulDiv(Value, CurrentPPI, 96);
@@ -306,6 +315,22 @@ begin
   FStrokeWidthEdit.Font.Height := -Logical(12);
   FStrokeWidthEdit.OnExit := EditExit;
   FStrokeWidthEdit.OnKeyDown := EditKeyDown;
+
+  for WidthMode := Low(TScreenLayoutStrokeWidthMode) to
+    High(TScreenLayoutStrokeWidthMode) do
+  begin
+    FWidthModeButtons[WidthMode] :=
+      TScreenLayoutStrokeWidthModeButton.Create(Self);
+    FWidthModeButtons[WidthMode].Parent := Self;
+    FWidthModeButtons[WidthMode].Mode := WidthMode;
+    FWidthModeButtons[WidthMode].OnClick := WidthModeClick;
+    FWidthModeButtons[WidthMode].ShowHint := True;
+  end;
+  FWidthModeButtons[slwmUniform].Hint :=
+    UnicodeText([$5747, $4E00, $5E45]);
+  FWidthModeButtons[slwmVariable].Hint :=
+    UnicodeText([$53EF, $5909, $5E45]);
+  FWidthModeButtons[slwmUniform].Selected := True;
 
   FMifStrokeStyleCombo := TVectArtMifStrokeStyleCombo.Create(Self);
   FMifStrokeStyleCombo.Parent := Self;
@@ -559,6 +584,28 @@ end;
 procedure TVectArtLineToolbarControl.ApplyStrokeWidth(Value: Single);
 begin
   ApplyStrokeWidthInternal(Value, True);
+end;
+
+procedure TVectArtLineToolbarControl.ApplyStrokeWidthMode(
+  Value: TScreenLayoutStrokeWidthMode);
+var
+  Indices: TArray<Integer>;
+begin
+  if FUpdating then
+    Exit;
+  Indices := SelectedPathIndices;
+  if (Length(Indices) > 0) and SelectionHasLockedLine then
+    Exit;
+  FUpdating := True;
+  try
+    ApplyScreenLayoutToolbarWidthMode(FDocument, FEditHistory, Indices,
+      Value);
+    if FEditorState <> nil then
+      FEditorState.StrokeWidthMode := Value;
+  finally
+    FUpdating := False;
+  end;
+  RefreshState;
 end;
 
 procedure TVectArtLineToolbarControl.ApplyStrokeWidthInternal(Value: Single;
@@ -837,10 +884,25 @@ begin
   ApplyLineCap(TVectArtLineCapButton(Sender).LineCap);
 end;
 
+procedure TVectArtLineToolbarControl.WidthModeClick(Sender: TObject);
+begin
+  if FUpdating or
+    not (Sender is TScreenLayoutStrokeWidthModeButton) then
+    Exit;
+  ApplyStrokeWidthMode(TScreenLayoutStrokeWidthModeButton(Sender).Mode);
+end;
+
 function TVectArtLineToolbarControl.LineCapButton(
   Value: TVectArtLineCap): TVectArtLineCapButton;
 begin
   Result := FLineCapButtons[Value];
+end;
+
+function TVectArtLineToolbarControl.StrokeWidthModeButton(
+  Value: TScreenLayoutStrokeWidthMode):
+  TScreenLayoutStrokeWidthModeButton;
+begin
+  Result := FWidthModeButtons[Value];
 end;
 
 procedure TVectArtLineToolbarControl.Paint;
@@ -873,24 +935,30 @@ var
   CommonFontFamily: Boolean;
   CommonStyle: Boolean;
   CommonLineCap: Boolean;
+  CommonWidthMode: Boolean;
   CommonWidth: Boolean;
   Cap: TVectArtLineCap;
   CurrentLineCap: TVectArtLineCap;
   CurrentStyle: TVectArtMifStrokeStyle;
   CurrentWidth: Single;
+  CurrentWidthMode: TScreenLayoutStrokeWidthMode;
   I: Integer;
   Indices: TArray<Integer>;
   Layer: TVectArtLayer;
   LineCapValue: TVectArtLineCap;
   Locked: Boolean;
+  Mode: TScreenLayoutStrokeWidthMode;
+  PathIndices: TArray<Integer>;
   StyleValue: TVectArtMifStrokeStyle;
   SupportsLineCap: Boolean;
+  SupportsWidthMode: Boolean;
   Style: TFontStyle;
   TextIndices: TArray<Integer>;
   TextPathIndices: TArray<Integer>;
   UseLineToolDefaults: Boolean;
   FontFamilyValue: string;
   WidthValue: Single;
+  WidthModeValue: TScreenLayoutStrokeWidthMode;
 begin
   if FUpdating then
     Exit;
@@ -919,6 +987,9 @@ begin
       FStrokeWidthEdit.Visible := False;
       FStrokeWidthTrackBar.Visible := False;
       FDetailsButton.Visible := False;
+      for Mode := Low(TScreenLayoutStrokeWidthMode) to
+        High(TScreenLayoutStrokeWidthMode) do
+        FWidthModeButtons[Mode].Visible := False;
       FTextAlignmentButton.Visible := AllRegularTexts;
       FTextPathAttachmentButton.Visible := AllTextPaths;
       if not AllRegularTexts then
@@ -1010,6 +1081,9 @@ begin
       FStrokeWidthEdit.Visible := True;
       FStrokeWidthTrackBar.Visible := True;
       FDetailsButton.Visible := True;
+      for Mode := Low(TScreenLayoutStrokeWidthMode) to
+        High(TScreenLayoutStrokeWidthMode) do
+        FWidthModeButtons[Mode].Visible := True;
       if UseLineToolDefaults then
         Indices := nil
       else
@@ -1054,11 +1128,50 @@ begin
           for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
             FLineCapButtons[Cap].Selected := False;
         Locked := SelectionHasLockedLine;
+        SupportsWidthMode := (FEditorState <> nil) and
+          (FEditorState.CurrentTool in [vetLine, vetFreehand, vetPath]);
+        if SupportsWidthMode then
+        begin
+          WidthModeValue := FEditorState.StrokeWidthMode;
+          CommonWidthMode := True;
+        end
+        else
+        begin
+          PathIndices := SelectedPathIndices;
+          SupportsWidthMode := Length(PathIndices) > 0;
+          CommonWidthMode := SupportsWidthMode;
+          if SupportsWidthMode then
+          begin
+            if Length(TVectArtPathLayer(
+              FDocument[PathIndices[0]]).WidthPoints) > 0 then
+              WidthModeValue := slwmVariable
+            else
+              WidthModeValue := slwmUniform;
+            for I := 1 to High(PathIndices) do
+            begin
+              if Length(TVectArtPathLayer(
+                FDocument[PathIndices[I]]).WidthPoints) > 0 then
+                CurrentWidthMode := slwmVariable
+              else
+                CurrentWidthMode := slwmUniform;
+              CommonWidthMode := CommonWidthMode and
+                (CurrentWidthMode = WidthModeValue);
+            end;
+          end;
+        end;
         FStrokeWidthEdit.Enabled := not Locked;
         FStrokeWidthTrackBar.Enabled := not Locked;
         FMifStrokeStyleCombo.Enabled := not Locked;
         for Cap := Low(TVectArtLineCap) to High(TVectArtLineCap) do
           FLineCapButtons[Cap].Enabled := not Locked and SupportsLineCap;
+        for Mode := Low(TScreenLayoutStrokeWidthMode) to
+          High(TScreenLayoutStrokeWidthMode) do
+        begin
+          FWidthModeButtons[Mode].Enabled :=
+            not Locked and SupportsWidthMode;
+          FWidthModeButtons[Mode].Selected := SupportsWidthMode and
+            CommonWidthMode and (Mode = WidthModeValue);
+        end;
       end
       else if UseLineToolDefaults or
         ((FDocument <> nil) and (FDocument.SelectionCount = 0) and
@@ -1085,6 +1198,15 @@ begin
         FStrokeWidthEdit.Enabled := True;
         FStrokeWidthTrackBar.Enabled := True;
         FMifStrokeStyleCombo.Enabled := True;
+        SupportsWidthMode := FEditorState.CurrentTool in
+          [vetLine, vetFreehand, vetPath];
+        for Mode := Low(TScreenLayoutStrokeWidthMode) to
+          High(TScreenLayoutStrokeWidthMode) do
+        begin
+          FWidthModeButtons[Mode].Enabled := SupportsWidthMode;
+          FWidthModeButtons[Mode].Selected := SupportsWidthMode and
+            (Mode = FEditorState.StrokeWidthMode);
+        end;
       end
       else
       begin
@@ -1100,6 +1222,7 @@ end;
 
 procedure TVectArtLineToolbarControl.Resize;
 var
+  Mode: TScreenLayoutStrokeWidthMode;
   Style: TFontStyle;
   StyleLeft: Integer;
   TrackWidth: Integer;
@@ -1123,13 +1246,19 @@ begin
   if FTextPathAttachmentButton <> nil then
     FTextPathAttachmentButton.SetBounds(Logical(374), Logical(6), Logical(34),
       Logical(29));
-  TrackWidth := Max(Width - Logical(176), Logical(60));
+  TrackWidth := Max(Width - Logical(256), Logical(60));
   if FStrokeWidthTrackBar <> nil then
     FStrokeWidthTrackBar.SetBounds(Logical(40), Logical(4), TrackWidth,
       Logical(34));
   if FStrokeWidthEdit <> nil then
-    FStrokeWidthEdit.SetBounds(Width - Logical(128), Logical(8), Logical(48),
+    FStrokeWidthEdit.SetBounds(Width - Logical(208), Logical(8), Logical(48),
       Logical(25));
+  for Mode := Low(TScreenLayoutStrokeWidthMode) to
+    High(TScreenLayoutStrokeWidthMode) do
+    if FWidthModeButtons[Mode] <> nil then
+      FWidthModeButtons[Mode].SetBounds(
+        Width - Logical(154 - Ord(Mode) * 34), Logical(6), Logical(30),
+        Logical(29));
   if FDetailsButton <> nil then
     FDetailsButton.SetBounds(Width - Logical(70), Logical(8), Logical(60),
       Logical(25));
@@ -1182,6 +1311,23 @@ begin
        not TVectArtPathLayer(FDocument[Selection[I]]).Closed)) then
       Exit;
   Result := Selection;
+end;
+
+function TVectArtLineToolbarControl.SelectedPathIndices: TArray<Integer>;
+var
+  I: Integer;
+  Indices: TArray<Integer>;
+  LineIndices: TArray<Integer>;
+begin
+  Result := nil;
+  if (FEditorState <> nil) and
+    (FEditorState.CurrentTool in [vetLine, vetFreehand, vetPath]) then
+    Exit;
+  LineIndices := SelectedLineIndices;
+  for I := 0 to High(LineIndices) do
+    if FDocument[LineIndices[I]] is TVectArtPathLayer then
+      Indices := Indices + [LineIndices[I]];
+  Result := Indices;
 end;
 
 function TVectArtLineToolbarControl.SelectionHasLockedLine: Boolean;

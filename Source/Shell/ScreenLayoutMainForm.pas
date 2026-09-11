@@ -19,7 +19,8 @@ uses
   ScreenLayoutGeometryPropertiesFrame,
   ScreenLayoutObjectPropertiesFrame, ScreenLayoutToolFrames,
   ScreenLayoutToolPaletteFrame, ScreenLayoutObjectContextMenu,
-  ScreenLayoutTextContextMenu, ScreenLayoutTransformContextMenu,
+  ScreenLayoutTextContextMenu, ScreenLayoutPathContextMenu,
+  ScreenLayoutTransformContextMenu,
   ScreenLayoutArrangementContextMenu;
 
 type
@@ -266,6 +267,9 @@ begin
       FDocument, FEditHistory, FEditorState));
   FObjectContextMenu.RegisterContributor(
     TScreenLayoutTextMenuContributor.Create(FObjectContextMenu,
+      FEditHistory));
+  FObjectContextMenu.RegisterContributor(
+    TScreenLayoutPathMenuContributor.Create(FObjectContextMenu,
       FEditHistory));
   FEditorFrame := TEditorWorkspaceFrame.Create(Self);
   FEditorFrame.Context := FDesignerContext;

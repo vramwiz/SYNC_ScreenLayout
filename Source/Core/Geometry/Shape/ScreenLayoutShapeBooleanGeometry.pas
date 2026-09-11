@@ -9,6 +9,9 @@ uses
 // Skia Pathの閉輪郭をShapeデータへ変換する。空Pathは長さ0の配列を返す。
 function ConvertSkPathToScreenLayoutShapeContours(
   const Path: ISkPath): TArray<TScreenLayoutContour>;
+// 円弧Conicを各1本の3次ベジェへ近似し、ストローク外周の編集点を抑える。
+function ConvertSkPathToCompactScreenLayoutShapeContours(
+  const Path: ISkPath): TArray<TScreenLayoutContour>;
 
 implementation
 
@@ -123,9 +126,12 @@ begin
   Contour.Vertices := nil;
 end;
 
-function ConvertSkPathToScreenLayoutShapeContours(
-  const Path: ISkPath): TArray<TScreenLayoutContour>;
+function ConvertSkPathToScreenLayoutShapeContoursInternal(
+  const Path: ISkPath; CompactConics: Boolean): TArray<TScreenLayoutContour>;
 var
+  Alpha: Single;
+  CubicControl1: TPointF;
+  CubicControl2: TPointF;
   ConicPoints: TArray<TPointF>;
   Contour: TScreenLayoutContour;
   Contours: TList<TScreenLayoutContour>;
@@ -158,15 +164,35 @@ begin
             Element.Points[1], Element.Points[2]);
         TSkPathVerb.Conic:
           begin
-            ConicPoints := TSkPath.ConvertConicToQuads(Element.Points[0],
-              Element.Points[1], Element.Points[2], Element.ConicWeight,
-              CONIC_SUBDIVISION_POWER);
-            I := 0;
-            while I + 2 <= High(ConicPoints) do
+            if CompactConics then
             begin
-              AppendQuadraticSegment(Contour, ConicPoints[I],
-                ConicPoints[I + 1], ConicPoints[I + 2]);
-              Inc(I, 2);
+              // 有理2次曲線の端点接線を保つ3次近似。円の1/4弧では
+              // weight=sqrt(2)/2となり、係数は標準の0.55228475になる。
+              Alpha := 4 * Element.ConicWeight /
+                (3 * (1 + Element.ConicWeight));
+              CubicControl1 := TPointF.Create(Element.Points[0].X +
+                (Element.Points[1].X - Element.Points[0].X) * Alpha,
+                Element.Points[0].Y +
+                (Element.Points[1].Y - Element.Points[0].Y) * Alpha);
+              CubicControl2 := TPointF.Create(Element.Points[2].X +
+                (Element.Points[1].X - Element.Points[2].X) * Alpha,
+                Element.Points[2].Y +
+                (Element.Points[1].Y - Element.Points[2].Y) * Alpha);
+              AppendSegment(Contour, Element.Points[2], CubicControl1,
+                CubicControl2, slskCubicBezier);
+            end
+            else
+            begin
+              ConicPoints := TSkPath.ConvertConicToQuads(Element.Points[0],
+                Element.Points[1], Element.Points[2], Element.ConicWeight,
+                CONIC_SUBDIVISION_POWER);
+              I := 0;
+              while I + 2 <= High(ConicPoints) do
+              begin
+                AppendQuadraticSegment(Contour, ConicPoints[I],
+                  ConicPoints[I + 1], ConicPoints[I + 2]);
+                Inc(I, 2);
+              end;
             end;
           end;
         TSkPathVerb.Cubic:
@@ -180,6 +206,18 @@ begin
   finally
     Contours.Free;
   end;
+end;
+
+function ConvertSkPathToScreenLayoutShapeContours(
+  const Path: ISkPath): TArray<TScreenLayoutContour>;
+begin
+  Result := ConvertSkPathToScreenLayoutShapeContoursInternal(Path, False);
+end;
+
+function ConvertSkPathToCompactScreenLayoutShapeContours(
+  const Path: ISkPath): TArray<TScreenLayoutContour>;
+begin
+  Result := ConvertSkPathToScreenLayoutShapeContoursInternal(Path, True);
 end;
 
 end.

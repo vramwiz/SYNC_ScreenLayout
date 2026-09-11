@@ -28,12 +28,27 @@ procedure DrawStyledPreviewLine(Target: TCanvas; const StartPoint,
 procedure DrawStyledPreviewLine(Target: TDirect2DCanvas;
   const StartPoint, EndPoint: TPoint; Color: TColor; Width: Single;
   Style: TVectArtMifStrokeStyle; LineCap: TVectArtLineCap); overload;
+// Draws the freehand input hotspot and its current document stroke diameter.
+procedure DrawStrokeWidthCursor(Target: TCanvas; const Center: TPoint;
+  Width: Single; MarkerHalfSize: Integer); overload;
+// Direct2D counterpart of the freehand stroke-width cursor.
+procedure DrawStrokeWidthCursor(Target: TDirect2DCanvas;
+  const Center: TPoint; Width: Single; MarkerHalfSize: Integer); overload;
+// Draws pressure samples with per-segment widths during freehand creation.
+procedure DrawVariableWidthPreview(Target: TCanvas;
+  const Points: TArray<TPoint>; const WidthScales: TArray<Single>;
+  Color: TColor; BaseWidth: Single); overload;
+// Direct2D counterpart of the pressure-sensitive freehand preview.
+procedure DrawVariableWidthPreview(Target: TDirect2DCanvas;
+  const Points: TArray<TPoint>; const WidthScales: TArray<Single>;
+  Color: TColor; BaseWidth: Single); overload;
 
 implementation
 
 uses
   System.Math, System.UITypes, Winapi.D2D1, ScreenLayoutOverlayHandles,
-  ScreenLayoutOverlayPrimitives, ScreenLayoutRenderer;
+  ScreenLayoutOverlayPrimitives, ScreenLayoutOverlayShapes,
+  ScreenLayoutRenderer;
 
 type
   TPreviewLineSegment = record
@@ -169,6 +184,90 @@ begin
   Result[1] := Point(Bounds.Right, (Bounds.Top + Bounds.Bottom) div 2);
   Result[2] := Point((Bounds.Left + Bounds.Right) div 2, Bounds.Bottom);
   Result[3] := Point(Bounds.Left, (Bounds.Top + Bounds.Bottom) div 2);
+end;
+
+function StrokeWidthCursorBounds(const Center: TPoint;
+  Width: Single): TRect;
+var
+  Diameter: Integer;
+begin
+  Diameter := Max(Round(Width), 1);
+  Result.Left := Center.X - Diameter div 2;
+  Result.Top := Center.Y - Diameter div 2;
+  Result.Right := Result.Left + Diameter;
+  Result.Bottom := Result.Top + Diameter;
+end;
+
+procedure DrawStrokeWidthCursor(Target: TCanvas; const Center: TPoint;
+  Width: Single; MarkerHalfSize: Integer);
+var
+  Bounds: TRect;
+begin
+  Bounds := StrokeWidthCursorBounds(Center, Width);
+  DrawOverlayEllipse(Target, Bounds);
+  MarkerHalfSize := Max(MarkerHalfSize, 2);
+  DrawOverlayLine(Target,
+    Point(Center.X - MarkerHalfSize, Center.Y),
+    Point(Center.X + MarkerHalfSize, Center.Y));
+  DrawOverlayLine(Target,
+    Point(Center.X, Center.Y - MarkerHalfSize),
+    Point(Center.X, Center.Y + MarkerHalfSize));
+end;
+
+procedure DrawStrokeWidthCursor(Target: TDirect2DCanvas;
+  const Center: TPoint; Width: Single; MarkerHalfSize: Integer);
+var
+  Bounds: TRect;
+begin
+  Bounds := StrokeWidthCursorBounds(Center, Width);
+  DrawOverlayEllipse(Target, Bounds);
+  MarkerHalfSize := Max(MarkerHalfSize, 2);
+  DrawOverlayLine(Target,
+    Point(Center.X - MarkerHalfSize, Center.Y),
+    Point(Center.X + MarkerHalfSize, Center.Y));
+  DrawOverlayLine(Target,
+    Point(Center.X, Center.Y - MarkerHalfSize),
+    Point(Center.X, Center.Y + MarkerHalfSize));
+end;
+
+procedure DrawVariableWidthPreview(Target: TCanvas;
+  const Points: TArray<TPoint>; const WidthScales: TArray<Single>;
+  Color: TColor; BaseWidth: Single);
+var
+  CoreWidth: Integer;
+  I: Integer;
+  SegmentScale: Single;
+begin
+  if (Length(Points) < 2) or
+    (Length(WidthScales) <> Length(Points)) then
+    Exit;
+  for I := 0 to High(Points) - 1 do
+  begin
+    SegmentScale := (WidthScales[I] + WidthScales[I + 1]) * 0.5;
+    CoreWidth := Max(Round(BaseWidth * SegmentScale), 1);
+    DrawOverlayLine(Target, Points[I], Points[I + 1], Color, psSolid,
+      CoreWidth + 2, CoreWidth);
+  end;
+end;
+
+procedure DrawVariableWidthPreview(Target: TDirect2DCanvas;
+  const Points: TArray<TPoint>; const WidthScales: TArray<Single>;
+  Color: TColor; BaseWidth: Single);
+var
+  CoreWidth: Integer;
+  I: Integer;
+  SegmentScale: Single;
+begin
+  if (Length(Points) < 2) or
+    (Length(WidthScales) <> Length(Points)) then
+    Exit;
+  for I := 0 to High(Points) - 1 do
+  begin
+    SegmentScale := (WidthScales[I] + WidthScales[I + 1]) * 0.5;
+    CoreWidth := Max(Round(BaseWidth * SegmentScale), 1);
+    DrawOverlayLine(Target, Points[I], Points[I + 1], Color, psSolid,
+      CoreWidth + 2, CoreWidth);
+  end;
 end;
 
 procedure BuildRotationMarkPoints(const Bounds: TRect;

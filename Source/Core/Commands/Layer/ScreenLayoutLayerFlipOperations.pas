@@ -181,6 +181,8 @@ var
   Style: TScreenLayoutPaintStyle;
   Text: TScreenLayoutTextLayer;
   TextPath: TScreenLayoutTextPathLayer;
+  WidthPoints: TArray<TScreenLayoutStrokeWidthPoint>;
+  WidthScale: Single;
   Vertices: TArray<TScreenLayoutVertex>;
 begin
   if Layer = nil then
@@ -254,6 +256,14 @@ begin
     Vertices := TVectArtPathLayer(Layer).Vertices;
     ReflectVertices(Vertices, AxisCenter, Direction);
     TVectArtPathLayer(Layer).Vertices := Vertices;
+    WidthPoints := TVectArtPathLayer(Layer).WidthPoints;
+    for I := 0 to High(WidthPoints) do
+    begin
+      WidthScale := WidthPoints[I].LeftScale;
+      WidthPoints[I].LeftScale := WidthPoints[I].RightScale;
+      WidthPoints[I].RightScale := WidthScale;
+    end;
+    TVectArtPathLayer(Layer).WidthPoints := WidthPoints;
   end
   else if Layer is TScreenLayoutShapeLayer then
   begin
@@ -349,7 +359,11 @@ begin
   if (Source is TVectArtImageLayer) and (Target is TVectArtImageLayer) then
     TVectArtImageLayer(Target).Points := TVectArtImageLayer(Source).Points
   else if (Source is TVectArtPathLayer) and (Target is TVectArtPathLayer) then
-    TVectArtPathLayer(Target).Vertices := TVectArtPathLayer(Source).Vertices
+  begin
+    TVectArtPathLayer(Target).Vertices := TVectArtPathLayer(Source).Vertices;
+    TVectArtPathLayer(Target).WidthPoints :=
+      TVectArtPathLayer(Source).WidthPoints;
+  end
   else if (Source is TScreenLayoutShapeLayer) and
     (Target is TScreenLayoutShapeLayer) then
     TScreenLayoutShapeLayer(Target).Contours :=

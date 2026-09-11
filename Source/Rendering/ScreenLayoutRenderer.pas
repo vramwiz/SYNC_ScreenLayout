@@ -68,7 +68,7 @@ uses
   ScreenLayoutFilters, ScreenLayoutLayerGeometry, ScreenLayoutPathOperations,
   ScreenLayoutPaintRenderer, ScreenLayoutPatternRenderer,
   ScreenLayoutShapePath, ScreenLayoutTextGeometry,
-  ScreenLayoutTextPathGeometry;
+  ScreenLayoutTextPathGeometry, ScreenLayoutVariableWidthRenderer;
 
 const
   MAX_RENDER_DIMENSION = 16384;
@@ -758,6 +758,8 @@ var
   LetterSpacing: Single;
   IndividualLetterSpacingRatios: TArray<Single>;
   TransformMatrix: TMatrix;
+  VariableWidthPath: ISkPath;
+  WidthPoints: TArray<TScreenLayoutStrokeWidthPoint>;
 
 begin
   if Target = nil then
@@ -1153,6 +1155,24 @@ begin
       ApplyScreenLayoutStrokeGradient(StrokePaint, PathLayer, Path,
         PathLayer.Opacity * OpacityMultiplier, StrokeWidth);
       StrokePaint.StrokeWidth := StrokeWidth;
+      WidthPoints := PathLayer.WidthPoints;
+      VariableWidthPath := nil;
+      if not PathLayer.Closed and
+        (PathLayer.MifStrokeStyle = vssSolid) then
+      begin
+        if Length(WidthPoints) < 2 then
+          WidthPoints := UniformScreenLayoutStrokeWidthPoints;
+        VariableWidthPath := BuildScreenLayoutVariableWidthPath(Path,
+          WidthPoints, StrokeWidth, PathLayer.LineCap, PathVertices);
+      end;
+      if VariableWidthPath <> nil then
+      begin
+        StrokePaint.PathEffect := nil;
+        StrokePaint.Style := TSkPaintStyle.Fill;
+        Canvas.DrawPath(VariableWidthPath, StrokePaint);
+        StrokePaint.Style := TSkPaintStyle.Stroke;
+        Continue;
+      end;
       DashIntervals := VectArtStrokeDashIntervals(PathLayer.MifStrokeStyle,
         StrokeWidth);
       if Length(DashIntervals) > 0 then

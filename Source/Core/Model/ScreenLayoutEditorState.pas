@@ -20,6 +20,7 @@ type
     FLineCap: TVectArtLineCap;
     FLineMifStrokeStyle: TVectArtMifStrokeStyle;
     FLineStrokeWidth: Single;
+    FStrokeWidthMode: TScreenLayoutStrokeWidthMode;
     FNextVertexKind: TScreenLayoutVertexKind;
     FOnChanged: TNotifyEvent;
     FOpenGroup: TScreenLayoutGroupLayer;
@@ -38,6 +39,7 @@ type
     procedure SetLineCap(const Value: TVectArtLineCap);
     procedure SetLineMifStrokeStyle(const Value: TVectArtMifStrokeStyle);
     procedure SetLineStrokeWidth(const Value: Single);
+    procedure SetStrokeWidthMode(const Value: TScreenLayoutStrokeWidthMode);
     procedure SetNextVertexKind(const Value: TScreenLayoutVertexKind);
     procedure SetOpenGroup(const Value: TScreenLayoutGroupLayer);
     procedure SetOpenGroupChild(const Value: TVectArtLayer);
@@ -88,6 +90,8 @@ type
       write SetLineMifStrokeStyle;
     property LineStrokeWidth: Single read FLineStrokeWidth
       write SetLineStrokeWidth;
+    property StrokeWidthMode: TScreenLayoutStrokeWidthMode
+      read FStrokeWidthMode write SetStrokeWidthMode;
     property NextVertexKind: TScreenLayoutVertexKind read FNextVertexKind
       write SetNextVertexKind;
     property OnChanged: TNotifyEvent read FOnChanged write FOnChanged;
@@ -187,6 +191,7 @@ begin
     DEFAULT_RECTANGLE_COLOR);
   FLineMifStrokeStyle := vssSolid;
   FLineStrokeWidth := 1.0;
+  FStrokeWidthMode := slwmUniform;
   FNextVertexKind := slvkSharp;
   FRectangleOpacity := 1.0;
   FSelectedGradientStopId := SCREEN_LAYOUT_GRADIENT_STOP_NONE;
@@ -638,6 +643,16 @@ begin
   if SameValue(FLineStrokeWidth, NewValue) then
     Exit;
   FLineStrokeWidth := NewValue;
+  if Assigned(FOnChanged) then
+    FOnChanged(Self);
+end;
+
+procedure TVectArtEditorState.SetStrokeWidthMode(
+  const Value: TScreenLayoutStrokeWidthMode);
+begin
+  if FStrokeWidthMode = Value then
+    Exit;
+  FStrokeWidthMode := Value;
   if Assigned(FOnChanged) then
     FOnChanged(Self);
 end;

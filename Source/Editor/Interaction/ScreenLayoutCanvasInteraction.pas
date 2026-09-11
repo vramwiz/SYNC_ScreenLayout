@@ -18,7 +18,8 @@ type
     vcdmTextLetterSpacing, vcdmTextLineSpacing,
     vcdmTextIndividualLetterSpacing,
     vcdmTextPathCharacterMove, vcdmTextPathCharacterResize,
-    vcdmPathVertex, vcdmPathBezierHandle, vcdmShapeVertex,
+    vcdmPathVertex, vcdmPathBezierHandle, vcdmPathWidth,
+    vcdmShapeVertex,
     vcdmShapeBezierHandle);
 
   TScreenLayoutTextSpacingHandles = record
@@ -58,6 +59,8 @@ type
     ScreenLayoutShapeInteraction.TScreenLayoutBezierHandles;
   TScreenLayoutVertexKindButton =
     ScreenLayoutShapeInteraction.TScreenLayoutVertexKindButton;
+  TScreenLayoutPathWidthHandle =
+    ScreenLayoutPathInteraction.TScreenLayoutPathWidthHandle;
 
   TVectArtCanvasInteraction = class
   private
@@ -211,6 +214,9 @@ type
     function SelectedPathVertexRects: TArray<TRect>;
     // 単一選択されたPathの直線・ベジェを表示用の画面座標点列として返す。
     function SelectedPathPoints: TArray<TPoint>;
+    // 単一選択された可変幅Pathの中心と左右幅ハンドルを返す。
+    function SelectedPathWidthHandles:
+      TArray<TScreenLayoutPathWidthHandle>;
     // パス編集で選択中のアンカー種別を返す。
     function SelectedPathVertexKind(
       out Kind: TScreenLayoutVertexKind): Boolean;
@@ -956,8 +962,14 @@ begin
   if FDragMode in [vcdmPathVertex, vcdmPathBezierHandle, vcdmShapeVertex,
     vcdmShapeBezierHandle] then
     Exit(crSizeAll);
+  if FDragMode = vcdmPathWidth then
+    Exit(crSizeAll);
   if FDocument = nil then
     Exit;
+  if FPathInteraction.WidthCursorAt(
+    MapSelectedScreenPoint(Point(X, Y), True).X,
+    MapSelectedScreenPoint(Point(X, Y), True).Y, VertexCursor) then
+    Exit(VertexCursor);
   if FPathStructureEditingEnabled then
   begin
     if FPathInteraction.CursorAt(MapSelectedScreenPoint(Point(X,Y),True).X,
@@ -3020,6 +3032,8 @@ begin
   Y := SourcePoint.Y;
   if Button = mbRight then
   begin
+    if FPathInteraction.DeleteWidthPointAt(X, Y) then
+      Exit(True);
     if FPathStructureEditingEnabled and
       FPathInteraction.DeleteVertexAt(X, Y) then
       Exit(True);
@@ -3028,8 +3042,22 @@ begin
       Exit(True);
     Exit;
   end;
-  if (Button <> mbLeft) or (ssCtrl in Shift) then
+  if Button <> mbLeft then
     Exit;
+  if ssCtrl in Shift then
+  begin
+    if FPathInteraction.InsertWidthPointAt(X, Y) then
+      Exit(True);
+    Exit;
+  end;
+  if not SelectionContainsLockedLayer and
+    FPathInteraction.BeginWidthHandleDragAt(X, Y) then
+  begin
+    FDragMode := vcdmPathWidth;
+    FDragStartMouse := Point(X, Y);
+    CaptureNeeded := True;
+    Exit(True);
+  end;
   if FShapeStructureEditingEnabled and
     FShapeInteraction.ApplyVertexKindAt(X, Y) then
     Exit(True);
@@ -3120,6 +3148,13 @@ begin
   if FDragMode = vcdmRangeSelect then
   begin
     FRangeCurrent := Point(X, Y);
+    Exit(True);
+  end;
+  if FDragMode = vcdmPathWidth then
+  begin
+    SourcePoint := MapSelectedScreenPoint(Point(X, Y), True);
+    FPathInteraction.DragWidthTo(SourcePoint.X, SourcePoint.Y);
+    FSnapGuides := nil;
     Exit(True);
   end;
   if FDragMode in [vcdmPathVertex, vcdmPathBezierHandle] then
@@ -3588,7 +3623,8 @@ begin
     ClickSelectionChanged := False;
     if FDragMode = vcdmRangeSelect then
       ApplyRangeSelection;
-    if FDragMode in [vcdmPathVertex, vcdmPathBezierHandle] then
+    if FDragMode in [vcdmPathVertex, vcdmPathBezierHandle,
+      vcdmPathWidth] then
       FPathInteraction.CommitDrag
     else if FDragMode in [vcdmShapeVertex, vcdmShapeBezierHandle] then
       FShapeInteraction.CommitDrag
@@ -3713,6 +3749,36 @@ var I: Integer;
 begin
   Result := FPathInteraction.SelectedPathPoints;
   for I := 0 to High(Result) do Result[I] := MapSelectedScreenPoint(Result[I]);
+end;
+
+function TVectArtCanvasInteraction.SelectedPathWidthHandles:
+  TArray<TScreenLayoutPathWidthHandle>;
+var
+  CenterHalf: Integer;
+  HandleHalf: Integer;
+  I: Integer;
+begin
+  Result := FPathInteraction.SelectedWidthHandles;
+  CenterHalf := 3;
+  HandleHalf := 4;
+  for I := 0 to High(Result) do
+  begin
+    Result[I].CenterPoint := MapSelectedScreenPoint(Result[I].CenterPoint);
+    Result[I].LeftPoint := MapSelectedScreenPoint(Result[I].LeftPoint);
+    Result[I].RightPoint := MapSelectedScreenPoint(Result[I].RightPoint);
+    Result[I].CenterRect := Rect(Result[I].CenterPoint.X - CenterHalf,
+      Result[I].CenterPoint.Y - CenterHalf,
+      Result[I].CenterPoint.X + CenterHalf + 1,
+      Result[I].CenterPoint.Y + CenterHalf + 1);
+    Result[I].LeftRect := Rect(Result[I].LeftPoint.X - HandleHalf,
+      Result[I].LeftPoint.Y - HandleHalf,
+      Result[I].LeftPoint.X + HandleHalf + 1,
+      Result[I].LeftPoint.Y + HandleHalf + 1);
+    Result[I].RightRect := Rect(Result[I].RightPoint.X - HandleHalf,
+      Result[I].RightPoint.Y - HandleHalf,
+      Result[I].RightPoint.X + HandleHalf + 1,
+      Result[I].RightPoint.Y + HandleHalf + 1);
+  end;
 end;
 
 function TVectArtCanvasInteraction.SelectedPathVertexKind(

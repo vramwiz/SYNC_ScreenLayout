@@ -24,6 +24,7 @@
         <CfgParent>Cfg_1</CfgParent>
         <Cfg_1>true</Cfg_1>
         <Base>true</Base>
+        <DCC_Define>DEBUG;$(DCC_Define)</DCC_Define>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' or '$(Cfg_2)'!=''">
         <Cfg_2>true</Cfg_2>
@@ -83,6 +84,7 @@
         </DCCReference>
         <DCCReference Include="Source\Shell\Menus\ScreenLayoutObjectContextMenu.pas"/>
         <DCCReference Include="Source\Shell\Menus\ScreenLayoutTextContextMenu.pas"/>
+        <DCCReference Include="Source\Shell\Menus\ScreenLayoutPathContextMenu.pas"/>
         <DCCReference Include="Source\Shell\Menus\ScreenLayoutTransformContextMenu.pas"/>
         <DCCReference Include="Source\Shell\Menus\ScreenLayoutArrangementContextMenu.pas"/>
         <DCCReference Include="Source\Shell\Toolbars\ScreenLayoutEditActionsUI.pas"/>
@@ -118,12 +120,15 @@
         <DCCReference Include="Source\Core\Geometry\Shape\ScreenLayoutPathOperations.pas"/>
         <DCCReference Include="Source\Core\Geometry\Shape\ScreenLayoutShapeOperations.pas"/>
         <DCCReference Include="Source\Core\Geometry\Shape\ScreenLayoutShapeBooleanGeometry.pas"/>
+        <DCCReference Include="Source\Core\Geometry\Shape\ScreenLayoutStrokeOutlineGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\Shape\ScreenLayoutShapeBooleanOperations.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutLayerGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutProjectiveTransform.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutRenderer.pas"/>
         <DCCReference Include="Source\Rendering\Cache\ScreenLayoutCanvasRenderCache.pas"/>
         <DCCReference Include="Source\Rendering\Paint\ScreenLayoutPaintRenderer.pas"/>
+        <DCCReference Include="Source\Rendering\Paint\ScreenLayoutVariableWidthRenderer.pas"/>
+        <DCCReference Include="Source\Rendering\Paint\Stroke\ScreenLayoutStrokeSampling.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutCanvasGuides.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutCanvasPreview.pas"/>
         <DCCReference Include="Source\Rendering\Overlay\ScreenLayoutOverlayPrimitives.pas"/>
@@ -137,6 +142,7 @@
         <DCCReference Include="Source\Core\Commands\ScreenLayoutEditCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\Shape\ScreenLayoutShapeEditCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\Shape\ScreenLayoutShapeBooleanCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\Shape\ScreenLayoutStrokeOutlineCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\Text\ScreenLayoutTextCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\Layer\ScreenLayoutLayerStructureCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\Layer\ScreenLayoutLayerBatchCommands.pas"/>

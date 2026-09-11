@@ -47,8 +47,8 @@ begin
     Toolbar.RefreshState;
 
     PPI := Toolbar.CurrentPPI;
-    ExpectedWidth := MulDiv(270, PPI, 96);
-    ExpectedTrackWidth := Max(ExpectedWidth - MulDiv(176, PPI, 96),
+    ExpectedWidth := MulDiv(350, PPI, 96);
+    ExpectedTrackWidth := Max(ExpectedWidth - MulDiv(256, PPI, 96),
       MulDiv(60, PPI, 96));
     Check(Toolbar.Width = ExpectedWidth, Format(
       'line toolbar width was reset without DPI scaling: PPI=%d Width=%d',
@@ -62,6 +62,13 @@ begin
     Check(Toolbar.StrokeWidthTrackBar.Left +
       Toolbar.StrokeWidthTrackBar.Width <= Toolbar.StrokeWidthEdit.Left,
       'stroke width trackbar overlaps the numeric edit');
+    Check(Toolbar.StrokeWidthModeButton(slwmUniform).Left >=
+      Toolbar.StrokeWidthEdit.Left + Toolbar.StrokeWidthEdit.Width,
+      'uniform-width button overlaps the numeric edit');
+    Check(Toolbar.StrokeWidthModeButton(slwmVariable).Left +
+      Toolbar.StrokeWidthModeButton(slwmVariable).Width <=
+      Toolbar.DetailsButton.Left,
+      'variable-width button overlaps the details button');
     Writeln(Format('PASS line toolbar DPI layout: %d DPI', [PPI]));
   finally
     State.Free;

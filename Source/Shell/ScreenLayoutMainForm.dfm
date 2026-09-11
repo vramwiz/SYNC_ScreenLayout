@@ -6431,7 +6431,7 @@ object MainForm: TMainForm
     Color = 2236962
     ParentBackground = False
     TabOrder = 0
-    ExplicitWidth = 1170
+    ExplicitWidth = 1178
     object lblMenuItems: TLabel
       Left = 0
       Top = 0
@@ -6476,7 +6476,7 @@ object MainForm: TMainForm
     Color = 2631720
     ParentBackground = False
     TabOrder = 1
-    ExplicitWidth = 1170
+    ExplicitWidth = 1178
     object lblShortcutItems: TLabel
       Left = 0
       Top = 0
@@ -6505,8 +6505,8 @@ object MainForm: TMainForm
     Color = 2236962
     ParentBackground = False
     TabOrder = 2
-    ExplicitTop = 664
-    ExplicitWidth = 1170
+    ExplicitTop = 688
+    ExplicitWidth = 1178
     object lblStatus: TLabel
       Left = 0
       Top = 0
@@ -6535,8 +6535,8 @@ object MainForm: TMainForm
     Color = 1710618
     ParentBackground = False
     TabOrder = 3
-    ExplicitWidth = 1170
-    ExplicitHeight = 592
+    ExplicitWidth = 1178
+    ExplicitHeight = 616
     object splLeftRegion: TSplitter
       Left = 286
       Top = 0
@@ -6564,7 +6564,7 @@ object MainForm: TMainForm
       Color = 2171169
       ParentBackground = False
       TabOrder = 0
-      ExplicitHeight = 592
+      ExplicitHeight = 616
     end
     object pnlRightDockArea: TPanel
       Left = 890
@@ -6576,8 +6576,8 @@ object MainForm: TMainForm
       Color = 2171169
       ParentBackground = False
       TabOrder = 1
-      ExplicitLeft = 880
-      ExplicitHeight = 592
+      ExplicitLeft = 888
+      ExplicitHeight = 616
     end
     object pnlEditorHost: TPanel
       Left = 291
@@ -6589,8 +6589,8 @@ object MainForm: TMainForm
       Color = 1184274
       ParentBackground = False
       TabOrder = 2
-      ExplicitWidth = 584
-      ExplicitHeight = 592
+      ExplicitWidth = 592
+      ExplicitHeight = 616
     end
     object pnlLeftDropTarget: TPanel
       Left = 0

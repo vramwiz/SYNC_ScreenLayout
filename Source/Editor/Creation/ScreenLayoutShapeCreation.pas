@@ -23,6 +23,10 @@ type
     FEditHistory: TVectArtEditHistory;
     FModifiers: TShiftState;
     FPathPoints: TArray<TPoint>;
+    FPathPressures: TArray<Single>;
+    FPressureCaptured: Boolean;
+    FInputPressure: Single;
+    FInputPressureAvailable: Boolean;
     FVertexKinds: TArray<TScreenLayoutVertexKind>; // 確定済みPath／Shape頂点の種別。
     FNextVertexKind: TScreenLayoutVertexKind;      // 次のクリックへ適用する種別。
     FStartPoint: TPoint;
@@ -44,6 +48,8 @@ type
     procedure CreateRoundedRectangleLine;
     procedure CreateShape;
     function BuildFreehandPathVertices: TArray<TScreenLayoutVertex>;
+    function BuildFreehandWidthPoints:
+      TArray<TScreenLayoutStrokeWidthPoint>;
     function BuildPathVertices: TArray<TScreenLayoutVertex>;
     function BuildOpenPathPreview(out Points: TArray<TPoint>): Boolean;
     function BuildShapePreview(out Points: TArray<TPoint>): Boolean;
@@ -66,6 +72,8 @@ type
     function FinishPath(Closed: Boolean): Boolean;
     // 作成中のPath／Shapeプレビュー頂点を返す。
     function PreviewPath(out Points: TArray<TPoint>): Boolean;
+    // Returns pressure scales aligned with the current freehand preview points.
+    function PreviewWidthScales: TArray<Single>;
     // ドラッグ作成中の矩形プレビュー範囲を返す。
     function PreviewRect: TRect;
     // 配置中の既定上半円を画面座標の折れ線として返す。
@@ -77,6 +85,8 @@ type
     // Canvasが初回文字入力を完了するまで履歴確定を保留した文字パスを受け取る。
     function TakeCreatedTextPath(out LayerIndex: Integer;
       out BeforeSelection: TArray<Integer>): Boolean;
+    // Supplies the latest pen pressure; unavailable input produces uniform width.
+    procedure SetInputPressure(Value: Single; Available: Boolean);
     property Active: Boolean read FActive;
     property DeferTextPathHistory: Boolean read FDeferTextPathHistory
       write FDeferTextPathHistory;
@@ -96,6 +106,8 @@ const
   MIN_DRAG_SIZE               = 3;
   FREEHAND_SAMPLE_DISTANCE    = 2;   // 入力点を追加する最小画面距離（px）。
   FREEHAND_SIMPLIFY_TOLERANCE = 1.5; // 簡略化で許容する画面距離（px）。
+  FREEHAND_WIDTH_SAMPLE_DISTANCE = 8; // 幅情報を保存する最小画面距離（px）。
+  FREEHAND_WIDTH_CHANGE = 0.025;      // 短い区間でも保持する筆圧変化量。
   PATH_CLOSE_DISTANCE         = 8;
   SHAPE_PREVIEW_CURVE_STEPS   = 16;
 
@@ -139,6 +151,8 @@ begin
   FCreationTool := vetSelect;
   FSnapGuides := nil;
   SetLength(FPathPoints, 0);
+  SetLength(FPathPressures, 0);
+  FPressureCaptured := False;
   SetLength(FVertexKinds, 0);
   FNextVertexKind := slvkSharp;
 end;
@@ -365,6 +379,10 @@ begin
   Data.Vertices[0].Kind := slvkSharp;
   Data.Vertices[1].OutgoingSegment := slskLine;
   Data.Vertices[1].Kind := slvkSharp;
+  if FEditorState.StrokeWidthMode = slwmVariable then
+    Data.WidthPoints := UniformScreenLayoutStrokeWidthPoints
+  else
+    Data.WidthPoints := nil;
   Data.Closed := False;
   Data.Locked := False;
   Data.LineCap := FEditorState.LineCap;
@@ -397,9 +415,25 @@ begin
   if Closed and (Length(FPathPoints) < 3) then
     Closed := False;
   if FCreationTool = vetFreehand then
-    Data.Vertices := BuildFreehandPathVertices
+  begin
+    Data.Vertices := BuildFreehandPathVertices;
+    if FEditorState.StrokeWidthMode = slwmVariable then
+    begin
+      Data.WidthPoints := BuildFreehandWidthPoints;
+      if Length(Data.WidthPoints) = 0 then
+        Data.WidthPoints := UniformScreenLayoutStrokeWidthPoints;
+    end
+    else
+      Data.WidthPoints := nil;
+  end
   else
+  begin
     Data.Vertices := BuildPathVertices;
+    if not Closed and (FEditorState.StrokeWidthMode = slwmVariable) then
+      Data.WidthPoints := UniformScreenLayoutStrokeWidthPoints
+    else
+      Data.WidthPoints := nil;
+  end;
   Data.Closed := Closed;
   Data.LineCap := FEditorState.LineCap;
   Data.Locked := False;
@@ -874,6 +908,8 @@ begin
     FActive := True;
     FCreationTool := vetFreehand;
     FPathPoints := [PointValue];
+    FPathPressures := [EnsureRange(FInputPressure, 0.0, 1.0)];
+    FPressureCaptured := FInputPressureAvailable;
     FVertexKinds := [slvkSharp];
     FCurrentPoint := PointValue;
     FDocument.SetSelectedLayers([]);
@@ -945,6 +981,12 @@ begin
         FCurrentPoint.Y - FPathPoints[High(FPathPoints)].Y) >=
         FREEHAND_SAMPLE_DISTANCE) then
       FPathPoints := FPathPoints + [FCurrentPoint];
+    if Length(FPathPressures) < Length(FPathPoints) then
+    begin
+      FPathPressures := FPathPressures +
+        [EnsureRange(FInputPressure, 0.0, 1.0)];
+      FPressureCaptured := FPressureCaptured or FInputPressureAvailable;
+    end;
     Exit;
   end;
   if (FEditorState <> nil) and
@@ -982,6 +1024,12 @@ begin
         FCurrentPoint.Y - FPathPoints[High(FPathPoints)].Y) >=
         FREEHAND_SAMPLE_DISTANCE) then
       FPathPoints := FPathPoints + [FCurrentPoint];
+    if Length(FPathPressures) < Length(FPathPoints) then
+    begin
+      FPathPressures := FPathPressures +
+        [EnsureRange(FInputPressure, 0.0, 1.0)];
+      FPressureCaptured := FPressureCaptured or FInputPressureAvailable;
+    end;
     CreatePath(False);
     CancelPath;
     Exit(True);
@@ -1034,6 +1082,76 @@ begin
     Result[I].Kind := slvkBezier;
   end;
   ConfigureScreenLayoutOpenPath(Result);
+end;
+
+function TVectArtShapeCreation.BuildFreehandWidthPoints:
+  TArray<TScreenLayoutStrokeWidthPoint>;
+var
+  Cumulative: TArray<Single>;
+  I: Integer;
+  LastSavedDistance: Single;
+  LastSavedPressure: Single;
+  OutputCount: Integer;
+  Pressure: Single;
+  TotalDistance: Single;
+begin
+  Result := nil;
+  if not FPressureCaptured or (Length(FPathPoints) < 2) or
+    (Length(FPathPressures) <> Length(FPathPoints)) then
+    Exit;
+  SetLength(Cumulative, Length(FPathPoints));
+  for I := 1 to High(FPathPoints) do
+    Cumulative[I] := Cumulative[I - 1] + Hypot(
+      FPathPoints[I].X - FPathPoints[I - 1].X,
+      FPathPoints[I].Y - FPathPoints[I - 1].Y);
+  TotalDistance := Cumulative[High(Cumulative)];
+  if TotalDistance <= 0 then
+    Exit;
+  SetLength(Result, Length(FPathPoints));
+  OutputCount := 1;
+  Result[0].Offset := 0;
+  Result[0].LeftScale := EnsureRange(FPathPressures[0], 0.0, 1.0);
+  Result[0].RightScale := Result[0].LeftScale;
+  LastSavedDistance := 0;
+  LastSavedPressure := Result[0].LeftScale;
+  for I := 1 to High(FPathPoints) - 1 do
+  begin
+    Pressure := EnsureRange(FPathPressures[I], 0.0, 1.0);
+    if (Cumulative[I] - LastSavedDistance >=
+      FREEHAND_WIDTH_SAMPLE_DISTANCE) or
+      (Abs(Pressure - LastSavedPressure) >= FREEHAND_WIDTH_CHANGE) then
+    begin
+      Result[OutputCount].Offset := Cumulative[I] / TotalDistance;
+      Result[OutputCount].LeftScale := Pressure;
+      Result[OutputCount].RightScale := Pressure;
+      Inc(OutputCount);
+      LastSavedDistance := Cumulative[I];
+      LastSavedPressure := Pressure;
+    end;
+  end;
+  Result[OutputCount].Offset := 1;
+  Result[OutputCount].LeftScale := EnsureRange(
+    FPathPressures[High(FPathPressures)], 0.0, 1.0);
+  Result[OutputCount].RightScale := Result[OutputCount].LeftScale;
+  Inc(OutputCount);
+  SetLength(Result, OutputCount);
+end;
+
+function TVectArtShapeCreation.PreviewWidthScales: TArray<Single>;
+begin
+  if FActive and (FCreationTool = vetFreehand) and FPressureCaptured and
+    (FEditorState <> nil) and
+    (FEditorState.StrokeWidthMode = slwmVariable) then
+    Result := Copy(FPathPressures)
+  else
+    Result := nil;
+end;
+
+procedure TVectArtShapeCreation.SetInputPressure(Value: Single;
+  Available: Boolean);
+begin
+  FInputPressure := EnsureRange(Value, 0.0, 1.0);
+  FInputPressureAvailable := Available;
 end;
 
 function TVectArtShapeCreation.FinishPath(Closed: Boolean): Boolean;
