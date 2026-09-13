@@ -67,6 +67,7 @@ type
     FTextEnding: Boolean;
     FTextGuideBounds: TRectF;
     FTextLayerIndex: Integer;
+    FTextLayer: TScreenLayoutTextLayer; // 編集中のトップレベルまたは開いたグループ内文字。所有しない。
     FTextInputOutlineColor: TColor;
     FTextAutoExpandWidth: Boolean;
     FTextNewLayer: Boolean;
@@ -98,6 +99,9 @@ type
     procedure UpdateRenderedDocument;
     procedure SetEditHistory(const Value: TVectArtEditHistory);
     procedure BeginExistingTextEdit(Index: Integer);
+    procedure BeginExistingTextLayerEdit(Layer: TScreenLayoutTextLayer;
+      Index: Integer);
+    function EditingTextLayer: TScreenLayoutTextLayer;
     procedure BeginCreatedTextPathEdit;
     procedure BeginNewTextEdit(const GuideBounds: TRectF;
       AutoExpandWidth: Boolean);
@@ -336,8 +340,13 @@ begin
   else
     Data.PaintStyle := TScreenLayoutPaintStyle.Solid(Data.TextColor);
   Data.Visible := True;
-  Data.WrapWidth := Max(GuideBounds.Width, 1.0);
+  // クリック配置は幅0を「折り返しなし」として保持し、ドラッグ指定時だけ固定幅を使う。
+  if AutoExpandWidth then
+    Data.WrapWidth := 0
+  else
+    Data.WrapWidth := Max(GuideBounds.Width, 1.0);
   FTextLayerIndex := FDocument.InsertText(FDocument.LayerCount, Data);
+  FTextLayer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
   FDocument.SetSelectedLayers([FTextLayerIndex]);
   FTextGuideBounds := GuideBounds;
   FTextAutoExpandWidth := AutoExpandWidth;
@@ -376,9 +385,23 @@ begin
   if FTextEditing then
     FinishTextEdit(False);
   Layer := TScreenLayoutTextLayer(FDocument[Index]);
+  BeginExistingTextLayerEdit(Layer, Index);
+end;
+
+procedure TVectArtCanvasControl.BeginExistingTextLayerEdit(
+  Layer: TScreenLayoutTextLayer; Index: Integer);
+begin
+  if (FDocument = nil) or (Layer = nil) or Layer.Locked then
+    Exit;
+  if FTextEditing then
+    FinishTextEdit(False);
   FTextBeforeSelection := FDocument.GetSelectedLayerIndices;
-  FDocument.SetSelectedLayers([Index]);
+  if Index > 0 then
+    FDocument.SetSelectedLayers([Index])
+  else
+    FDocument.SetSelectedLayers([]);
   FTextLayerIndex := Index;
+  FTextLayer := Layer;
   FTextOriginalData := CaptureScreenLayoutTextData(Layer);
   FTextGuideBounds := TRectF.Create(Layer.Bounds.Left, Layer.Bounds.Top,
     Layer.Bounds.Left + Max(Layer.WrapWidth, Layer.Bounds.Width),
@@ -407,6 +430,14 @@ begin
   RestoreWindowsIme(FTextEditor.Handle, FImeState);
 end;
 
+function TVectArtCanvasControl.EditingTextLayer: TScreenLayoutTextLayer;
+begin
+  if FTextEditing then
+    Result := FTextLayer
+  else
+    Result := nil;
+end;
+
 procedure TVectArtCanvasControl.BeginNewTextPathEdit(Index: Integer;
   const BeforeSelection: TArray<Integer>);
 var
@@ -420,6 +451,7 @@ begin
   FTextBeforeSelection := Copy(BeforeSelection);
   FDocument.SetSelectedLayers([Index]);
   FTextLayerIndex := Index;
+  FTextLayer := Layer;
   FTextGuideBounds := TRectF.Create(Layer.Bounds.Left, Layer.Bounds.Top,
     Layer.Bounds.Left + Max(Layer.WrapWidth, Layer.Bounds.Width),
     Layer.Bounds.Top + Max(Layer.Bounds.Height, DEFAULT_TEXT_GUIDE_HEIGHT));
@@ -484,10 +516,7 @@ function TVectArtCanvasControl.TextEditOverlayState:
   TScreenLayoutTextEditOverlayState;
 begin
   Result := Default(TScreenLayoutTextEditOverlayState);
-  if FTextEditing and (FDocument <> nil) and
-    (FTextLayerIndex > 0) and (FTextLayerIndex < FDocument.LayerCount) and
-    (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
-    Result.Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
+  Result.Layer := EditingTextLayer;
   Result.Text := FTextBuffer;
   Result.CaretIndex := FTextCaretIndex;
   Result.SelectionAnchor := FTextSelectionAnchor;
@@ -673,12 +702,9 @@ begin
   try
     SuspendWindowsIme(FTextEditor.Handle, FImeState);
     FTextEditor.Visible := False;
-    if (FDocument <> nil) and (FTextLayerIndex > 0) and
-      (FTextLayerIndex < FDocument.LayerCount) and
-      (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
+    if (FDocument <> nil) and (EditingTextLayer <> nil) then
     begin
-      CurrentData := CaptureScreenLayoutTextData(
-        TScreenLayoutTextLayer(FDocument[FTextLayerIndex]));
+      CurrentData := CaptureScreenLayoutTextData(EditingTextLayer);
       if FTextNewLayer then
       begin
         if Cancel or (CurrentData.Text = '') then
@@ -706,9 +732,9 @@ begin
               FTextBeforeSelection, AfterSelection));
         end;
       end
-      else if Cancel then
+      else if (FTextLayerIndex > 0) and Cancel then
         FDocument.SetTextData(FTextLayerIndex, FTextOriginalData)
-      else if CurrentData.Text = '' then
+      else if (FTextLayerIndex > 0) and (CurrentData.Text = '') then
       begin
         FDocument.RemoveText(FTextLayerIndex, RemovedData);
         AfterSelection := FDocument.GetSelectedLayerIndices;
@@ -717,12 +743,21 @@ begin
             FDocument, FTextLayerIndex, FTextOriginalData,
             FTextBeforeSelection, AfterSelection));
       end
+      else if FTextLayerIndex > 0 then
+      begin
+        if EditHistory <> nil then
+          EditHistory.AddApplied(TScreenLayoutTextDataCommand.Create(FDocument,
+            FTextLayerIndex, FTextOriginalData, CurrentData));
+      end
+      else if Cancel then
+        FDocument.SetTextLayerData(EditingTextLayer, FTextOriginalData)
       else if EditHistory <> nil then
-        EditHistory.AddApplied(TScreenLayoutTextDataCommand.Create(FDocument,
-          FTextLayerIndex, FTextOriginalData, CurrentData));
+        EditHistory.AddApplied(TScreenLayoutTextDataCommand.CreateForLayer(
+          FDocument, EditingTextLayer, FTextOriginalData, CurrentData));
     end;
     FTextEditing := False;
     FTextLayerIndex := -1;
+    FTextLayer := nil;
     FTextNewLayer := False;
     FTextNewPathLayer := False;
     FTextAutoExpandWidth := False;
@@ -767,9 +802,7 @@ begin
   FTextCompositionCursor := 0;
   FTextCompositionText := '';
   InputText := Text;
-  if (FDocument <> nil) and (FTextLayerIndex > 0) and
-    (FTextLayerIndex < FDocument.LayerCount) and
-    (FDocument[FTextLayerIndex] is TScreenLayoutTextPathLayer) then
+  if EditingTextLayer is TScreenLayoutTextPathLayer then
     InputText := NormalizeScreenLayoutTextPathText(InputText);
   InsertScreenLayoutTextAtCaret(FTextBuffer, FTextCaretIndex,
     FTextSelectionAnchor, FTextPreferredCaretX, InputText);
@@ -805,7 +838,9 @@ var
   Layer: TScreenLayoutTextLayer;
   TargetLine: Integer;
 begin
-  Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
+  Layer := EditingTextLayer;
+  if Layer = nil then
+    Exit;
   CaretLines := BuildScreenLayoutTextCaretLines(FTextBuffer,
     Layer.FontFamily, Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
     Layer.LetterSpacingRatio, Layer.LineSpacingRatio);
@@ -853,11 +888,9 @@ var
   TargetX: Single;
   TargetY: Single;
 begin
-  if not FTextEditing or (FDocument = nil) or
-    (FTextLayerIndex <= 0) or (FTextLayerIndex >= FDocument.LayerCount) or
-    not (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
+  Layer := EditingTextLayer;
+  if (Layer = nil) or (FDocument = nil) then
     Exit;
-  Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
   LogicalPoint := TPointF.Create(
     ScreenToLogicalX(X, FCanvasBounds, FZoom,
       FDocument.CanvasLayer.Width),
@@ -926,15 +959,13 @@ var
   SelectionEnd: Integer;
   SelectionStart: Integer;
 begin
-  if (FDocument = nil) or (FTextLayerIndex <= 0) or
-    (FTextLayerIndex >= FDocument.LayerCount) or
-    not (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
+  Layer := EditingTextLayer;
+  if (FDocument = nil) or (Layer = nil) then
     Exit;
   // 変換確定のEnterなどはIME自身へ渡す。ここで編集キーとして扱うと、
   // 漢字変換の確定と同時にDocumentへ改行が挿入される。
   if FTextCompositionActive then
     Exit;
-  Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
   ExtendSelection := ssShift in Shift;
   if ssCtrl in Shift then
   begin
@@ -1215,11 +1246,9 @@ var
   ScaleY: Single;
   ScreenPoint: TPoint;
 begin
-  if not FTextEditing or (FDocument = nil) or
-    (FTextLayerIndex <= 0) or (FTextLayerIndex >= FDocument.LayerCount) or
-    not (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
+  Layer := EditingTextLayer;
+  if (Layer = nil) or (FDocument = nil) then
     Exit;
-  Layer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
   IndividualLetterSpacingRatios := Layer.IndividualLetterSpacingRatios;
   FullLayout := BuildScreenLayoutTextLayout(FTextBuffer, Layer.FontFamily,
     Layer.FontSize, Layer.WrapWidth, Layer.FontStyle,
@@ -1288,24 +1317,22 @@ var
   Data: TScreenLayoutTextData;
   Layout: TScreenLayoutTextLayout;
 begin
-  if not FTextEditing or (FDocument = nil) or
-    (FTextLayerIndex <= 0) or (FTextLayerIndex >= FDocument.LayerCount) or
-    not (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
+  if (EditingTextLayer = nil) or (FDocument = nil) then
     Exit;
-  Data := CaptureScreenLayoutTextData(
-    TScreenLayoutTextLayer(FDocument[FTextLayerIndex]));
+  Data := CaptureScreenLayoutTextData(EditingTextLayer);
   if Data.Text <> FTextBuffer then
     SetLength(Data.IndividualLetterSpacingRatios, 0);
   Data.Text := FTextBuffer;
   if FTextNewLayer and not FTextNewPathLayer then
   begin
-    if FTextAutoExpandWidth then
+    // WrapWidth=0も自動幅の永続的な印として扱い、通知中のUI再同期で入力状態が変わっても固定幅へ戻さない。
+    if FTextAutoExpandWidth or (Data.WrapWidth <= 0) then
     begin
       Layout := BuildScreenLayoutTextLayout(Data.Text, Data.FontFamily,
         Data.FontSize, 0, Data.FontStyle, Data.LetterSpacingRatio,
         Data.LineSpacingRatio);
-      Data.WrapWidth := Max(FTextGuideBounds.Width, Layout.Width);
-      FTextGuideBounds.Right := FTextGuideBounds.Left + Data.WrapWidth;
+      Data.WrapWidth := 0;
+      FTextGuideBounds.Right := FTextGuideBounds.Left + Max(Layout.Width, 1.0);
     end
     else
       Data.WrapWidth := Max(FTextGuideBounds.Width, 1.0);
@@ -1316,7 +1343,7 @@ begin
       FTextGuideBounds.Left + Max(Layout.Width, 1.0),
       FTextGuideBounds.Top + Max(Layout.Height, Data.FontSize));
   end;
-  FDocument.SetTextData(FTextLayerIndex, Data);
+  FDocument.SetTextLayerData(EditingTextLayer, Data);
   UpdateTextEditorBounds;
   Invalidate;
 end;
@@ -1725,8 +1752,16 @@ begin
     begin
       CalculateCanvasBounds;
       ConfigureInteraction;
+      if (FTextLayerIndex < 0) and (FEditorState <> nil) and
+        (FEditorState.OpenGroup <> nil) and
+        TryClientPointToLogical(Point(X, Y), LogicalPoint) and
+        (HitTestGroupChild(FEditorState.OpenGroup, LogicalPoint) = FTextLayer) then
+      begin
+        SetTextCaretFromClientPoint(X, Y, ssShift in Shift);
+        Exit;
+      end;
       TextLayerIndex := FInteraction.LayerAt(X, Y);
-      if TextLayerIndex = FTextLayerIndex then
+      if (FTextLayerIndex > 0) and (TextLayerIndex = FTextLayerIndex) then
       begin
         SetTextCaretFromClientPoint(X, Y, ssShift in Shift);
         Exit;
@@ -1854,6 +1889,21 @@ begin
         else
           FEditorState.OpenGroup := TScreenLayoutGroupLayer(
             FDocument[LayerIndex]);
+        Invalidate;
+        Exit;
+      end;
+    end;
+    if (FEditorState <> nil) and (FEditorState.CurrentTool = vetText) and
+      (FEditorState.OpenGroup <> nil) and
+      TryClientPointToLogical(Point(X, Y), LogicalPoint) then
+    begin
+      GroupChild := HitTestGroupChild(FEditorState.OpenGroup, LogicalPoint);
+      if (GroupChild is TScreenLayoutTextLayer) and not GroupChild.Locked then
+      begin
+        FEditorState.OpenGroupChild := GroupChild;
+        BeginExistingTextLayerEdit(TScreenLayoutTextLayer(GroupChild), -1);
+        SetTextCaretFromClientPoint(X, Y, ssShift in Shift);
+        Cursor := crIBeam;
         Invalidate;
         Exit;
       end;
@@ -2163,7 +2213,9 @@ begin
     GuideRect := TRect.Create(Min(FTextDragStart.X, X),
       Min(FTextDragStart.Y, Y), Max(FTextDragStart.X, X),
       Max(FTextDragStart.Y, Y));
-    AutoExpandWidth := (GuideRect.Width < 4) or (GuideRect.Height < 4);
+    // TRectの正規化やキャンバスとの交差結果ではなく、実際のドラッグ距離でクリック配置を判定する。
+    AutoExpandWidth := (Abs(X - FTextDragStart.X) < 4) and
+      (Abs(Y - FTextDragStart.Y) < 4);
     if AutoExpandWidth then
       GuideRect := TRect.Create(FTextDragStart.X, FTextDragStart.Y,
         FTextDragStart.X + Round(DEFAULT_TEXT_GUIDE_WIDTH * FZoom),
@@ -2257,10 +2309,8 @@ begin
   if ENABLE_THIN_STROKE_PREVIEW and (FZoom > 0) then
     PreviewStrokeWidth := MIN_PREVIEW_STROKE_WIDTH_PIXELS / FZoom;
   InputTextLayer := nil;
-  if FTextEditing and (FTextLayerIndex > 0) and
-    (FTextLayerIndex < FDocument.LayerCount) and
-    (FDocument[FTextLayerIndex] is TScreenLayoutTextLayer) then
-    InputTextLayer := TScreenLayoutTextLayer(FDocument[FTextLayerIndex]);
+  if FTextEditing then
+    InputTextLayer := EditingTextLayer;
   FRenderCache.Update(FDocument, Width, Height, PreviewStrokeWidth,
     InputTextLayer, FTextInputOutlineColor, FZoomPreviewActive,
     FInteraction.Moving or FTransformInteraction.Moving);

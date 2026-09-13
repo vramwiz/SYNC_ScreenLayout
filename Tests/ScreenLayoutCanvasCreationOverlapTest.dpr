@@ -105,6 +105,7 @@ var
   EditorState: TVectArtEditorState;
   Form: TForm;
   Group: TScreenLayoutGroupLayer;
+  GroupText: TScreenLayoutTextLayer;
   Harness: TDocumentRefreshHarness;
   History: TVectArtEditHistory;
   I: Integer;
@@ -113,6 +114,7 @@ var
   PropertiesFrame: TObjectPropertiesFrame;
   ResizedBounds: TRectF;
   ResizedWrapWidth: Single;
+  TextBeforeEdit: string;
 begin
   Document := TVectArtDocument.Create;
   EditorState := TVectArtEditorState.Create;
@@ -254,6 +256,35 @@ begin
       TScreenLayoutTextLayer(Document[NewTextIndex]).LineSpacingRatio);
     Check(Length(Layout.Lines) = 1,
       'click-created text wrapped at its initial guide width');
+    CanvasControl.ClickAt(Point(CanvasControl.CanvasBounds.Left + 5,
+      CanvasControl.CanvasBounds.Top + 5));
+
+    GroupText := TScreenLayoutTextLayer.Create('Grouped text',
+      TRectF.Create(-80, -80, -20, -45), 'group', 'Segoe UI', 20, 0,
+      clWhite);
+    Group.AddChild(GroupText);
+    Document.Changed;
+    EditorState.OpenGroup := Group;
+    EditorState.OpenGroupChild := GroupText;
+    EditorState.CurrentTool := vetText;
+    TextBeforeEdit := GroupText.Text;
+    CanvasControl.ClickAt(Point(
+      (CanvasControl.CanvasBounds.Left + CanvasControl.CanvasBounds.Right) div 2 - 50,
+      (CanvasControl.CanvasBounds.Top + CanvasControl.CanvasBounds.Bottom) div 2 - 60));
+    Check(CanvasControl.TextEditing,
+      'text tool did not open grouped text for editing');
+    SendMessage(Form.ActiveControl.Handle, WM_CHAR, Ord('X'), 0);
+    Application.ProcessMessages;
+    Check(GroupText.Text <> TextBeforeEdit,
+      'grouped text input was not applied');
+    CanvasControl.ClickAt(Point(CanvasControl.CanvasBounds.Right - 5,
+      CanvasControl.CanvasBounds.Bottom - 5));
+    History.Undo;
+    Check(GroupText.Text = TextBeforeEdit,
+      'grouped text edit undo did not restore the text');
+    History.Redo;
+    Check(GroupText.Text <> TextBeforeEdit,
+      'grouped text edit redo did not restore the input');
   finally
     Document.OnChanged := nil;
     PropertiesFrame.Context := nil;

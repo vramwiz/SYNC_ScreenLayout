@@ -66,6 +66,11 @@ type
     function SelectedTextPathIndices: TArray<Integer>;
     function SelectionHasLockedLine: Boolean;
     function SelectionHasLockedText: Boolean;
+    // 正の値はDocument直下、負の値は開いたグループ内の子位置として対象を返す。
+    function SelectionLayer(Token: Integer): TVectArtLayer;
+    function SelectionLayers(const Tokens: TArray<Integer>): TArray<TVectArtLayer>;
+    function SelectionTextLayers(const Tokens: TArray<Integer>):
+      TArray<TScreenLayoutTextLayer>;
     procedure StyleChanged(Sender: TObject);
     procedure TrackBarChanged(Sender: TObject);
     procedure TrackBarMouseDown(Sender: TObject; Button: TMouseButton;
@@ -452,7 +457,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    ApplyScreenLayoutToolbarFontStyle(FDocument, FEditHistory, Indices,
+    ApplyScreenLayoutToolbarFontStyle(FDocument, FEditHistory,
+      SelectionTextLayers(Indices),
       Style, Enabled);
   finally
     FUpdating := False;
@@ -472,7 +478,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    ApplyScreenLayoutToolbarTextAlignment(FDocument, FEditHistory, Indices,
+    ApplyScreenLayoutToolbarTextAlignment(FDocument, FEditHistory,
+      SelectionTextLayers(Indices),
       Value);
   finally
     FUpdating := False;
@@ -493,7 +500,7 @@ begin
   FUpdating := True;
   try
     ApplyScreenLayoutToolbarTextPathAttachment(FDocument, FEditHistory,
-      Indices, Value);
+      SelectionTextLayers(Indices), Value);
   finally
     FUpdating := False;
   end;
@@ -512,7 +519,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    ApplyScreenLayoutToolbarTextSpacing(FDocument, FEditHistory, Indices,
+    ApplyScreenLayoutToolbarTextSpacing(FDocument, FEditHistory,
+      SelectionTextLayers(Indices),
       IsLetterSpacing, Ratio);
   finally
     FUpdating := False;
@@ -531,7 +539,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    ApplyScreenLayoutToolbarFontFamily(FDocument, FEditHistory, Indices,
+    ApplyScreenLayoutToolbarFontFamily(FDocument, FEditHistory,
+      SelectionTextLayers(Indices),
       Value);
   finally
     FUpdating := False;
@@ -550,7 +559,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    ApplyScreenLayoutToolbarLineCap(FDocument, FEditHistory, Indices, Value);
+    ApplyScreenLayoutToolbarLineCap(FDocument, FEditHistory,
+      SelectionLayers(Indices), Value);
     if FEditorState <> nil then
       FEditorState.LineCap := Value;
   finally
@@ -571,7 +581,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    ApplyScreenLayoutToolbarLineStyle(FDocument, FEditHistory, Indices,
+    ApplyScreenLayoutToolbarLineStyle(FDocument, FEditHistory,
+      SelectionLayers(Indices),
       Value);
     if FEditorState <> nil then
       FEditorState.LineMifStrokeStyle := Value;
@@ -598,7 +609,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    ApplyScreenLayoutToolbarWidthMode(FDocument, FEditHistory, Indices,
+    ApplyScreenLayoutToolbarWidthMode(FDocument, FEditHistory,
+      SelectionLayers(Indices),
       Value);
     if FEditorState <> nil then
       FEditorState.StrokeWidthMode := Value;
@@ -621,7 +633,8 @@ begin
     Exit;
   FUpdating := True;
   try
-    ApplyScreenLayoutToolbarLineWidth(FDocument, FEditHistory, Indices,
+    ApplyScreenLayoutToolbarLineWidth(FDocument, FEditHistory,
+      SelectionLayers(Indices),
       Value, RecordHistory);
     if (FEditorState <> nil) and
       (RecordHistory or (Length(Indices) = 0)) then
@@ -635,51 +648,22 @@ end;
 procedure TVectArtLineToolbarControl.CommitTrackGesture;
 var
   Color: TColor;
-  Command: TVectArtCompoundCommand;
   FinalWidth: Single;
   HasFinalWidth: Boolean;
-  I: Integer;
-  Index: Integer;
   Indices: TArray<Integer>;
-  Layer: TVectArtLayer;
   LineCap: TVectArtLineCap;
   Style: TVectArtMifStrokeStyle;
-  Width: Single;
 begin
   if not FTrackGestureActive then
     Exit;
   FinalWidth := 0;
   FTrackGestureActive := False;
-  Command := nil;
-  if FEditHistory <> nil then
-    Command := TVectArtCompoundCommand.Create;
-  if Command <> nil then
-    for I := 0 to Min(High(FTrackStartIndices),
-      High(FTrackStartWidths)) do
-    begin
-      Index := FTrackStartIndices[I];
-      if (FDocument = nil) or not InRange(Index, 0,
-        FDocument.LayerCount - 1) or
-        not ((FDocument[Index] is TScreenLayoutRectangleLineLayer) or
-          (FDocument[Index] is TScreenLayoutArcLayer) or
-          ((FDocument[Index] is TVectArtPathLayer) and
-           not TVectArtPathLayer(FDocument[Index]).Closed)) then
-        Continue;
-      Layer := FDocument[Index];
-      TryReadScreenLayoutToolbarLine(Layer, Color, Width, Style, LineCap);
-      if SameValue(FTrackStartWidths[I], Width) then
-        Continue;
-      Command.Add(TVectArtStrokeCommand.Create(FDocument, Index,
-        Color, FTrackStartWidths[I], Style, Color, Width, Style));
-    end;
-  if (Command <> nil) and (Command.Count > 0) then
-    FEditHistory.AddApplied(Command)
-  else
-    Command.Free;
+  RecordScreenLayoutToolbarLineWidths(FDocument, FEditHistory,
+    SelectionLayers(FTrackStartIndices), FTrackStartWidths);
   Indices := SelectedLineIndices;
   HasFinalWidth := (FDocument <> nil) and (Length(Indices) > 0);
   if HasFinalWidth then
-    TryReadScreenLayoutToolbarLine(FDocument[Indices[0]], Color, FinalWidth,
+    TryReadScreenLayoutToolbarLine(SelectionLayer(Indices[0]), Color, FinalWidth,
       Style, LineCap);
   FTrackStartIndices := nil;
   FTrackStartWidths := nil;
@@ -979,7 +963,7 @@ begin
       AllRegularTexts := True;
       for I := 0 to High(TextIndices) do
         AllRegularTexts := AllRegularTexts and
-          not (FDocument[TextIndices[I]] is TScreenLayoutTextPathLayer);
+          not (SelectionLayer(TextIndices[I]) is TScreenLayoutTextPathLayer);
       Width := MulDiv(TEXT_TOOLBAR_WIDTH, CurrentPPI, 96);
       Visible := True;
       FDetailsPanel.Visible := False;
@@ -999,12 +983,12 @@ begin
       for Style := Low(TFontStyle) to High(TFontStyle) do
         FFontStyleButtons[Style].Visible := True;
       FontFamilyValue := TScreenLayoutTextLayer(
-        FDocument[TextIndices[0]]).FontFamily;
+        SelectionLayer(TextIndices[0])).FontFamily;
       CommonFontFamily := True;
       for I := 1 to High(TextIndices) do
       begin
         CommonFontFamily := CommonFontFamily and SameText(FontFamilyValue,
-          TScreenLayoutTextLayer(FDocument[TextIndices[I]]).FontFamily);
+          TScreenLayoutTextLayer(SelectionLayer(TextIndices[I])).FontFamily);
       end;
       if CommonFontFamily then
         FFontFamilyCombo.ItemIndex :=
@@ -1015,12 +999,12 @@ begin
       if AllRegularTexts then
       begin
         AlignmentValue := TScreenLayoutTextLayer(
-          FDocument[TextIndices[0]]).Alignment;
+          SelectionLayer(TextIndices[0])).Alignment;
         CommonAlignment := True;
         for I := 1 to High(TextIndices) do
           CommonAlignment := CommonAlignment and
             (AlignmentValue = TScreenLayoutTextLayer(
-              FDocument[TextIndices[I]]).Alignment);
+              SelectionLayer(TextIndices[I])).Alignment);
         FTextAlignmentButton.Enabled := not SelectionHasLockedText;
         FTextAlignmentButton.Mixed := not CommonAlignment;
         if CommonAlignment then
@@ -1038,12 +1022,12 @@ begin
       if AllTextPaths then
       begin
         AttachmentValue := TScreenLayoutTextPathLayer(
-          FDocument[TextPathIndices[0]]).Attachment;
+          SelectionLayer(TextPathIndices[0])).Attachment;
         CommonAttachment := True;
         for I := 1 to High(TextPathIndices) do
           CommonAttachment := CommonAttachment and
             (AttachmentValue = TScreenLayoutTextPathLayer(
-              FDocument[TextPathIndices[I]]).Attachment);
+              SelectionLayer(TextPathIndices[I])).Attachment);
         FTextPathAttachmentButton.Enabled := not SelectionHasLockedText;
         FTextPathAttachmentButton.Mixed := not CommonAttachment;
         if CommonAttachment then
@@ -1064,7 +1048,7 @@ begin
           FFontStyleButtons[Style].Selected :=
             FFontStyleButtons[Style].Selected and
             (Style in TScreenLayoutTextLayer(
-              FDocument[TextIndices[I]]).FontStyle);
+              SelectionLayer(TextIndices[I])).FontStyle);
         FFontStyleButtons[Style].Enabled := not SelectionHasLockedText;
       end;
     end
@@ -1091,7 +1075,7 @@ begin
       if Length(Indices) > 0 then
       begin
         Visible := True;
-        Layer := FDocument[Indices[0]];
+        Layer := SelectionLayer(Indices[0]);
         TryReadScreenLayoutToolbarLine(Layer, Color, WidthValue, StyleValue,
           LineCapValue);
         CommonWidth := True;
@@ -1100,7 +1084,7 @@ begin
         SupportsLineCap := not (Layer is TScreenLayoutRectangleLineLayer);
         for I := 1 to High(Indices) do
         begin
-          Layer := FDocument[Indices[I]];
+          Layer := SelectionLayer(Indices[I]);
           SupportsLineCap := SupportsLineCap and
             not (Layer is TScreenLayoutRectangleLineLayer);
           TryReadScreenLayoutToolbarLine(Layer, Color, CurrentWidth, CurrentStyle,
@@ -1143,14 +1127,14 @@ begin
           if SupportsWidthMode then
           begin
             if Length(TVectArtPathLayer(
-              FDocument[PathIndices[0]]).WidthPoints) > 0 then
+              SelectionLayer(PathIndices[0])).WidthPoints) > 0 then
               WidthModeValue := slwmVariable
             else
               WidthModeValue := slwmUniform;
             for I := 1 to High(PathIndices) do
             begin
               if Length(TVectArtPathLayer(
-                FDocument[PathIndices[I]]).WidthPoints) > 0 then
+                SelectionLayer(PathIndices[I])).WidthPoints) > 0 then
                 CurrentWidthMode := slwmVariable
               else
                 CurrentWidthMode := slwmUniform;
@@ -1270,6 +1254,18 @@ var
   Selection: TArray<Integer>;
 begin
   Result := nil;
+  if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
+    (FEditorState.OpenGroupChildCount > 0) then
+  begin
+    for I := 0 to FEditorState.OpenGroup.ChildCount - 1 do
+      if FEditorState.IsOpenGroupChildSelected(FEditorState.OpenGroup[I]) then
+      begin
+        if not (FEditorState.OpenGroup[I] is TScreenLayoutTextLayer) then
+          Exit(nil);
+        Result := Result + [-(I + 1)];
+      end;
+    Exit;
+  end;
   if (FDocument = nil) or (FDocument.SelectionCount = 0) then
     Exit;
   Selection := FDocument.GetSelectedLayerIndices;
@@ -1286,6 +1282,18 @@ var
   Selection: TArray<Integer>;
 begin
   Result := nil;
+  if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
+    (FEditorState.OpenGroupChildCount > 0) then
+  begin
+    for I := 0 to FEditorState.OpenGroup.ChildCount - 1 do
+      if FEditorState.IsOpenGroupChildSelected(FEditorState.OpenGroup[I]) then
+      begin
+        if not (FEditorState.OpenGroup[I] is TScreenLayoutTextPathLayer) then
+          Exit(nil);
+        Result := Result + [-(I + 1)];
+      end;
+    Exit;
+  end;
   if (FDocument = nil) or (FDocument.SelectionCount = 0) then
     Exit;
   Selection := FDocument.GetSelectedLayerIndices;
@@ -1301,6 +1309,21 @@ var
   Selection: TArray<Integer>;
 begin
   Result := nil;
+  if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
+    (FEditorState.OpenGroupChildCount > 0) then
+  begin
+    for I := 0 to FEditorState.OpenGroup.ChildCount - 1 do
+      if FEditorState.IsOpenGroupChildSelected(FEditorState.OpenGroup[I]) then
+      begin
+        if not ((FEditorState.OpenGroup[I] is TScreenLayoutRectangleLineLayer) or
+          (FEditorState.OpenGroup[I] is TScreenLayoutArcLayer) or
+          ((FEditorState.OpenGroup[I] is TVectArtPathLayer) and
+           not TVectArtPathLayer(FEditorState.OpenGroup[I]).Closed)) then
+          Exit(nil);
+        Result := Result + [-(I + 1)];
+      end;
+    Exit;
+  end;
   if (FDocument = nil) or (FDocument.SelectionCount = 0) then
     Exit;
   Selection := FDocument.GetSelectedLayerIndices;
@@ -1325,7 +1348,7 @@ begin
     Exit;
   LineIndices := SelectedLineIndices;
   for I := 0 to High(LineIndices) do
-    if FDocument[LineIndices[I]] is TVectArtPathLayer then
+    if SelectionLayer(LineIndices[I]) is TVectArtPathLayer then
       Indices := Indices + [LineIndices[I]];
   Result := Indices;
 end;
@@ -1338,7 +1361,7 @@ begin
   Result := False;
   Indices := SelectedLineIndices;
   for I := 0 to High(Indices) do
-    if FDocument[Indices[I]].Locked then
+    if SelectionLayer(Indices[I]).Locked then
       Exit(True);
 end;
 
@@ -1350,8 +1373,40 @@ begin
   Result := False;
   Indices := SelectedTextIndices;
   for I := 0 to High(Indices) do
-    if FDocument[Indices[I]].Locked then
+    if SelectionLayer(Indices[I]).Locked then
       Exit(True);
+end;
+
+function TVectArtLineToolbarControl.SelectionLayer(Token: Integer): TVectArtLayer;
+begin
+  Result := nil;
+  if (Token >= 0) and (FDocument <> nil) and
+    (Token < FDocument.LayerCount) then
+    Exit(FDocument[Token]);
+  if (Token < 0) and (FEditorState <> nil) and
+    (FEditorState.OpenGroup <> nil) and
+    (-Token - 1 < FEditorState.OpenGroup.ChildCount) then
+    Result := FEditorState.OpenGroup[-Token - 1];
+end;
+
+function TVectArtLineToolbarControl.SelectionLayers(
+  const Tokens: TArray<Integer>): TArray<TVectArtLayer>;
+var
+  I: Integer;
+begin
+  SetLength(Result, Length(Tokens));
+  for I := 0 to High(Tokens) do
+    Result[I] := SelectionLayer(Tokens[I]);
+end;
+
+function TVectArtLineToolbarControl.SelectionTextLayers(
+  const Tokens: TArray<Integer>): TArray<TScreenLayoutTextLayer>;
+var
+  I: Integer;
+begin
+  SetLength(Result, Length(Tokens));
+  for I := 0 to High(Tokens) do
+    Result[I] := TScreenLayoutTextLayer(SelectionLayer(Tokens[I]));
 end;
 
 procedure TVectArtLineToolbarControl.StyleChanged(Sender: TObject);
@@ -1393,7 +1448,7 @@ begin
   FTrackStartIndices := SelectedLineIndices;
   SetLength(FTrackStartWidths, Length(FTrackStartIndices));
   for I := 0 to High(FTrackStartIndices) do
-    TryReadScreenLayoutToolbarLine(FDocument[FTrackStartIndices[I]], Color,
+    TryReadScreenLayoutToolbarLine(SelectionLayer(FTrackStartIndices[I]), Color,
       FTrackStartWidths[I], Style, LineCap);
   if (Length(FTrackStartIndices) > 0) and (FDocument <> nil) then
   begin

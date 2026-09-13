@@ -17,7 +17,7 @@ type
     DrawFrame: Boolean;                          // 選択枠本体を描画する場合にTrue。
     FrameRect: TRect;                            // 回転しない選択枠の画面範囲。
     FramePoints: array[0..4] of TPoint;           // 閉じた回転選択枠の5点。
-    Handles: array[vshTopLeft..vshLeft] of TRect; // 8方向のリサイズ当たり判定範囲。
+    Handles: array[vshTopLeft..vshLeft] of TRect; // 8方向リサイズハンドルの描画範囲。
     PrimaryRotationHandle: TRect;                // 上辺中央の回転マーク範囲。
     RotationStem: array[0..1] of TPoint;          // 選択枠から回転マークへ結ぶ線分。
   end;
@@ -61,6 +61,7 @@ const
   PRIMARY_ROTATION_HANDLE_SIZE = 18;
   PRIMARY_ROTATION_HANDLE_OFFSET = 30;
   LINE_HANDLE_GAP = 6;
+  HANDLE_HIT_PADDING = 3; // 白い外周を含む表示全体とポインター判定を一致させる画面px。
   CR_VECTART_ROTATE = 101;
 
 var
@@ -411,10 +412,17 @@ function HitTestSelectionHandle(const Point: TPoint;
   const Geometry: TVectArtSelectionGeometry): TVectArtSelectionHandle;
 var
   Handle: TVectArtSelectionHandle;
+  HitRect: TRect;
 begin
   for Handle := vshTopLeft to vshLeft do
-    if PtInRect(Geometry.Handles[Handle], Point) then
+  begin
+    HitRect := Geometry.Handles[Handle];
+    if HitRect.IsEmpty then
+      Continue;
+    InflateRect(HitRect, HANDLE_HIT_PADDING, HANDLE_HIT_PADDING);
+    if PtInRect(HitRect, Point) then
       Exit(Handle);
+  end;
   Result := vshNone;
 end;
 

@@ -59,6 +59,7 @@ type
     FHost: TWinControl;
     FMenu: TVectArtDarkPopupMenu;
     procedure EditObjectClick(Sender: TObject);
+    procedure GroupObjectClick(Sender: TObject);
     function CaptureContext: TScreenLayoutObjectMenuContext;
     procedure Rebuild(const Context: TScreenLayoutObjectMenuContext);
     procedure SelectHitLayer(Sender: TObject);
@@ -85,7 +86,8 @@ type
 implementation
 
 uses
-  ScreenLayoutLayerOperations, ScreenLayoutObjectClipboard;
+  ScreenLayoutGroupCommands, ScreenLayoutLayerOperations,
+  ScreenLayoutObjectClipboard;
 
 const
   MENU_ITEM_HEIGHT = 32;
@@ -224,6 +226,7 @@ var
   Contributor: TScreenLayoutObjectMenuContributor;
   I: Integer;
   LayerBuilder: TScreenLayoutObjectMenuBuilder;
+  GroupBuilder: TScreenLayoutObjectMenuBuilder;
   OrderBuilder: TScreenLayoutObjectMenuBuilder;
   Panel: TPanel;
   Operations: TVectArtLayerOperations;
@@ -248,6 +251,12 @@ begin
   OrderBuilder.AddItem('前面へ', nil);
   OrderBuilder.AddItem('背面へ', nil);
   OrderBuilder.AddItem('最背面へ', nil);
+  // ショートカットと同じ既存コマンドへ接続し、メニュー固有の編集処理は持たせない。
+  GroupBuilder := FBuilder.AddSubMenu('グループ');
+  GroupBuilder.AddItem('グループ化', 'Ctrl+G', GroupObjectClick,
+    CanGroupCurrentSelection(FDocument, FEditorState)).Tag := 1;
+  GroupBuilder.AddItem('グループ化解除', 'Ctrl+Shift+G', GroupObjectClick,
+    CanUngroupCurrentSelection(FDocument, FEditorState)).Tag := 2;
   if (Length(FHitLayerIndices) > 1) and
     ((FEditorState = nil) or (FEditorState.OpenGroup = nil)) then
   begin
@@ -268,6 +277,18 @@ begin
       FBuilder.AddSeparator;
       Contributor.BuildMenu(Context, FBuilder);
     end;
+end;
+
+procedure TScreenLayoutObjectContextMenu.GroupObjectClick(Sender: TObject);
+begin
+  if not (Sender is TPanel) then Exit;
+  case TPanel(Sender).Tag of
+    1:
+      GroupCurrentSelection(FDocument, FEditHistory, FEditorState);
+    2:
+      UngroupCurrentSelection(FDocument, FEditHistory, FEditorState);
+  end;
+  Close;
 end;
 
 procedure TScreenLayoutObjectContextMenu.EditObjectClick(Sender: TObject);

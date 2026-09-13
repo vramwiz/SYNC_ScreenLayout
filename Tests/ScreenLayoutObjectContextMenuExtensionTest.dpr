@@ -5,6 +5,7 @@
 uses
   System.SysUtils,
   System.Types,
+  Vcl.Controls,
   Vcl.Forms,
   Vcl.Graphics,
   Vcl.ExtCtrls,
@@ -45,6 +46,24 @@ begin
   Result := False;
 end;
 
+function FindPanel(Control: TWinControl; const Caption: string): TPanel;
+var
+  I: Integer;
+begin
+  for I := 0 to Control.ControlCount - 1 do
+  begin
+    if (Control.Controls[I] is TPanel) and
+      (TPanel(Control.Controls[I]).Caption = Caption) then
+      Exit(TPanel(Control.Controls[I]));
+    if Control.Controls[I] is TWinControl then
+    begin
+      Result := FindPanel(TWinControl(Control.Controls[I]), Caption);
+      if Result <> nil then Exit;
+    end;
+  end;
+  Result := nil;
+end;
+
 procedure Run;
 var
   ContextMenu: TScreenLayoutObjectContextMenu;
@@ -53,6 +72,7 @@ var
   Group: TScreenLayoutGroupLayer;
   History: TVectArtEditHistory;
   MenuGroup: TVectArtDarkMenuGroup;
+  MenuItem: TPanel;
   RectangleData: TVectArtRectangleData;
   State: TVectArtEditorState;
   TextData: TScreenLayoutTextData;
@@ -65,6 +85,7 @@ begin
     MenuGroup := TVectArtDarkMenuGroup.Create(Form);
     ContextMenu := TScreenLayoutObjectContextMenu.Create(Form, Form,
       MenuGroup, Document, State);
+    ContextMenu.EditHistory := History;
     ContextMenu.RegisterContributor(TScreenLayoutTextMenuContributor.Create(
       ContextMenu, nil));
     ContextMenu.RegisterContributor(
@@ -112,8 +133,27 @@ begin
     ContextMenu.ShowForObject(nil, Point(0, 0));
     Check(FindMenuItem(ContextMenu.Menu, '整列と均等配置  >'),
       'arrangement submenu was not added for a multiple selection');
+    Check(FindMenuItem(ContextMenu.Menu, 'グループ  >'),
+      'group submenu was not added');
     Check(not FindMenuItem(ContextMenu.Menu, 'テキストの分解  >'),
       'single-text item was added for a mixed multiple selection');
+    MenuItem := FindPanel(Form, 'グループ化    Ctrl+G');
+    Check((MenuItem <> nil) and MenuItem.Enabled,
+      'group command was not enabled for a multiple selection');
+    MenuItem.OnClick(MenuItem);
+    Check((Document.LayerCount = 2) and
+      (Document[1] is TScreenLayoutGroupLayer),
+      'group menu did not invoke the existing group command');
+    History.Undo;
+    Check(Document.LayerCount = 3, 'group menu undo failed');
+    History.Redo;
+    ContextMenu.ShowForObject(nil, Point(0, 0));
+    MenuItem := FindPanel(Form, 'グループ化解除    Ctrl+Shift+G');
+    Check((MenuItem <> nil) and MenuItem.Enabled,
+      'ungroup command was not enabled for a group selection');
+    MenuItem.OnClick(MenuItem);
+    Check(Document.LayerCount = 3,
+      'group menu did not invoke the existing ungroup command');
 
     Group := TScreenLayoutGroupLayer.Create('Group');
     Group.AddChild(TScreenLayoutTextLayer.Create('Child Text',

@@ -76,6 +76,7 @@ var
   History: TVectArtEditHistory;
   Interaction: TVectArtCanvasInteraction;
   StartPoint: TPoint;
+  VisibleHandle: TRect;
   TextLayer: TScreenLayoutTextLayer;
 begin
   Document := TVectArtDocument.Create;
@@ -103,6 +104,19 @@ begin
     Interaction.Configure(Document, Rect(0, 0, 400, 400), 1.0);
 
     BeforeBounds := TextLayer.Bounds;
+    VisibleHandle := BuildSelectionGeometry(
+      Rect(Round(CANVAS_CENTER + BeforeBounds.Left),
+        Round(CANVAS_CENTER + BeforeBounds.Top),
+        Round(CANVAS_CENTER + BeforeBounds.Right),
+        Round(CANVAS_CENTER + BeforeBounds.Bottom)),
+      SelectionFrameOffset(0, 1.0)).Handles[vshBottomRight];
+    Check(Interaction.CursorAt(VisibleHandle.Right + 2,
+      VisibleHandle.Bottom + 2) = crSizeNWSE,
+      'text resize hover did not include the visible handle outline');
+    Check(Interaction.MouseDown(mbLeft, [], VisibleHandle.Right + 2,
+      VisibleHandle.Bottom + 2),
+      'text resize drag did not include the visible handle outline');
+    Interaction.MouseUp(mbLeft);
     StartPoint := BottomRightHandle(BeforeBounds);
     EndPoint := Point(StartPoint.X + 40, StartPoint.Y);
     DragResize(Interaction, [], StartPoint, EndPoint);

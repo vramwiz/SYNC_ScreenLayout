@@ -65,12 +65,16 @@ type
   TScreenLayoutTextDataCommand = class(TVectArtEditCommand)
   private
     FDocument: TVectArtDocument;
-    FIndex: Integer;
+    FLayer: TScreenLayoutTextLayer; // グループ内編集では積層番号の代わりに対象を保持する。
     FNewData: TScreenLayoutTextData;
     FOldData: TScreenLayoutTextData;
   public
     constructor Create(ADocument: TVectArtDocument; Index: Integer;
       const OldData, NewData: TScreenLayoutTextData);
+    // グループ内の既存文字を所有せず参照し、同じ編集履歴を適用する。
+    constructor CreateForLayer(ADocument: TVectArtDocument;
+      Layer: TScreenLayoutTextLayer; const OldData,
+      NewData: TScreenLayoutTextData);
     procedure Execute; override;
     procedure Undo; override;
   end;
@@ -160,7 +164,6 @@ constructor TScreenLayoutInsertTextCommand.Create(
 begin
   inherited Create;
   FDocument := ADocument;
-  FIndex := Index;
   FData := Data;
   FBeforeSelection := Copy(BeforeSelection);
   FAfterSelection := Copy(AfterSelection);
@@ -221,7 +224,10 @@ constructor TScreenLayoutTextDataCommand.Create(
 begin
   inherited Create;
   FDocument := ADocument;
-  FIndex := Index;
+  if (ADocument <> nil) and (Index > 0) and
+    (Index < ADocument.LayerCount) and
+    (ADocument[Index] is TScreenLayoutTextLayer) then
+    FLayer := TScreenLayoutTextLayer(ADocument[Index]);
   FOldData := OldData;
   FNewData := NewData;
   FOldData.IndividualLetterSpacingRatios :=
@@ -238,16 +244,24 @@ begin
   FNewData.CharacterScales := Copy(NewData.CharacterScales);
 end;
 
+constructor TScreenLayoutTextDataCommand.CreateForLayer(
+  ADocument: TVectArtDocument; Layer: TScreenLayoutTextLayer;
+  const OldData, NewData: TScreenLayoutTextData);
+begin
+  Create(ADocument, -1, OldData, NewData);
+  FLayer := Layer;
+end;
+
 procedure TScreenLayoutTextDataCommand.Execute;
 begin
-  if FDocument <> nil then
-    FDocument.SetTextData(FIndex, FNewData);
+  if (FDocument <> nil) and (FLayer <> nil) then
+    FDocument.SetTextLayerData(FLayer, FNewData);
 end;
 
 procedure TScreenLayoutTextDataCommand.Undo;
 begin
-  if FDocument <> nil then
-    FDocument.SetTextData(FIndex, FOldData);
+  if (FDocument <> nil) and (FLayer <> nil) then
+    FDocument.SetTextLayerData(FLayer, FOldData);
 end;
 
 end.

@@ -779,7 +779,8 @@ begin
             SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX);
           TextValue.TransformMode := ParseTextTransformMode(
             ReadOptionalString(LayerJson, 'transformMode', 'uniformScale'));
-          TextValue.WrapWidth := Max(ReadSingle(LayerJson, 'wrapWidth'), 1.0);
+          // 0はクリック配置した自動幅文字を表し、再読込後も折り返しを発生させない。
+          TextValue.WrapWidth := Max(ReadSingle(LayerJson, 'wrapWidth'), 0.0);
           TextValue.Bounds := TRectF.Create(
             ReadSingle(LayerJson, 'left'), ReadSingle(LayerJson, 'top'),
             ReadSingle(LayerJson, 'right'), ReadSingle(LayerJson, 'bottom'));

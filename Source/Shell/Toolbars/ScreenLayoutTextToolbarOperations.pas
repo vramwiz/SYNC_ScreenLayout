@@ -8,23 +8,23 @@ uses
 
 // 選択済みTextのフォント装飾を変更する。IndicesはTextだけを指し、ロック確認は呼び出し側が行う。
 procedure ApplyScreenLayoutToolbarFontStyle(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TScreenLayoutTextLayer>;
   Style: TFontStyle; Enabled: Boolean);
 // 選択済みTextの枠内配置を変更し、変更があった項目を1件のUndo履歴へまとめる。
 procedure ApplyScreenLayoutToolbarTextAlignment(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TScreenLayoutTextLayer>;
   Value: TScreenLayoutTextAlignment);
 // 選択済み文字パスのPath接触面を変更し、変更があった項目をUndo可能にする。
 procedure ApplyScreenLayoutToolbarTextPathAttachment(
   Document: TVectArtDocument; History: TVectArtEditHistory;
-  const Indices: TArray<Integer>; Value: TScreenLayoutTextPathAttachment);
+  const Layers: TArray<TScreenLayoutTextLayer>; Value: TScreenLayoutTextPathAttachment);
 // 選択済みTextの字間または行間を変更する。Ratioはモデルが許容する範囲へ制限される。
 procedure ApplyScreenLayoutToolbarTextSpacing(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TScreenLayoutTextLayer>;
   IsLetterSpacing: Boolean; Ratio: Single);
 // 選択済みTextのフォントファミリーを変更し、複数選択は1件のUndo履歴へまとめる。
 procedure ApplyScreenLayoutToolbarFontFamily(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TScreenLayoutTextLayer>;
   const Value: string);
 
 implementation
@@ -43,7 +43,7 @@ begin
 end;
 
 procedure ApplyScreenLayoutToolbarFontStyle(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TScreenLayoutTextLayer>;
   Style: TFontStyle; Enabled: Boolean);
 var
   Command: TVectArtCompoundCommand;
@@ -56,10 +56,9 @@ begin
   Command := TVectArtCompoundCommand.Create;
   Document.BeginUpdate;
   try
-    for I := 0 to High(Indices) do
+    for I := 0 to High(Layers) do
     begin
-      OldData := CaptureScreenLayoutTextData(
-        TScreenLayoutTextLayer(Document[Indices[I]]));
+      OldData := CaptureScreenLayoutTextData(Layers[I]);
       if (Style in OldData.FontStyle) = Enabled then
         Continue;
       NewData := OldData;
@@ -67,9 +66,9 @@ begin
         Include(NewData.FontStyle, Style)
       else
         Exclude(NewData.FontStyle, Style);
-      Command.Add(TScreenLayoutTextDataCommand.Create(Document, Indices[I],
+      Command.Add(TScreenLayoutTextDataCommand.CreateForLayer(Document, Layers[I],
         OldData, NewData));
-      Document.SetTextData(Indices[I], NewData);
+      Document.SetTextLayerData(Layers[I], NewData);
     end;
   finally
     Document.EndUpdate;
@@ -78,7 +77,7 @@ begin
 end;
 
 procedure ApplyScreenLayoutToolbarTextAlignment(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TScreenLayoutTextLayer>;
   Value: TScreenLayoutTextAlignment);
 var
   Command: TVectArtCompoundCommand;
@@ -91,17 +90,16 @@ begin
   Command := TVectArtCompoundCommand.Create;
   Document.BeginUpdate;
   try
-    for I := 0 to High(Indices) do
+    for I := 0 to High(Layers) do
     begin
-      OldData := CaptureScreenLayoutTextData(
-        TScreenLayoutTextLayer(Document[Indices[I]]));
+      OldData := CaptureScreenLayoutTextData(Layers[I]);
       if OldData.Alignment = Value then
         Continue;
       NewData := OldData;
       NewData.Alignment := Value;
-      Command.Add(TScreenLayoutTextDataCommand.Create(Document, Indices[I],
+      Command.Add(TScreenLayoutTextDataCommand.CreateForLayer(Document, Layers[I],
         OldData, NewData));
-      Document.SetTextData(Indices[I], NewData);
+      Document.SetTextLayerData(Layers[I], NewData);
     end;
   finally
     Document.EndUpdate;
@@ -111,7 +109,7 @@ end;
 
 procedure ApplyScreenLayoutToolbarTextPathAttachment(
   Document: TVectArtDocument; History: TVectArtEditHistory;
-  const Indices: TArray<Integer>; Value: TScreenLayoutTextPathAttachment);
+  const Layers: TArray<TScreenLayoutTextLayer>; Value: TScreenLayoutTextPathAttachment);
 var
   Command: TVectArtCompoundCommand;
   I: Integer;
@@ -123,17 +121,16 @@ begin
   Command := TVectArtCompoundCommand.Create;
   Document.BeginUpdate;
   try
-    for I := 0 to High(Indices) do
+    for I := 0 to High(Layers) do
     begin
-      OldData := CaptureScreenLayoutTextData(
-        TScreenLayoutTextPathLayer(Document[Indices[I]]));
+      OldData := CaptureScreenLayoutTextData(Layers[I]);
       if OldData.TextPathAttachment = Value then
         Continue;
       NewData := OldData;
       NewData.TextPathAttachment := Value;
-      Command.Add(TScreenLayoutTextDataCommand.Create(Document, Indices[I],
+      Command.Add(TScreenLayoutTextDataCommand.CreateForLayer(Document, Layers[I],
         OldData, NewData));
-      Document.SetTextData(Indices[I], NewData);
+      Document.SetTextLayerData(Layers[I], NewData);
     end;
   finally
     Document.EndUpdate;
@@ -142,7 +139,7 @@ begin
 end;
 
 procedure ApplyScreenLayoutToolbarTextSpacing(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TScreenLayoutTextLayer>;
   IsLetterSpacing: Boolean; Ratio: Single);
 var
   Command: TVectArtCompoundCommand;
@@ -161,10 +158,9 @@ begin
   Command := TVectArtCompoundCommand.Create;
   Document.BeginUpdate;
   try
-    for I := 0 to High(Indices) do
+    for I := 0 to High(Layers) do
     begin
-      OldData := CaptureScreenLayoutTextData(
-        TScreenLayoutTextLayer(Document[Indices[I]]));
+      OldData := CaptureScreenLayoutTextData(Layers[I]);
       NewData := OldData;
       if IsLetterSpacing then
       begin
@@ -178,9 +174,9 @@ begin
           Continue;
         NewData.LineSpacingRatio := Ratio;
       end;
-      Command.Add(TScreenLayoutTextDataCommand.Create(Document, Indices[I],
+      Command.Add(TScreenLayoutTextDataCommand.CreateForLayer(Document, Layers[I],
         OldData, NewData));
-      Document.SetTextData(Indices[I], NewData);
+      Document.SetTextLayerData(Layers[I], NewData);
     end;
   finally
     Document.EndUpdate;
@@ -189,7 +185,7 @@ begin
 end;
 
 procedure ApplyScreenLayoutToolbarFontFamily(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TScreenLayoutTextLayer>;
   const Value: string);
 var
   Command: TVectArtCompoundCommand;
@@ -202,17 +198,16 @@ begin
   Command := TVectArtCompoundCommand.Create;
   Document.BeginUpdate;
   try
-    for I := 0 to High(Indices) do
+    for I := 0 to High(Layers) do
     begin
-      OldData := CaptureScreenLayoutTextData(
-        TScreenLayoutTextLayer(Document[Indices[I]]));
+      OldData := CaptureScreenLayoutTextData(Layers[I]);
       if SameText(OldData.FontFamily, Value) then
         Continue;
       NewData := OldData;
       NewData.FontFamily := Value;
-      Command.Add(TScreenLayoutTextDataCommand.Create(Document, Indices[I],
+      Command.Add(TScreenLayoutTextDataCommand.CreateForLayer(Document, Layers[I],
         OldData, NewData));
-      Document.SetTextData(Indices[I], NewData);
+      Document.SetTextLayerData(Layers[I], NewData);
     end;
   finally
     Document.EndUpdate;

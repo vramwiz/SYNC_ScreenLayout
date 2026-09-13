@@ -49,6 +49,18 @@ procedure GroupOpenGroupChildren(Document: TVectArtDocument;
 // 選択中の内部グループを解除し、子を現在の親へ展開する。
 procedure UngroupOpenGroupChild(Document: TVectArtDocument;
   EditHistory: TVectArtEditHistory; EditorState: TVectArtEditorState);
+// トップレベルと開いたグループを区別せず、現在選択をグループ化できるか返す。
+function CanGroupCurrentSelection(Document: TVectArtDocument;
+  EditorState: TVectArtEditorState): Boolean;
+// トップレベルと開いたグループを区別せず、現在選択をグループ化する。
+procedure GroupCurrentSelection(Document: TVectArtDocument;
+  EditHistory: TVectArtEditHistory; EditorState: TVectArtEditorState);
+// 現在選択がグループ化解除の対象か返す。
+function CanUngroupCurrentSelection(Document: TVectArtDocument;
+  EditorState: TVectArtEditorState): Boolean;
+// 現在選択のグループ化を解除する。
+procedure UngroupCurrentSelection(Document: TVectArtDocument;
+  EditHistory: TVectArtEditHistory; EditorState: TVectArtEditorState);
 
 implementation
 
@@ -215,6 +227,42 @@ begin
     EditHistory.AddApplied(Command)
   else
     Command.Free;
+end;
+
+function CanGroupCurrentSelection(Document: TVectArtDocument;
+  EditorState: TVectArtEditorState): Boolean;
+begin
+  if (EditorState <> nil) and (EditorState.OpenGroup <> nil) then
+    Result := CanGroupOpenGroupChildren(EditorState)
+  else
+    Result := CanGroupSelectedLayers(Document);
+end;
+
+procedure GroupCurrentSelection(Document: TVectArtDocument;
+  EditHistory: TVectArtEditHistory; EditorState: TVectArtEditorState);
+begin
+  if (EditorState <> nil) and (EditorState.OpenGroup <> nil) then
+    GroupOpenGroupChildren(Document, EditHistory, EditorState)
+  else
+    GroupSelectedLayers(Document, EditHistory);
+end;
+
+function CanUngroupCurrentSelection(Document: TVectArtDocument;
+  EditorState: TVectArtEditorState): Boolean;
+begin
+  if (EditorState <> nil) and (EditorState.OpenGroup <> nil) then
+    Result := CanUngroupOpenGroupChild(EditorState)
+  else
+    Result := CanUngroupSelectedLayer(Document);
+end;
+
+procedure UngroupCurrentSelection(Document: TVectArtDocument;
+  EditHistory: TVectArtEditHistory; EditorState: TVectArtEditorState);
+begin
+  if (EditorState <> nil) and (EditorState.OpenGroup <> nil) then
+    UngroupOpenGroupChild(Document, EditHistory, EditorState)
+  else
+    UngroupSelectedLayer(Document, EditHistory);
 end;
 
 function CanMoveOpenGroupChild(EditorState: TVectArtEditorState;

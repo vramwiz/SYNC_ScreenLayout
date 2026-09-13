@@ -327,7 +327,7 @@ type
     PaintStyle: TScreenLayoutPaintStyle; // 本文へ適用する共通描画スタイル。
     TransformMode: TScreenLayoutTextTransformMode; // 枠変形時の縦横比拘束方式。
     Visible: Boolean;        // 描画対象に含める状態。
-    WrapWidth: Single;       // 入力時の自動折り返し幅。
+    WrapWidth: Single;       // 入力時の折り返し幅。0は明示改行だけを使用する自動幅。
   end;
 
   TScreenLayoutRectangleLineLayer = class(TVectArtLayer)
@@ -681,6 +681,9 @@ type
     procedure SetImagePoints(Index: Integer;
       const Points: TVectArtImagePoints);
     procedure SetTextData(Index: Integer; const Data: TScreenLayoutTextData);
+    // Document内またはグループ内の既存文字へ全永続属性を適用し、変更を通知する。
+    procedure SetTextLayerData(Layer: TScreenLayoutTextLayer;
+      const Data: TScreenLayoutTextData);
     procedure SetPathLineCap(Index: Integer; Value: TVectArtLineCap);
     procedure SetLayerLocked(Index: Integer; Value: Boolean);
     procedure SetLayerOpacity(Index: Integer; Value: Single);
@@ -1117,7 +1120,7 @@ begin
   FFontFamily := AFontFamily;
   FFontSize := Max(AFontSize, 1.0);
   FTransformMode := slttmUniformScale;
-  FWrapWidth := Max(AWrapWidth, 1.0);
+  FWrapWidth := Max(AWrapWidth, 0.0);
 end;
 
 procedure TScreenLayoutTextLayer.SetLetterSpacingRatio(Value: Single);
@@ -2848,55 +2851,60 @@ end;
 
 procedure TVectArtDocument.SetTextData(Index: Integer;
   const Data: TScreenLayoutTextData);
-var
-  TextLayer: TScreenLayoutTextLayer;
 begin
   if (Index <= 0) or (Index >= FLayers.Count) or
     not (FLayers[Index] is TScreenLayoutTextLayer) then
     Exit;
-  TextLayer := TScreenLayoutTextLayer(FLayers[Index]);
-  TextLayer.Alignment := Data.Alignment;
-  TextLayer.Bounds := Data.Bounds;
-  TextLayer.FillColor := Data.TextColor;
-  TextLayer.FontFamily := Data.FontFamily;
-  TextLayer.FontSize := Max(Data.FontSize, 1.0);
-  TextLayer.FontStyle := Data.FontStyle;
-  TextLayer.Text := Data.Text;
-  if TextLayer is TScreenLayoutTextPathLayer then
+  SetTextLayerData(TScreenLayoutTextLayer(FLayers[Index]), Data);
+end;
+
+procedure TVectArtDocument.SetTextLayerData(Layer: TScreenLayoutTextLayer;
+  const Data: TScreenLayoutTextData);
+begin
+  if Layer = nil then
+    Exit;
+  Layer.Alignment := Data.Alignment;
+  Layer.Bounds := Data.Bounds;
+  Layer.FillColor := Data.TextColor;
+  Layer.FontFamily := Data.FontFamily;
+  Layer.FontSize := Max(Data.FontSize, 1.0);
+  Layer.FontStyle := Data.FontStyle;
+  Layer.Text := Data.Text;
+  if Layer is TScreenLayoutTextPathLayer then
   begin
-    TScreenLayoutTextPathLayer(TextLayer).Attachment :=
+    TScreenLayoutTextPathLayer(Layer).Attachment :=
       Data.TextPathAttachment;
-    TScreenLayoutTextPathLayer(TextLayer).CharacterPathOffsets :=
+    TScreenLayoutTextPathLayer(Layer).CharacterPathOffsets :=
       Data.CharacterPathOffsets;
-    TScreenLayoutTextPathLayer(TextLayer).CharacterPositionManual :=
+    TScreenLayoutTextPathLayer(Layer).CharacterPositionManual :=
       Data.CharacterPositionManual;
-    TScreenLayoutTextPathLayer(TextLayer).CharacterScales :=
+    TScreenLayoutTextPathLayer(Layer).CharacterScales :=
       Data.CharacterScales;
   end;
-  if TextLayer is TScreenLayoutTextPathLayer then
-    TextLayer.LetterSpacingRatio := 0
+  if Layer is TScreenLayoutTextPathLayer then
+    Layer.LetterSpacingRatio := 0
   else
-    TextLayer.LetterSpacingRatio := EnsureRange(Data.LetterSpacingRatio,
+    Layer.LetterSpacingRatio := EnsureRange(Data.LetterSpacingRatio,
       SCREEN_LAYOUT_TEXT_LETTER_SPACING_MIN,
       SCREEN_LAYOUT_TEXT_LETTER_SPACING_MAX);
-  TextLayer.LineSpacingRatio := EnsureRange(Data.LineSpacingRatio,
+  Layer.LineSpacingRatio := EnsureRange(Data.LineSpacingRatio,
     SCREEN_LAYOUT_TEXT_LINE_SPACING_MIN,
     SCREEN_LAYOUT_TEXT_LINE_SPACING_MAX);
-  TextLayer.Locked := Data.Locked;
-  TextLayer.Name := Data.Name;
-  TextLayer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
-  TextLayer.RotationDegrees := Data.RotationDegrees;
-  if TextLayer is TScreenLayoutTextPathLayer then
-    TextLayer.IndividualLetterSpacingRatios := nil
+  Layer.Locked := Data.Locked;
+  Layer.Name := Data.Name;
+  Layer.Opacity := EnsureRange(Data.Opacity, 0.0, 1.0);
+  Layer.RotationDegrees := Data.RotationDegrees;
+  if Layer is TScreenLayoutTextPathLayer then
+    Layer.IndividualLetterSpacingRatios := nil
   else
-    TextLayer.IndividualLetterSpacingRatios :=
+    Layer.IndividualLetterSpacingRatios :=
       Data.IndividualLetterSpacingRatios;
-  TextLayer.TransformMode := Data.TransformMode;
-  TextLayer.Visible := Data.Visible;
-  if TextLayer is TScreenLayoutTextPathLayer then
-    TextLayer.WrapWidth := 0
+  Layer.TransformMode := Data.TransformMode;
+  Layer.Visible := Data.Visible;
+  if Layer is TScreenLayoutTextPathLayer then
+    Layer.WrapWidth := 0
   else
-    TextLayer.WrapWidth := Max(Data.WrapWidth, 1.0);
+    Layer.WrapWidth := Max(Data.WrapWidth, 0.0);
   Changed;
 end;
 

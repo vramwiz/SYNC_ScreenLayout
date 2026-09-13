@@ -922,36 +922,22 @@ begin
   FShortcuts.Add(Ord('G'), [ssCtrl],
     procedure
     begin
-      if (FEditorState <> nil) and
-        (FEditorState.OpenGroup <> nil) then
-        GroupOpenGroupChildren(FDocument, FEditHistory, FEditorState)
-      else
-        GroupSelectedLayers(FDocument, FEditHistory);
+      GroupCurrentSelection(FDocument, FEditHistory, FEditorState);
     end,
     function: Boolean
     begin
-      Result := IsEditingSurfaceFocused and (FEditorState <> nil) and
-        (((FEditorState.OpenGroup <> nil) and
-          CanGroupOpenGroupChildren(FEditorState)) or
-         ((FEditorState.OpenGroup = nil) and
-          CanGroupSelectedLayers(FDocument)));
+      Result := IsEditingSurfaceFocused and
+        CanGroupCurrentSelection(FDocument, FEditorState);
     end);
   FShortcuts.Add(Ord('G'), [ssCtrl, ssShift],
     procedure
     begin
-      if (FEditorState <> nil) and
-        (FEditorState.OpenGroup <> nil) then
-        UngroupOpenGroupChild(FDocument, FEditHistory, FEditorState)
-      else
-        UngroupSelectedLayer(FDocument, FEditHistory);
+      UngroupCurrentSelection(FDocument, FEditHistory, FEditorState);
     end,
     function: Boolean
     begin
-      Result := IsEditingSurfaceFocused and (FEditorState <> nil) and
-        (((FEditorState.OpenGroup <> nil) and
-          CanUngroupOpenGroupChild(FEditorState)) or
-         ((FEditorState.OpenGroup = nil) and
-          CanUngroupSelectedLayer(FDocument)));
+      Result := IsEditingSurfaceFocused and
+        CanUngroupCurrentSelection(FDocument, FEditorState);
     end);
   FShortcuts.Add(VK_DELETE, [],
     procedure

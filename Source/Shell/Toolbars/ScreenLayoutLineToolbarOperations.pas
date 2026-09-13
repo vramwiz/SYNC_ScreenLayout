@@ -12,25 +12,154 @@ function TryReadScreenLayoutToolbarLine(Layer: TVectArtLayer;
   out LineCap: TVectArtLineCap): Boolean;
 // 選択済み線の線端を変更する。矩形線は線端を持たず、変更対象から除外される。
 procedure ApplyScreenLayoutToolbarLineCap(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TVectArtLayer>;
   Value: TVectArtLineCap);
 // 選択済み線の線種を変更し、複数選択の変更を1件のUndo履歴へまとめる。
 procedure ApplyScreenLayoutToolbarLineStyle(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TVectArtLayer>;
   Value: TVectArtMifStrokeStyle);
 // 選択済み線の幅を変更する。RecordHistory=Falseはドラッグ中のプレビュー更新に使用する。
 procedure ApplyScreenLayoutToolbarLineWidth(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TVectArtLayer>;
   Value: Single; RecordHistory: Boolean);
+// ドラッグ開始時の線幅と現在値から、既に適用済みの変更履歴だけを追加する。
+procedure RecordScreenLayoutToolbarLineWidths(Document: TVectArtDocument;
+  History: TVectArtEditHistory; const Layers: TArray<TVectArtLayer>;
+  const OldWidths: TArray<Single>);
 // 選択済みの開いたPathを均一幅または初期100%の可変幅へ切り替える。
 procedure ApplyScreenLayoutToolbarWidthMode(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TVectArtLayer>;
   Value: TScreenLayoutStrokeWidthMode);
 
 implementation
 
 uses
   System.Math, ScreenLayoutEditCommands;
+
+type
+  // Document直下とグループ内のどちらにも同じUndo処理を適用する。
+  TLayerStrokeCommand = class(TVectArtEditCommand)
+  private
+    FDocument: TVectArtDocument;
+    FLayer: TVectArtLayer;
+    FOldColor, FNewColor: TColor;
+    FOldWidth, FNewWidth: Single;
+    FOldStyle, FNewStyle: TVectArtMifStrokeStyle;
+    procedure Apply(Color: TColor; Width: Single; Style: TVectArtMifStrokeStyle);
+  public
+    constructor Create(ADocument: TVectArtDocument; ALayer: TVectArtLayer;
+      OldColor: TColor; OldWidth: Single; OldStyle: TVectArtMifStrokeStyle;
+      NewColor: TColor; NewWidth: Single; NewStyle: TVectArtMifStrokeStyle);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TLayerLineCapCommand = class(TVectArtEditCommand)
+  private
+    FDocument: TVectArtDocument;
+    FLayer: TVectArtLayer;
+    FOldValue, FNewValue: TVectArtLineCap;
+    procedure Apply(Value: TVectArtLineCap);
+  public
+    constructor Create(ADocument: TVectArtDocument; ALayer: TVectArtLayer;
+      OldValue, NewValue: TVectArtLineCap);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+  TLayerWidthPointsCommand = class(TVectArtEditCommand)
+  private
+    FDocument: TVectArtDocument;
+    FLayer: TVectArtPathLayer;
+    FOldValue, FNewValue: TArray<TScreenLayoutStrokeWidthPoint>;
+    procedure Apply(const Value: TArray<TScreenLayoutStrokeWidthPoint>);
+  public
+    constructor Create(ADocument: TVectArtDocument; ALayer: TVectArtPathLayer;
+      const OldValue, NewValue: TArray<TScreenLayoutStrokeWidthPoint>);
+    procedure Execute; override;
+    procedure Undo; override;
+  end;
+
+procedure SetLineStroke(Document: TVectArtDocument; Layer: TVectArtLayer;
+  Color: TColor; Width: Single; Style: TVectArtMifStrokeStyle);
+begin
+  if Layer is TScreenLayoutRectangleLineLayer then
+  begin
+    TScreenLayoutRectangleLineLayer(Layer).StrokeColor := Color;
+    TScreenLayoutRectangleLineLayer(Layer).StrokeWidth := Width;
+    TScreenLayoutRectangleLineLayer(Layer).StrokeStyle := Style;
+  end
+  else if Layer is TScreenLayoutArcLayer then
+  begin
+    TScreenLayoutArcLayer(Layer).StrokeColor := Color;
+    TScreenLayoutArcLayer(Layer).StrokeWidth := Width;
+    TScreenLayoutArcLayer(Layer).StrokeStyle := Style;
+  end
+  else if Layer is TVectArtPathLayer then
+  begin
+    TVectArtPathLayer(Layer).StrokeColor := Color;
+    TVectArtPathLayer(Layer).StrokeWidth := Width;
+    TVectArtPathLayer(Layer).MifStrokeStyle := Style;
+  end;
+  Document.Changed;
+end;
+
+procedure SetLineCap(Document: TVectArtDocument; Layer: TVectArtLayer;
+  Value: TVectArtLineCap);
+begin
+  if Layer is TScreenLayoutArcLayer then
+    TScreenLayoutArcLayer(Layer).LineCap := Value
+  else if Layer is TVectArtPathLayer then
+    TVectArtPathLayer(Layer).LineCap := Value;
+  Document.Changed;
+end;
+
+procedure TLayerStrokeCommand.Apply(Color: TColor; Width: Single;
+  Style: TVectArtMifStrokeStyle);
+begin
+  if (FDocument <> nil) and (FLayer <> nil) then
+    SetLineStroke(FDocument, FLayer, Color, Width, Style);
+end;
+
+constructor TLayerStrokeCommand.Create(ADocument: TVectArtDocument;
+  ALayer: TVectArtLayer; OldColor: TColor; OldWidth: Single;
+  OldStyle: TVectArtMifStrokeStyle; NewColor: TColor; NewWidth: Single;
+  NewStyle: TVectArtMifStrokeStyle);
+begin
+  inherited Create; FDocument := ADocument; FLayer := ALayer;
+  FOldColor := OldColor; FOldWidth := OldWidth; FOldStyle := OldStyle;
+  FNewColor := NewColor; FNewWidth := NewWidth; FNewStyle := NewStyle;
+end;
+
+procedure TLayerStrokeCommand.Execute; begin Apply(FNewColor, FNewWidth, FNewStyle); end;
+procedure TLayerStrokeCommand.Undo; begin Apply(FOldColor, FOldWidth, FOldStyle); end;
+
+procedure TLayerLineCapCommand.Apply(Value: TVectArtLineCap);
+begin
+  if (FDocument <> nil) and (FLayer <> nil) then SetLineCap(FDocument, FLayer, Value);
+end;
+
+constructor TLayerLineCapCommand.Create(ADocument: TVectArtDocument;
+  ALayer: TVectArtLayer; OldValue, NewValue: TVectArtLineCap);
+begin inherited Create; FDocument := ADocument; FLayer := ALayer;
+  FOldValue := OldValue; FNewValue := NewValue; end;
+procedure TLayerLineCapCommand.Execute; begin Apply(FNewValue); end;
+procedure TLayerLineCapCommand.Undo; begin Apply(FOldValue); end;
+
+procedure TLayerWidthPointsCommand.Apply(
+  const Value: TArray<TScreenLayoutStrokeWidthPoint>);
+begin
+  if (FDocument = nil) or (FLayer = nil) then Exit;
+  FLayer.WidthPoints := Copy(Value); FDocument.Changed;
+end;
+
+constructor TLayerWidthPointsCommand.Create(ADocument: TVectArtDocument;
+  ALayer: TVectArtPathLayer; const OldValue,
+  NewValue: TArray<TScreenLayoutStrokeWidthPoint>);
+begin inherited Create; FDocument := ADocument; FLayer := ALayer;
+  FOldValue := Copy(OldValue); FNewValue := Copy(NewValue); end;
+procedure TLayerWidthPointsCommand.Execute; begin Apply(FNewValue); end;
+procedure TLayerWidthPointsCommand.Undo; begin Apply(FOldValue); end;
 
 procedure AddAppliedCommand(History: TVectArtEditHistory;
   Command: TVectArtCompoundCommand);
@@ -39,26 +168,6 @@ begin
     History.AddApplied(Command)
   else
     Command.Free;
-end;
-
-procedure SetLineStroke(Document: TVectArtDocument; Index: Integer;
-  Color: TColor; Width: Single; Style: TVectArtMifStrokeStyle);
-begin
-  if Document[Index] is TScreenLayoutRectangleLineLayer then
-    Document.SetRectangleLineStroke(Index, Color, Width, Style)
-  else if Document[Index] is TScreenLayoutArcLayer then
-    Document.SetArcStroke(Index, Color, Width, Style)
-  else
-    Document.SetPathStroke(Index, Color, Width, Style);
-end;
-
-procedure SetLineCap(Document: TVectArtDocument; Index: Integer;
-  Value: TVectArtLineCap);
-begin
-  if Document[Index] is TScreenLayoutArcLayer then
-    Document.SetArcLineCap(Index, Value)
-  else if Document[Index] is TVectArtPathLayer then
-    Document.SetPathLineCap(Index, Value);
 end;
 
 function TryReadScreenLayoutToolbarLine(Layer: TVectArtLayer;
@@ -93,7 +202,7 @@ begin
 end;
 
 procedure ApplyScreenLayoutToolbarLineCap(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TVectArtLayer>;
   Value: TVectArtLineCap);
 var
   Color: TColor;
@@ -108,16 +217,16 @@ begin
   Command := TVectArtCompoundCommand.Create;
   Document.BeginUpdate;
   try
-    for I := 0 to High(Indices) do
+    for I := 0 to High(Layers) do
     begin
-      if Document[Indices[I]] is TScreenLayoutRectangleLineLayer then
+      if Layers[I] is TScreenLayoutRectangleLineLayer then
         Continue;
-      if not TryReadScreenLayoutToolbarLine(Document[Indices[I]], Color,
+      if not TryReadScreenLayoutToolbarLine(Layers[I], Color,
         Width, Style, OldLineCap) or (OldLineCap = Value) then
         Continue;
-      Command.Add(TVectArtPathLineCapCommand.Create(Document, Indices[I],
+      Command.Add(TLayerLineCapCommand.Create(Document, Layers[I],
         OldLineCap, Value));
-      SetLineCap(Document, Indices[I], Value);
+      SetLineCap(Document, Layers[I], Value);
     end;
   finally
     Document.EndUpdate;
@@ -126,7 +235,7 @@ begin
 end;
 
 procedure ApplyScreenLayoutToolbarLineStyle(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TVectArtLayer>;
   Value: TVectArtMifStrokeStyle);
 var
   Color: TColor;
@@ -141,14 +250,14 @@ begin
   Command := TVectArtCompoundCommand.Create;
   Document.BeginUpdate;
   try
-    for I := 0 to High(Indices) do
+    for I := 0 to High(Layers) do
     begin
-      if not TryReadScreenLayoutToolbarLine(Document[Indices[I]], Color,
+      if not TryReadScreenLayoutToolbarLine(Layers[I], Color,
         Width, OldStyle, LineCap) or (OldStyle = Value) then
         Continue;
-      Command.Add(TVectArtStrokeCommand.Create(Document, Indices[I], Color,
+      Command.Add(TLayerStrokeCommand.Create(Document, Layers[I], Color,
         Width, OldStyle, Color, Width, Value));
-      SetLineStroke(Document, Indices[I], Color, Width, Value);
+      SetLineStroke(Document, Layers[I], Color, Width, Value);
     end;
   finally
     Document.EndUpdate;
@@ -157,7 +266,7 @@ begin
 end;
 
 procedure ApplyScreenLayoutToolbarLineWidth(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TVectArtLayer>;
   Value: Single; RecordHistory: Boolean);
 var
   Color: TColor;
@@ -176,16 +285,16 @@ begin
     Command := TVectArtCompoundCommand.Create;
   Document.BeginUpdate;
   try
-    for I := 0 to High(Indices) do
+    for I := 0 to High(Layers) do
     begin
-      Layer := Document[Indices[I]];
+      Layer := Layers[I];
       if not TryReadScreenLayoutToolbarLine(Layer, Color, Width, Style,
         LineCap) or SameValue(Width, Value) then
         Continue;
       if Command <> nil then
-        Command.Add(TVectArtStrokeCommand.Create(Document, Indices[I], Color,
+        Command.Add(TLayerStrokeCommand.Create(Document, Layer, Color,
           Width, Style, Color, Value, Style));
-      SetLineStroke(Document, Indices[I], Color, Value, Style);
+      SetLineStroke(Document, Layer, Color, Value, Style);
     end;
   finally
     Document.EndUpdate;
@@ -193,8 +302,29 @@ begin
   AddAppliedCommand(History, Command);
 end;
 
+procedure RecordScreenLayoutToolbarLineWidths(Document: TVectArtDocument;
+  History: TVectArtEditHistory; const Layers: TArray<TVectArtLayer>;
+  const OldWidths: TArray<Single>);
+var
+  Color: TColor;
+  Command: TVectArtCompoundCommand;
+  I: Integer;
+  LineCap: TVectArtLineCap;
+  Style: TVectArtMifStrokeStyle;
+  Width: Single;
+begin
+  if (Document = nil) or (History = nil) then Exit;
+  Command := TVectArtCompoundCommand.Create;
+  for I := 0 to Min(High(Layers), High(OldWidths)) do
+    if TryReadScreenLayoutToolbarLine(Layers[I], Color, Width, Style,
+      LineCap) and not SameValue(OldWidths[I], Width) then
+      Command.Add(TLayerStrokeCommand.Create(Document, Layers[I], Color,
+        OldWidths[I], Style, Color, Width, Style));
+  AddAppliedCommand(History, Command);
+end;
+
 procedure ApplyScreenLayoutToolbarWidthMode(Document: TVectArtDocument;
-  History: TVectArtEditHistory; const Indices: TArray<Integer>;
+  History: TVectArtEditHistory; const Layers: TArray<TVectArtLayer>;
   Value: TScreenLayoutStrokeWidthMode);
 var
   Command: TVectArtCompoundCommand;
@@ -208,11 +338,11 @@ begin
   Command := TVectArtCompoundCommand.Create;
   Document.BeginUpdate;
   try
-    for I := 0 to High(Indices) do
+    for I := 0 to High(Layers) do
     begin
-      if not (Document[Indices[I]] is TVectArtPathLayer) then
+      if not (Layers[I] is TVectArtPathLayer) then
         Continue;
-      Path := TVectArtPathLayer(Document[Indices[I]]);
+      Path := TVectArtPathLayer(Layers[I]);
       if Path.Closed then
         Continue;
       OldValue := Path.WidthPoints;
@@ -228,9 +358,10 @@ begin
           Continue;
         NewValue := nil;
       end;
-      Command.Add(TScreenLayoutPathWidthPointsCommand.Create(Document,
-        Indices[I], OldValue, NewValue));
-      Document.SetPathWidthPoints(Indices[I], NewValue);
+      Command.Add(TLayerWidthPointsCommand.Create(Document, Path,
+        OldValue, NewValue));
+      Path.WidthPoints := Copy(NewValue);
+      Document.Changed;
     end;
   finally
     Document.EndUpdate;

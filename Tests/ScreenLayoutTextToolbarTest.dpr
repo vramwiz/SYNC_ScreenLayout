@@ -31,12 +31,16 @@ var
   Data: TScreenLayoutTextData;
   Document: TVectArtDocument;
   Form: TForm;
+  Group: TScreenLayoutGroupLayer;
+  GroupPath: TVectArtPathLayer;
+  GroupText: TScreenLayoutTextLayer;
   History: TVectArtEditHistory;
   ErrorMessage: string;
   Json: string;
   LegacyJson: string;
   LoadedDocument: TVectArtDocument;
   NewFontFamily: string;
+  PathData: TVectArtPathData;
   State: TVectArtEditorState;
   Toolbar: TVectArtLineToolbarControl;
 begin
@@ -86,6 +90,58 @@ begin
       'text alignment popup button was hidden for text selection');
     Check(not Toolbar.TextAlignmentPanel.Visible,
       'text alignment popup was initially visible');
+
+    Group := TScreenLayoutGroupLayer.Create('Group');
+    GroupText := TScreenLayoutTextLayer.Create('Grouped text', Data.Bounds,
+      'Grouped', Data.FontFamily, Data.FontSize, 0, clWhite);
+    Group.AddChild(GroupText);
+    PathData := Default(TVectArtPathData);
+    SetLength(PathData.Vertices, 2);
+    PathData.Vertices[0].Position := TPointF.Create(-40, 40);
+    PathData.Vertices[1].Position := TPointF.Create(40, 40);
+    PathData.Name := 'Grouped line';
+    PathData.Opacity := 1;
+    PathData.StrokeWidth := 6;
+    PathData.Visible := True;
+    GroupPath := TVectArtPathLayer.Create(PathData.Name,
+      PathData.Vertices, False);
+    GroupPath.Opacity := PathData.Opacity;
+    GroupPath.StrokeWidth := PathData.StrokeWidth;
+    GroupPath.Visible := PathData.Visible;
+    Group.AddChild(GroupPath);
+    Document.InsertLayer(Document.LayerCount, Group);
+    Document.SetSelectedLayers([]);
+    State.OpenGroup := Group;
+    State.OpenGroupChild := GroupText;
+    Toolbar.RefreshState;
+    Check(Toolbar.Visible and Toolbar.FontFamilyCombo.Visible and
+      not Toolbar.StrokeWidthEdit.Visible,
+      'grouped text selection did not show text tools');
+    Toolbar.ApplyFontStyle(fsItalic, True);
+    Check(fsItalic in GroupText.FontStyle,
+      'grouped text style was not applied');
+    History.Undo;
+    Check(not (fsItalic in GroupText.FontStyle),
+      'grouped text style undo failed');
+    History.Redo;
+    Check(fsItalic in GroupText.FontStyle,
+      'grouped text style redo failed');
+    State.OpenGroupChild := GroupPath;
+    Toolbar.RefreshState;
+    Check(Toolbar.Visible and Toolbar.StrokeWidthEdit.Visible and
+      not Toolbar.FontFamilyCombo.Visible,
+      'grouped line selection did not show line tools');
+    Toolbar.ApplyStrokeWidth(9);
+    Check(SameValue(GroupPath.StrokeWidth, 9),
+      'grouped line width was not applied');
+    History.Undo;
+    Check(SameValue(GroupPath.StrokeWidth, PathData.StrokeWidth),
+      'grouped line width undo failed');
+    History.Redo;
+    Check(SameValue(GroupPath.StrokeWidth, 9),
+      'grouped line width redo failed');
+    State.OpenGroup := nil;
+    Document.SetSelectedLayers([1]);
 
     State.LineStrokeWidth := 7.5;
     State.ActivateTool(vetFreehand);

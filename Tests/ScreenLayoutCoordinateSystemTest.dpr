@@ -57,6 +57,7 @@ var
   RenderBuffer: TVectArtRenderBuffer;
   Root: TJSONObject;
   Serialized: string;
+  TextData: TScreenLayoutTextData;
 begin
   Document := TVectArtDocument.Create;
   Loaded := TVectArtDocument.Create;
@@ -90,6 +91,24 @@ begin
       SameValue(Rectangle.Bounds.Right, 10.0) and
       SameValue(Rectangle.Bounds.Bottom, 5.0),
       'Centered coordinates changed during round trip');
+
+    TextData := Default(TScreenLayoutTextData);
+    TextData.Bounds := TRectF.Create(-80, 10, 80, 40);
+    TextData.FontFamily := 'Segoe UI';
+    TextData.FontSize := 24;
+    TextData.Name := 'Auto width';
+    TextData.Opacity := 1;
+    TextData.Text := 'This text must stay on one line';
+    TextData.TextColor := clWhite;
+    TextData.Visible := True;
+    TextData.WrapWidth := 0;
+    Document.InsertText(Document.LayerCount, TextData);
+    Serialized := SerializeVectArtDocument(Document);
+    Check(TryDeserializeVectArtDocument(Serialized, Loaded, ErrorMessage),
+      'Auto-width text document was not loaded: ' + ErrorMessage);
+    Check((Loaded[2] is TScreenLayoutTextLayer) and
+      SameValue(TScreenLayoutTextLayer(Loaded[2]).WrapWidth, 0),
+      'JSON round trip changed auto-width text into wrapped text');
 
     Check(LogicalToScreenX(0, Rect(100, 50, 300, 150), 1, 200) = 200,
       'Logical X origin is not at the canvas center');
