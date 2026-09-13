@@ -246,11 +246,22 @@ begin
   finally
     Operations.Free;
   end;
-  OrderBuilder := FBuilder.AddSubMenu('重なり順');
-  OrderBuilder.AddItem('最前面へ', nil);
-  OrderBuilder.AddItem('前面へ', nil);
-  OrderBuilder.AddItem('背面へ', nil);
-  OrderBuilder.AddItem('最背面へ', nil);
+  OrderBuilder := FBuilder.AddSubMenu('重なり');
+  Operations := TVectArtLayerOperations.Create;
+  try
+    Operations.Document := FDocument;
+    Operations.EditorState := FEditorState;
+    OrderBuilder.AddItem('最前面へ', 'Ctrl+Shift+]', EditObjectClick,
+      Operations.CanExecute(vlaMoveToFront)).Tag := 11;
+    OrderBuilder.AddItem('最背面へ', 'Ctrl+Shift+[', EditObjectClick,
+      Operations.CanExecute(vlaMoveToBack)).Tag := 12;
+    OrderBuilder.AddItem('前面へ', 'Ctrl+]', EditObjectClick,
+      Operations.CanExecute(vlaMoveForward)).Tag := 13;
+    OrderBuilder.AddItem('背面へ', 'Ctrl+[', EditObjectClick,
+      Operations.CanExecute(vlaMoveBackward)).Tag := 14;
+  finally
+    Operations.Free;
+  end;
   // ショートカットと同じ既存コマンドへ接続し、メニュー固有の編集処理は持たせない。
   GroupBuilder := FBuilder.AddSubMenu('グループ');
   GroupBuilder.AddItem('グループ化', 'Ctrl+G', GroupObjectClick,
@@ -311,6 +322,10 @@ begin
       3: PasteObjects(FDocument, FEditorState, FEditHistory);
       4: Operations.Execute(vlaDuplicate);
       5: Operations.Execute(vlaDelete);
+      11: Operations.Execute(vlaMoveToFront);
+      12: Operations.Execute(vlaMoveToBack);
+      13: Operations.Execute(vlaMoveForward);
+      14: Operations.Execute(vlaMoveBackward);
     end;
     Close;
   finally

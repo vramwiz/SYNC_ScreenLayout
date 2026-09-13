@@ -1666,15 +1666,18 @@ begin
     Exit;
   end;
   CalculateCanvasBounds;
-  // ペンの右クリックは頂点編集だけに使い、未命中でもオブジェクトメニューへ渡さない。
+  // ペン系ツールでも頂点上だけは削除を優先し、未命中は通常のオブジェクトメニュー判定へ渡す。
   if (Button = mbRight) and (FEditorState <> nil) and
     (FEditorState.CurrentTool in [vetLine, vetPath, vetShape, vetTextPath]) then
   begin
     CalculateCanvasBounds;
     ConfigureInteraction;
-    FInteraction.MouseDownSelectedVertex(Button, Shift, X, Y, VertexCaptureNeeded);
-    Invalidate;
-    Exit;
+    if FInteraction.MouseDownSelectedVertex(Button, Shift, X, Y,
+      VertexCaptureNeeded) then
+    begin
+      Invalidate;
+      Exit;
+    end;
   end;
   FTextureInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
   if FTextureInteraction.MouseDown(Button, X, Y) then
@@ -1706,7 +1709,9 @@ begin
       Invalidate;
       Exit;
     end;
-    if (FEditorState <> nil) and (FEditorState.CurrentTool <> vetSelect) then Exit;
+    if (FEditorState <> nil) and
+      not (FEditorState.CurrentTool in
+        [vetSelect, vetLine, vetPath, vetShape, vetTextPath]) then Exit;
     LogicalPointValid := TryClientPointToLogical(Point(X, Y), LogicalPoint);
     LayerIndex := FInteraction.LayerAt(X, Y);
     if SelectScreenLayoutContextMenuTarget(FDocument, FEditorState,

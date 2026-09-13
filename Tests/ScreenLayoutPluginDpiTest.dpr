@@ -6,10 +6,12 @@ program ScreenLayoutPluginDpiTest;
 uses
   System.SysUtils,
   Winapi.Windows,
-  Vcl.Forms,
+  Vcl.Forms, Vcl.Graphics,
   ScreenLayoutGradientKindCombo,
   ScreenLayoutLayerPanelFrame,
+  ScreenLayoutEditorState,
   ScreenLayoutTextureControl,
+  ScreenLayoutToolPalette,
   ScreenLayoutToolPaletteFrame;
 
 type
@@ -30,11 +32,14 @@ begin
 end;
 
 var
+  Bitmap: TBitmap;
   Form: TForm;
   GradientCombo: TScreenLayoutGradientKindCombo;
   LayerFrame: TLayerPanelFrame;
   PreviousContext: DPI_AWARENESS_CONTEXT;
+  State: TVectArtEditorState;
   TextureControl: TTextureControlAccess;
+  ToolPalette: TVectArtToolPaletteControl;
   ToolFrame: TToolPaletteFrame;
 
 begin
@@ -53,6 +58,26 @@ begin
       ToolFrame := TToolPaletteFrame.Create(Form);
       GradientCombo := TScreenLayoutGradientKindCombo.Create(Form);
       TextureControl := TTextureControlAccess.Create(Form);
+      State := TVectArtEditorState.Create;
+      Bitmap := TBitmap.Create;
+      try
+        ToolPalette := TVectArtToolPaletteControl.Create(Form);
+        ToolPalette.Parent := Form;
+        ToolPalette.SetBounds(0, 0, 58, 480);
+        ToolPalette.EditorState := State;
+        State.CreationColor := TColor(RGB($12, $34, $56));
+        Form.Show;
+        Application.ProcessMessages;
+        Bitmap.SetSize(ToolPalette.Width, ToolPalette.Height);
+        ToolPalette.PaintTo(Bitmap.Canvas.Handle, 0, 0);
+        Check(ColorToRGB(Bitmap.Canvas.Pixels[29, 453]) =
+          TColor(RGB($12, $34, $56)),
+          Format('tool palette did not display the current creation color: %.6x',
+            [ColorToRGB(Bitmap.Canvas.Pixels[29, 453])]));
+      finally
+        Bitmap.Free;
+        State.Free;
+      end;
       Check((Form.CurrentPPI = 96) and (LayerFrame.CurrentPPI = 96) and
         (ToolFrame.CurrentPPI = 96), 'plugin editor controls did not use 96 DPI coordinates');
       Check((LayerFrame.PreferredDockWidth = 150) and

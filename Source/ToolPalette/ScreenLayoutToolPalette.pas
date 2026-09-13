@@ -14,7 +14,9 @@ type
     function ButtonRect(Index: Integer): TRect;
     function ButtonSelected(Index: Integer): Boolean;
     function ButtonTool(Index: Integer): TVectArtEditorTool;
+    function ColorSwatchRect: TRect;
     procedure DrawButton(Index: Integer);
+    procedure DrawColorSwatch;
     procedure SetEditorState(const Value: TVectArtEditorState);
   protected
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState;
@@ -30,14 +32,16 @@ type
 implementation
 
 uses
-  Vcl.Graphics, Winapi.Windows;
+  Vcl.Graphics, Winapi.Windows, VectArtDarkPopupMenu;
 
 const
   BUTTON_SIZE = 40;
+  BUTTON_GAP = 3;
   PALETTE_BUTTON_COUNT = 10;
+  COLOR_SWATCH_SIZE = 28;
   COLOR_BACKGROUND = TColor($00252525);
   COLOR_BUTTON = TColor($002D2D2D);
-  COLOR_SELECTED = TColor($0046382B);
+  COLOR_SELECTED = VECTART_DARK_MENU_ACTIVE_COLOR;
   COLOR_ICON = TColor($00E0E0E0);
   COLOR_SHAPE_FILL = TColor($00808080);
 
@@ -115,8 +119,18 @@ var
   LogicalWidth: Integer;
 begin
   LogicalWidth := MulDiv(ClientWidth, 96, CurrentPPI);
-  Result := Rect(6, 6 + Index * (BUTTON_SIZE + 6),
-    LogicalWidth - 6, 6 + Index * (BUTTON_SIZE + 6) + BUTTON_SIZE);
+  Result := Rect(6, 6 + Index * (BUTTON_SIZE + BUTTON_GAP),
+    LogicalWidth - 6, 6 + Index * (BUTTON_SIZE + BUTTON_GAP) + BUTTON_SIZE);
+end;
+
+function TVectArtToolPaletteControl.ColorSwatchRect: TRect;
+var
+  Left: Integer;
+  Top: Integer;
+begin
+  Left := (MulDiv(ClientWidth, 96, CurrentPPI) - COLOR_SWATCH_SIZE) div 2;
+  Top := 6 + PALETTE_BUTTON_COUNT * (BUTTON_SIZE + BUTTON_GAP) + 3;
+  Result := Rect(Left, Top, Left + COLOR_SWATCH_SIZE, Top + COLOR_SWATCH_SIZE);
 end;
 
 function TVectArtToolPaletteControl.ButtonSelected(Index: Integer): Boolean;
@@ -299,6 +313,26 @@ begin
       VertexKind);
 end;
 
+procedure TVectArtToolPaletteControl.DrawColorSwatch;
+var
+  Bounds: TRect;
+begin
+  Bounds := ColorSwatchRect;
+  Canvas.Brush.Style := bsSolid;
+  Canvas.Brush.Color := clBlack;
+  Canvas.FillRect(Bounds);
+  InflateRect(Bounds, -1, -1);
+  Canvas.Brush.Color := clWhite;
+  Canvas.FillRect(Bounds);
+  InflateRect(Bounds, -1, -1);
+  if FEditorState <> nil then
+    Canvas.Brush.Color := ColorToRGB(FEditorState.CreationColor)
+  else
+    Canvas.Brush.Color := clBlack;
+  Canvas.FillRect(Bounds);
+  Canvas.Brush.Style := bsClear;
+end;
+
 procedure TVectArtToolPaletteControl.MouseDown(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
@@ -334,6 +368,7 @@ begin
     Canvas.FillRect(LogicalBounds);
     for I := 0 to PALETTE_BUTTON_COUNT - 1 do
       DrawButton(I);
+    DrawColorSwatch;
   finally
     RestoreDC(Canvas.Handle, SavedDC);
   end;

@@ -72,7 +72,7 @@ var
   ArrangementBuilder: TScreenLayoutObjectMenuBuilder;
   Item: TPanel;
 begin
-  ArrangementBuilder := Builder.AddSubMenu('整列と均等配置', 208);
+  ArrangementBuilder := Builder.AddSubMenu('整列', 208);
   for Arrangement := Low(TScreenLayoutArrangement) to
     High(TScreenLayoutArrangement) do
   begin

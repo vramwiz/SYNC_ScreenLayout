@@ -89,10 +89,12 @@ type
     procedure GeometrySettingsRequest(Sender: TObject);
     procedure HistoryChanged(Sender: TObject);
     procedure EditorStateChanged(Sender: TObject);
+    procedure ExecuteLayerAction(Action: TVectArtLayerAction);
     procedure InitializeSkiaRuntime;
     procedure InitializeShortcuts;
     function IsEditingSurfaceFocused: Boolean;
     function IsTextInputFocused: Boolean;
+    function CanExecuteLayerAction(Action: TVectArtLayerAction): Boolean;
     function ToolShortcutEnabled: Boolean;
     procedure LoadLayoutSettings;
     procedure LoadDocument;
@@ -704,6 +706,38 @@ begin
     FEditActionsUI.RefreshState;
 end;
 
+function TMainForm.CanExecuteLayerAction(
+  Action: TVectArtLayerAction): Boolean;
+var
+  Operations: TVectArtLayerOperations;
+begin
+  Result := False;
+  if not IsEditingSurfaceFocused or IsTextInputFocused then Exit;
+  Operations := TVectArtLayerOperations.Create;
+  try
+    Operations.Document := FDocument;
+    Operations.EditorState := FEditorState;
+    Result := Operations.CanExecute(Action);
+  finally
+    Operations.Free;
+  end;
+end;
+
+procedure TMainForm.ExecuteLayerAction(Action: TVectArtLayerAction);
+var
+  Operations: TVectArtLayerOperations;
+begin
+  Operations := TVectArtLayerOperations.Create;
+  try
+    Operations.Document := FDocument;
+    Operations.EditHistory := FEditHistory;
+    Operations.EditorState := FEditorState;
+    Operations.Execute(Action);
+  finally
+    Operations.Free;
+  end;
+end;
+
 procedure TMainForm.ToolMenuItemClick(Sender: TObject);
 begin
   if Sender = FLayerMenuItem then
@@ -768,6 +802,18 @@ end;
 procedure TMainForm.InitializeShortcuts;
 begin
   FShortcuts := TShortcutAction.Create;
+  FShortcuts.Add(VK_OEM_6, [ssCtrl],
+    procedure begin ExecuteLayerAction(vlaMoveForward); end,
+    function: Boolean begin Result := CanExecuteLayerAction(vlaMoveForward); end);
+  FShortcuts.Add(VK_OEM_4, [ssCtrl],
+    procedure begin ExecuteLayerAction(vlaMoveBackward); end,
+    function: Boolean begin Result := CanExecuteLayerAction(vlaMoveBackward); end);
+  FShortcuts.Add(VK_OEM_6, [ssCtrl, ssShift],
+    procedure begin ExecuteLayerAction(vlaMoveToFront); end,
+    function: Boolean begin Result := CanExecuteLayerAction(vlaMoveToFront); end);
+  FShortcuts.Add(VK_OEM_4, [ssCtrl, ssShift],
+    procedure begin ExecuteLayerAction(vlaMoveToBack); end,
+    function: Boolean begin Result := CanExecuteLayerAction(vlaMoveToBack); end);
   FShortcuts.Add(Ord('S'), [],
     procedure
     begin

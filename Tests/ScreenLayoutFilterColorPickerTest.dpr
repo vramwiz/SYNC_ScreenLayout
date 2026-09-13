@@ -110,6 +110,7 @@ var
   Bitmap: TBitmap;
   Png: TPngImage;
   Context: IVectArtDesignerContext;
+  ColorCodeEdit: TEdit;
   Controller: TScreenLayoutObjectColorController;
   Data: TVectArtRectangleData;
   Document: TVectArtDocument;
@@ -126,6 +127,7 @@ var
   OpacityLabel: TLabel;
   History: TVectArtEditHistory;
   I: Integer;
+  Key: Word;
   Layer: TVectArtLayer;
   Outline: TScreenLayoutOutlineFilter;
   Blur: TScreenLayoutBlurFilter;
@@ -179,6 +181,7 @@ begin
       FixedSVArea := nil;
       ModeSelector := nil;
       OpacityLabel := nil;
+      ColorCodeEdit := nil;
       for I := 0 to Frame.ControlCount - 1 do
       begin
         if Frame.Controls[I] is TComboBox then
@@ -192,11 +195,14 @@ begin
         if (Frame.Controls[I] is TLabel) and
           (TLabel(Frame.Controls[I]).Caption = '透明度：') then
           OpacityLabel := TLabel(Frame.Controls[I]);
+        if (Frame.Controls[I] is TEdit) and
+          TEdit(Frame.Controls[I]).Hint.Contains('#RRGGBB') then
+          ColorCodeEdit := TEdit(Frame.Controls[I]);
         Check(not (Frame.Controls[I] is TButton), 'coordinate button still exists');
       end;
       Check((KindSelector <> nil) and not KindSelector.Visible, 'solid mode shows gradient kinds');
       Check((FixedTargetSelector <> nil) and (FixedSVArea <> nil) and
-        (ModeSelector <> nil) and (OpacityLabel <> nil),
+        (ModeSelector <> nil) and (OpacityLabel <> nil) and (ColorCodeEdit <> nil),
         'fixed color layout controls missing');
       Check((OpacityLabel.Top < FixedTargetSelector.Top) and
         (FixedTargetSelector.Top < ModeSelector.Top), 'fixed color layout order is wrong');
@@ -207,6 +213,35 @@ begin
         'object color was not shown before selecting a filter');
       Check(Frame.Opacity = 75,
         'object opacity was not shown before selecting a filter');
+      Check(ColorCodeEdit.Text = '#0000FF', 'selected color was not formatted as HEX');
+      ColorCodeEdit.Text := '#123456';
+      Key := VK_RETURN;
+      ColorCodeEdit.OnKeyDown(ColorCodeEdit, Key, []);
+      Check((Key = 0) and (ColorToRGB(TVectArtRectangleLayer(Layer).FillColor) =
+        TColor(RGB($12, $34, $56))) and (ColorCodeEdit.Text = '#123456'),
+        'HEX color code was not applied');
+      History.Undo;
+      Controller.Refresh;
+      ColorCodeEdit.Text := 'rgb(12, 34, 56)';
+      Key := VK_RETURN;
+      ColorCodeEdit.OnKeyDown(ColorCodeEdit, Key, []);
+      Check((ColorToRGB(TVectArtRectangleLayer(Layer).FillColor) = TColor(RGB(12, 34, 56))) and
+        (ColorCodeEdit.Text = '#0C2238'), 'rgb() decimal color was not normalized');
+      History.Undo;
+      Controller.Refresh;
+      ColorCodeEdit.Text := '1, 2, 3';
+      ColorCodeEdit.OnExit(ColorCodeEdit);
+      Check((ColorToRGB(TVectArtRectangleLayer(Layer).FillColor) = TColor(RGB(1, 2, 3))) and
+        (ColorCodeEdit.Text = '#010203'), 'comma decimal color was not applied');
+      History.Undo;
+      Controller.Refresh;
+      ColorCodeEdit.Text := 'rgb(256, 0, 0)';
+      ColorCodeEdit.OnExit(ColorCodeEdit);
+      Check((ColorToRGB(TVectArtRectangleLayer(Layer).FillColor) = ColorToRGB(clBlue)) and
+        (ColorCodeEdit.Text = 'rgb(256, 0, 0)'), 'invalid color code changed the color');
+      Key := VK_ESCAPE;
+      ColorCodeEdit.OnKeyDown(ColorCodeEdit, Key, []);
+      Check(ColorCodeEdit.Text = '#0000FF', 'Escape did not restore the current HEX color');
       TargetSelector := TColorTargetSelectorAccess.Create(Frame);
       TargetSelector.Parent := Frame;
       Style := TScreenLayoutPaintStyle.Solid(clRed);

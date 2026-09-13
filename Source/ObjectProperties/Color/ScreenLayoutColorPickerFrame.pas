@@ -15,6 +15,8 @@ type
   TScreenLayoutColorPickerFrame = class(TFrame)
   private
     FColorHistory: TScreenLayoutColorHistory; // 所有する基本色・確定色履歴の表示。
+    FColorCodeEdit: TEdit;                    // HEX表示とHEX／RGB十進入力を兼ねる編集欄。
+    FColorCodeLabel: TLabel;                  // 編集欄の用途を示す固定ラベル。
     FHistoryGestureActive: Boolean; // 色ドラッグ中だけ履歴の確定を待つ。
     FHistoryStartColor: TColor; // 変更のないクリックを履歴へ追加しないための開始色。
     FPatternControl: TScreenLayoutPatternControl; // パターン専用の定義別編集UI。
@@ -48,6 +50,9 @@ type
     FTitleLabel: TLabel;
     FUpdating: Boolean;
     procedure HistorySelected(Sender: TObject; Color: TColor);
+    procedure ColorCodeExit(Sender: TObject);
+    procedure ColorCodeKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure CommitColorCode;
     procedure ScrollBarChanged(Sender: TObject);
     procedure PatternChanged(Sender: TObject);
     procedure PatternSlotSelected(Sender: TObject);
@@ -144,6 +149,8 @@ const
   COLOR_BACKGROUND = TColor($00212121);
   COLOR_HEADER = TColor($00292929);
   COLOR_TEXT = TColor($00EEEEEE);
+  COLOR_ERROR_TEXT = TColor($006060FF);
+  COLOR_EDIT_BACKGROUND = TColor($00303030);
   COLOR_PICKER_HEIGHT = 92;
   COLOR_PICKER_MARGIN = 6;
   COLOR_SELECTOR_SIZE = 26;
@@ -223,6 +230,29 @@ begin
   FColorHistory.Parent := Self;
   FColorHistory.OnSelect := HistorySelected;
 
+  FColorCodeLabel := TLabel.Create(Self);
+  FColorCodeLabel.Parent := Self;
+  FColorCodeLabel.AutoSize := False;
+  FColorCodeLabel.Caption := 'カラーコード';
+  FColorCodeLabel.Font.Name := 'Segoe UI';
+  FColorCodeLabel.Font.Height := -MulDiv(9, CurrentPPI, 96);
+  FColorCodeLabel.Font.Color := COLOR_TEXT;
+  FColorCodeLabel.ParentFont := False;
+  FColorCodeLabel.Layout := tlCenter;
+
+  FColorCodeEdit := TEdit.Create(Self);
+  FColorCodeEdit.Parent := Self;
+  FColorCodeEdit.Color := COLOR_EDIT_BACKGROUND;
+  FColorCodeEdit.Font.Name := 'Consolas';
+  FColorCodeEdit.Font.Height := -MulDiv(11, CurrentPPI, 96);
+  FColorCodeEdit.Font.Color := COLOR_TEXT;
+  FColorCodeEdit.ParentFont := False;
+  FColorCodeEdit.MaxLength := 24;
+  FColorCodeEdit.Hint := '#RRGGBB、rgb(r,g,b)、または r,g,b';
+  FColorCodeEdit.ShowHint := True;
+  FColorCodeEdit.OnExit := ColorCodeExit;
+  FColorCodeEdit.OnKeyDown := ColorCodeKeyDown;
+
   FHueBar := TColorPickerHueBar.Create(Self);
   FHueBar.Parent := Self;
   FHueBar.OnChange := HueBarChange;
@@ -257,6 +287,96 @@ begin
   FScrollBar.Visible := False;
   FScrollBar.OnChange := ScrollBarChanged;
   SyncControls;
+end;
+
+function TryParseColorCode(const Text: string; out Color: TColor): Boolean;
+var
+  HexText: string;
+  Parts: TArray<string>;
+  RedValue: Integer;
+  GreenValue: Integer;
+  BlueValue: Integer;
+begin
+  Result := False;
+  HexText := Trim(Text);
+  if HexText.StartsWith('#') then
+    Delete(HexText, 1, 1);
+  if (Length(HexText) = 6) and TryStrToInt('$' + HexText, RedValue) then
+  begin
+    Color := RGB((RedValue shr 16) and $FF, (RedValue shr 8) and $FF, RedValue and $FF);
+    Exit(True);
+  end;
+
+  HexText := Trim(Text);
+  if (Length(HexText) >= 5) and SameText(Copy(HexText, 1, 4), 'rgb(') and
+    (HexText[Length(HexText)] = ')') then
+    HexText := Copy(HexText, 5, Length(HexText) - 5);
+  Parts := HexText.Split([',']);
+  if (Length(Parts) <> 3) or not TryStrToInt(Trim(Parts[0]), RedValue) or
+    not TryStrToInt(Trim(Parts[1]), GreenValue) or
+    not TryStrToInt(Trim(Parts[2]), BlueValue) then
+    Exit;
+  if not InRange(RedValue, 0, 255) or not InRange(GreenValue, 0, 255) or
+    not InRange(BlueValue, 0, 255) then
+    Exit;
+  Color := RGB(RedValue, GreenValue, BlueValue);
+  Result := True;
+end;
+
+procedure TScreenLayoutColorPickerFrame.ColorCodeExit(Sender: TObject);
+begin
+  CommitColorCode;
+end;
+
+procedure TScreenLayoutColorPickerFrame.ColorCodeKeyDown(Sender: TObject;
+  var Key: Word; Shift: TShiftState);
+begin
+  case Key of
+    VK_RETURN:
+      begin
+        Key := 0;
+        CommitColorCode;
+      end;
+    VK_ESCAPE:
+      begin
+        Key := 0;
+        SyncControls;
+      end;
+  end;
+end;
+
+procedure TScreenLayoutColorPickerFrame.CommitColorCode;
+var
+  NewColor: TColor;
+begin
+  if FUpdating then Exit;
+  if not FColorEnabled or (FPaintStyle.Kind = slpkTexture) then
+  begin
+    SyncControls;
+    Exit;
+  end;
+  if not TryParseColorCode(FColorCodeEdit.Text, NewColor) then
+  begin
+    FColorCodeEdit.Font.Color := COLOR_ERROR_TEXT;
+    Exit;
+  end;
+  FColorCodeEdit.Font.Color := COLOR_TEXT;
+  if ColorToRGB(NewColor) = ColorToRGB(FColor) then
+  begin
+    SyncControls;
+    Exit;
+  end;
+  ColorMouseDown(Self, mbLeft, [], 0, 0);
+  try
+    SetSelectedColor(NewColor);
+    if FPaintStyle.Kind = slpkPattern then
+    begin
+      if Assigned(FOnPaintStyleChange) then FOnPaintStyleChange(Self);
+    end
+    else if Assigned(FOnChange) then FOnChange(Self);
+  finally
+    ColorMouseUp(Self, mbLeft, [], 0, 0);
+  end;
 end;
 
 function TScreenLayoutColorPickerFrame.DoMouseWheel(Shift: TShiftState;
@@ -538,6 +658,9 @@ var
   PickerTop: Integer;
   ContentTop: Integer;
   HistoryHeight: Integer;
+  CodeTop: Integer;
+  CodeHeight: Integer;
+  CodeLabelWidth: Integer;
   ScrollOffset: Integer;
 begin
   inherited Resize;
@@ -584,7 +707,14 @@ begin
     Max(ContentWidth - Margin * 2, 1), MulDiv(24, CurrentPPI, 96));
   PickerTop := ContentHeight - Margin - PickerHeight;
   HistoryHeight := MulDiv(78, CurrentPPI, 96);
-  FColorHistory.SetBounds(Margin, PickerTop - HistoryHeight - PickerGap - ScrollOffset,
+  CodeHeight := MulDiv(24, CurrentPPI, 96);
+  CodeLabelWidth := MulDiv(64, CurrentPPI, 96);
+  CodeTop := PickerTop - CodeHeight - PickerGap;
+  FColorCodeLabel.SetBounds(Margin, CodeTop - ScrollOffset, CodeLabelWidth, CodeHeight);
+  FColorCodeEdit.SetBounds(Margin + CodeLabelWidth, CodeTop - ScrollOffset,
+    Max(ContentWidth - Margin * 2 - CodeLabelWidth, 1), CodeHeight);
+  FColorHistory.SetBounds(Margin,
+    CodeTop - HistoryHeight - PickerGap - ScrollOffset,
     Max(ContentWidth - Margin * 2, 1), HistoryHeight);
   FHueBar.SetBounds(Max(ContentWidth - Margin - HueWidth, Margin),
     PickerTop - ScrollOffset, HueWidth, PickerHeight);
@@ -593,11 +723,11 @@ begin
   if FTextureControl <> nil then
     FTextureControl.SetBounds(Margin, ContentTop - ScrollOffset,
       Max(ContentWidth - Margin * 2, 1),
-      Max(PickerTop - HistoryHeight - PickerGap - ContentTop - PickerGap, 1));
+      Max(CodeTop - HistoryHeight - PickerGap - ContentTop - PickerGap, 1));
   if FPatternControl <> nil then
     FPatternControl.SetBounds(Margin, ContentTop - ScrollOffset,
       Max(ContentWidth - Margin * 2, 1),
-      Max(PickerTop - HistoryHeight - PickerGap - ContentTop - PickerGap, 1));
+      Max(CodeTop - HistoryHeight - PickerGap - ContentTop - PickerGap, 1));
 end;
 
 procedure TScreenLayoutColorPickerFrame.ScrollBarChanged(Sender: TObject);
@@ -621,6 +751,8 @@ procedure TScreenLayoutColorPickerFrame.SetColorEnabled(Value: Boolean);
 begin
   FColorEnabled := Value;
   FColorHistory.Enabled := Value and (FPaintStyle.Kind <> slpkTexture);
+  FColorCodeEdit.Enabled := Value and (FPaintStyle.Kind <> slpkTexture);
+  FColorCodeLabel.Enabled := FColorCodeEdit.Enabled;
   FTextureControl.Enabled := Value and FPaintModeEnabled;
   FPatternControl.Enabled := Value and FPaintModeEnabled;
   FGradientKindSelector.Enabled := Value and FPaintModeEnabled and (FPaintStyle.Kind = slpkGradient);
@@ -660,6 +792,8 @@ begin
   FGradientKindSelector.Enabled := FPaintModeEnabled and FColorEnabled and (FPaintStyle.Kind = slpkGradient);
   FGradientKindSelector.Visible := FPaintStyle.Kind = slpkGradient;
   FColorHistory.Enabled := FColorEnabled and (FPaintStyle.Kind <> slpkTexture);
+  FColorCodeEdit.Enabled := FColorEnabled and (FPaintStyle.Kind <> slpkTexture);
+  FColorCodeLabel.Enabled := FColorCodeEdit.Enabled;
   FHueBar.Enabled := FColorEnabled and (FPaintStyle.Kind <> slpkTexture);
   FSVArea.Enabled := FColorEnabled and (FPaintStyle.Kind <> slpkTexture);
   FColorTargetSelector.Enabled := FColorEnabled and (FPaintStyle.Kind <> slpkTexture);
@@ -763,6 +897,10 @@ begin
     FHueBar.Color := HsvToColor(FCurrentHue, 1, 1);
     FSVArea.BaseColor := HsvToColor(FCurrentHue, 1, 1);
     FSVArea.Color := FColor;
+    FColorCodeEdit.Font.Color := COLOR_TEXT;
+    FColorCodeEdit.Text := Format('#%.2X%.2X%.2X',
+      [GetRValue(ColorToRGB(FColor)), GetGValue(ColorToRGB(FColor)),
+      GetBValue(ColorToRGB(FColor))]);
     FColorTargetSelector.ColorValue := FColor;
     FColorTargetSelector.PaintStyle := FPaintStyle;
     FColorTargetSelector.SelectedStopId := FGradientStop;

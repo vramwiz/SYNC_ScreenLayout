@@ -73,6 +73,9 @@ var
   History: TVectArtEditHistory;
   MenuGroup: TVectArtDarkMenuGroup;
   MenuItem: TPanel;
+  ParentMenuItem: TPanel;
+  ChildMenuItem: TPanel;
+  NormalColor: TColor;
   RectangleData: TVectArtRectangleData;
   State: TVectArtEditorState;
   TextData: TScreenLayoutTextData;
@@ -105,12 +108,35 @@ begin
     ContextMenu.ShowForObject(nil, Point(0, 0));
     Check(FindMenuItem(ContextMenu.Menu, '切り取り    Ctrl+X'),
       'name and shortcut item caption compatibility was lost');
-    Check(FindMenuItem(ContextMenu.Menu, '変形  >'),
-      'common transform submenu was not added');
-    Check(not FindMenuItem(ContextMenu.Menu, '整列と均等配置  >'),
+    Check(FindMenuItem(ContextMenu.Menu, '重なり  >'),
+      'common stacking submenu was not added');
+    Check(FindMenuItem(ContextMenu.Menu, '反転  >'),
+      'common flip submenu was not added');
+    Check(FindMenuItem(ContextMenu.Menu, '回転  >'),
+      'common rotation submenu was not added');
+    Check(not FindMenuItem(ContextMenu.Menu, '整列  >'),
       'arrangement submenu was added for a single selection');
     Check(not FindMenuItem(ContextMenu.Menu, 'テキストの分解  >'),
       'text-only item was added for a rectangle');
+    MenuItem := FindPanel(Form, 'コピー    Ctrl+C');
+    Check(MenuItem <> nil, 'hover test item missing');
+    NormalColor := MenuItem.Color;
+    MenuItem.OnMouseEnter(MenuItem);
+    Check(MenuItem.Color <> NormalColor, 'menu hover was not highlighted');
+    MenuItem.OnMouseLeave(MenuItem);
+    Check(MenuItem.Color = NormalColor, 'menu hover highlight was not cleared');
+    ParentMenuItem := FindPanel(Form, '反転  >');
+    Check(ParentMenuItem <> nil, 'submenu parent test item missing');
+    ParentMenuItem.OnMouseEnter(ParentMenuItem);
+    ParentMenuItem.OnMouseLeave(ParentMenuItem);
+    ChildMenuItem := FindPanel(Form, '左右反転    Shift+H');
+    Check(ChildMenuItem <> nil, 'submenu child test item missing');
+    ChildMenuItem.OnMouseEnter(ChildMenuItem);
+    Check(ParentMenuItem.Color <> NormalColor,
+      'open submenu parent did not retain its active highlight');
+    MenuItem.OnMouseEnter(MenuItem);
+    Check(ParentMenuItem.Color = NormalColor,
+      'submenu parent highlight was not cleared after closing its child');
 
     TextData := Default(TScreenLayoutTextData);
     TextData.Bounds := TRectF.Create(-80, -20, 80, 20);
@@ -129,9 +155,28 @@ begin
       'registered text item was not added for a top-level text layer');
     Check(FindMenuItem(ContextMenu.Menu, 'この位置のレイヤー  >'),
       'overlapping layer selection submenu was not added');
+    MenuItem := FindPanel(Form, '最背面へ    Ctrl+Shift+[');
+    Check((MenuItem <> nil) and MenuItem.Enabled,
+      'move-to-back command was not enabled');
+    MenuItem.OnClick(MenuItem);
+    Check(Document[1] is TScreenLayoutTextLayer,
+      'stacking menu did not invoke the common layer operation');
+    History.Undo;
+    Check(Document[2] is TScreenLayoutTextLayer,
+      'stacking menu undo failed');
+    ContextMenu.ShowForObject(nil, Point(0, 0));
+    MenuItem := FindPanel(Form, '左へ90度');
+    Check((MenuItem <> nil) and MenuItem.Enabled,
+      '90 degree rotation command was not enabled');
+    MenuItem.OnClick(MenuItem);
+    Check(Abs(TScreenLayoutTextLayer(Document[2]).RotationDegrees + 90) < 0.001,
+      'rotation menu did not invoke the common layer operation');
+    History.Undo;
+    Check(Abs(TScreenLayoutTextLayer(Document[2]).RotationDegrees) < 0.001,
+      'rotation menu undo failed');
     Document.SetSelectedLayers([1, 2]);
     ContextMenu.ShowForObject(nil, Point(0, 0));
-    Check(FindMenuItem(ContextMenu.Menu, '整列と均等配置  >'),
+    Check(FindMenuItem(ContextMenu.Menu, '整列  >'),
       'arrangement submenu was not added for a multiple selection');
     Check(FindMenuItem(ContextMenu.Menu, 'グループ  >'),
       'group submenu was not added');

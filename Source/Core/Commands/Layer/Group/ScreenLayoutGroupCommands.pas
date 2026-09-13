@@ -27,7 +27,7 @@ procedure DuplicateOpenGroupChild(Document: TVectArtDocument;
 // 選択子を指定方向へ1段移動できるかを返す。
 function CanMoveOpenGroupChild(EditorState: TVectArtEditorState;
   Delta: Integer): Boolean;
-// 選択子を親グループ内で指定方向へ1段移動する。
+// 選択子を親グループ内で指定段数移動する。範囲外の段数は先頭または末尾へ制限する。
 procedure MoveOpenGroupChild(Document: TVectArtDocument;
   EditHistory: TVectArtEditHistory; EditorState: TVectArtEditorState;
   Delta: Integer);
@@ -65,7 +65,8 @@ procedure UngroupCurrentSelection(Document: TVectArtDocument;
 implementation
 
 uses
-  System.Classes, System.Generics.Collections, System.SysUtils, System.Types,
+  System.Classes, System.Generics.Collections, System.Math, System.SysUtils,
+  System.Types,
   ScreenLayoutEditCommands, ScreenLayoutGroupChildCommands,
   ScreenLayoutLayerGeometry, ScreenLayoutPathOperations,
   ScreenLayoutShapeOperations;
@@ -687,6 +688,8 @@ var
   I: Integer;
   Index: Integer;
   J: Integer;
+  Step: Integer;
+  StepCount: Integer;
   ReorderCommand: TScreenLayoutReorderGroupChildrenCommand;
   Temp: TVectArtLayer;
 begin
@@ -698,24 +701,26 @@ begin
     for I := 0 to High(BeforeOrder) do
       BeforeOrder[I] := EditorState.OpenGroup[I];
     AfterOrder := Copy(BeforeOrder);
-    if Delta > 0 then
-      for I := High(AfterOrder) - 1 downto 0 do
-        if EditorState.IsOpenGroupChildSelected(AfterOrder[I]) and
-          not EditorState.IsOpenGroupChildSelected(AfterOrder[I + 1]) then
-        begin
-          Temp := AfterOrder[I];
-          AfterOrder[I] := AfterOrder[I + 1];
-          AfterOrder[I + 1] := Temp;
-        end
-    else
-      for J := 1 to High(AfterOrder) do
-        if EditorState.IsOpenGroupChildSelected(AfterOrder[J]) and
-          not EditorState.IsOpenGroupChildSelected(AfterOrder[J - 1]) then
-        begin
-          Temp := AfterOrder[J];
-          AfterOrder[J] := AfterOrder[J - 1];
-          AfterOrder[J - 1] := Temp;
-        end;
+    if Abs(Delta) > 1 then StepCount := Length(AfterOrder) else StepCount := 1;
+    for Step := 1 to StepCount do
+      if Delta > 0 then
+        for I := High(AfterOrder) - 1 downto 0 do
+          if EditorState.IsOpenGroupChildSelected(AfterOrder[I]) and
+            not EditorState.IsOpenGroupChildSelected(AfterOrder[I + 1]) then
+          begin
+            Temp := AfterOrder[I];
+            AfterOrder[I] := AfterOrder[I + 1];
+            AfterOrder[I + 1] := Temp;
+          end
+      else
+        for J := 1 to High(AfterOrder) do
+          if EditorState.IsOpenGroupChildSelected(AfterOrder[J]) and
+            not EditorState.IsOpenGroupChildSelected(AfterOrder[J - 1]) then
+          begin
+            Temp := AfterOrder[J];
+            AfterOrder[J] := AfterOrder[J - 1];
+            AfterOrder[J - 1] := Temp;
+          end;
     ReorderCommand := TScreenLayoutReorderGroupChildrenCommand.Create(
       Document, EditorState.OpenGroup, BeforeOrder, AfterOrder);
     ReorderCommand.Execute;
@@ -727,7 +732,8 @@ begin
   end;
   Index := OpenGroupChildIndex(EditorState);
   Command := TScreenLayoutMoveGroupChildCommand.Create(Document,
-    EditorState.OpenGroup, Index, Index + Delta);
+    EditorState.OpenGroup, Index, EnsureRange(Index + Delta, 0,
+      EditorState.OpenGroup.ChildCount - 1));
   Command.Execute;
   if EditHistory <> nil then
     EditHistory.AddApplied(Command)

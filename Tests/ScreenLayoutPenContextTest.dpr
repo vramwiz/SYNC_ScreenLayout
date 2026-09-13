@@ -90,7 +90,10 @@ begin
     Check(Length(Path.Vertices) = 4, 'delete undo');
     History.Redo;
     Canvas.ClickAt(mbRight, 80, 80);
-    Check(Observer.Count = 1, 'pen empty right click opened menu');
+    Check(Observer.Count = 2, 'pen empty right click did not open the menu');
+    Canvas.ClickAt(mbRight, 20, 0);
+    Check(Observer.Count = 3,
+      'pen right click away from vertices did not open the object menu');
     SetLength(Contours, 1);
     SetLength(Contours[0].Vertices, 4);
     for I := 0 to 3 do
@@ -108,17 +111,17 @@ begin
     Canvas.ClickAt(mbLeft, 0, -40);
     Check(Length(Shape.Contours[0].Vertices) = 5, 'pen did not insert on closed shape');
     Canvas.ClickAt(mbRight, 0, -40);
-    Check((Length(Shape.Contours[0].Vertices) = 4) and (Observer.Count = 1), 'pen did not delete on closed shape');
+    Check((Length(Shape.Contours[0].Vertices) = 4) and (Observer.Count = 3), 'pen did not delete on closed shape');
     State.CurrentTool := vetSelect;
     Canvas.ClickAt(mbLeft, -40, -40);
     Canvas.ClickAt(mbRight, -40, -40);
-    Check((Length(Shape.Contours[0].Vertices) = 3) and (Observer.Count = 1),
+    Check((Length(Shape.Contours[0].Vertices) = 3) and (Observer.Count = 3),
       'selected shape vertex must delete in select tool');
     History.Undo;
     Check(Length(Shape.Contours[0].Vertices) = 4, 'selected shape delete undo');
     Canvas.ClickAt(mbLeft, -40, -40);
     Canvas.ClickAt(mbRight, 40, 40);
-    Check((Length(Shape.Contours[0].Vertices) = 4) and (Observer.Count = 2),
+    Check((Length(Shape.Contours[0].Vertices) = 4) and (Observer.Count = 4),
       'unselected vertex must show menu instead of deleting');
     Writeln('PASS: select menu, pen insert/delete, empty click, closed shape, undo/redo');
   finally

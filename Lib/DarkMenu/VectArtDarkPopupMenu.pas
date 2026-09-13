@@ -7,13 +7,19 @@ interface
 
 uses
   System.Classes, System.Generics.Collections, Vcl.Controls, Vcl.ExtCtrls,
-  Winapi.Windows;
+  Vcl.Graphics, Winapi.Windows;
+
+const
+  VECTART_DARK_MENU_ACTIVE_COLOR = TColor($00613F20); // 開いている子メニューの親と共通UIの選択背景。
+  VECTART_DARK_MENU_ACCENT_COLOR = TColor($00E89A45); // アクティブ項目の左端と外枠。
 
 type
   TVectArtDarkPopupMenu = class(TComponent)
   private
     FButton: TPanel;
+    FActiveSubMenuItem: TPanel; // 表示中の子メニューを開いた親項目。子が閉じるまで強調する。
     FChildMenus: TList<TVectArtDarkPopupMenu>; // このメニューから開く子への非所有参照。
+    FHoveredItem: TPanel;       // 現在ポインターがある項目。親項目の固定強調とは独立する。
     FMainForm: TWinControl;
     FOnHover: TNotifyEvent;
     FOnOpening: TNotifyEvent;
@@ -27,10 +33,12 @@ type
     function GetVisible: Boolean;
     procedure InitializeControls(AButton, APopup: TPanel);
     procedure ItemMouseEnter(Sender: TObject);
+    procedure ItemMouseLeave(Sender: TObject);
     procedure OpenAtScreenPointCore(const ScreenPoint: TPoint;
       NotifyOpening: Boolean);
     procedure OpenSubMenu(Item: TPanel;
       SubMenu: TVectArtDarkPopupMenu);
+    procedure SetActiveSubMenuItem(Item: TPanel);
     procedure SetPopupHeight(const Value: Integer);
     procedure SubMenuItemClick(Sender: TObject);
   public
@@ -88,25 +96,30 @@ type
 implementation
 
 uses
-  System.Math, System.SysUtils, System.Types, Vcl.Forms, Vcl.Graphics;
+  System.Math, System.SysUtils, System.Types, Vcl.Forms;
 
 type
+  TVectArtDarkMenuItemState = (dmisNormal, dmisHover, dmisSubMenuActive);
+
   // 標準メニューに近い左寄せ名称、右寄せショートカット、右端矢印を描く。
   TVectArtDarkMenuItem = class(TPanel)
   private
     FDisplayCaption: string;
     FHasSubMenu: Boolean;
     FShortcut: string;
+    FState: TVectArtDarkMenuItemState;
   protected
     procedure Paint; override;
   public
     procedure SetMenuContent(const ACaption, AShortcut: string;
       HasSubMenu: Boolean);
+    procedure SetState(Value: TVectArtDarkMenuItemState);
   end;
 
 const
   COLOR_BUTTON = TColor($00222222);
   COLOR_DISABLED = TColor($00757575);
+  COLOR_ITEM_HOVER = TColor($00464646);          // 通常項目へポインターがある間の背景。
   COLOR_POPUP = TColor($00303030);
   COLOR_TEXT = TColor($00E6E6E6);
   MENU_ITEM_HEIGHT = 32;
@@ -150,8 +163,21 @@ var
   ShortcutColumnWidth: Integer;
   ShortcutRect: TRect;
 begin
-  Canvas.Brush.Color := Color;
+  case FState of
+    dmisHover: Canvas.Brush.Color := COLOR_ITEM_HOVER;
+    dmisSubMenuActive: Canvas.Brush.Color := VECTART_DARK_MENU_ACTIVE_COLOR;
+  else
+    Canvas.Brush.Color := Color;
+  end;
   Canvas.FillRect(ClientRect);
+  if FState = dmisSubMenuActive then
+  begin
+    Canvas.Brush.Color := VECTART_DARK_MENU_ACCENT_COLOR;
+    Canvas.FillRect(Rect(0, 0, MulDiv(3, CurrentPPI, 96), ClientHeight));
+    Canvas.Brush.Style := bsClear;
+    Canvas.Pen.Color := VECTART_DARK_MENU_ACCENT_COLOR;
+    Canvas.Rectangle(0, 0, ClientWidth, ClientHeight);
+  end;
   Canvas.Brush.Style := bsClear;
   Canvas.Font.Assign(Font);
 
@@ -185,6 +211,19 @@ begin
     DrawText(Canvas.Handle, PChar(#8250), 1, ArrowRect,
       DT_RIGHT or DT_VCENTER or DT_SINGLELINE or DT_NOPREFIX);
   end;
+end;
+
+procedure TVectArtDarkMenuItem.SetState(Value: TVectArtDarkMenuItemState);
+begin
+  if FState = Value then Exit;
+  FState := Value;
+  case FState of
+    dmisHover: Color := COLOR_ITEM_HOVER;
+    dmisSubMenuActive: Color := VECTART_DARK_MENU_ACTIVE_COLOR;
+  else
+    Color := COLOR_POPUP;
+  end;
+  Invalidate;
 end;
 
 procedure TVectArtDarkMenuItem.SetMenuContent(const ACaption,
@@ -225,6 +264,7 @@ begin
   Result.ParentBackground := False;
   Result.OnClick := ClickHandler;
   Result.OnMouseEnter := ItemMouseEnter;
+  Result.OnMouseLeave := ItemMouseLeave;
   TVectArtDarkMenuItem(Result).SetMenuContent(ACaption, AShortcut, False);
 end;
 
@@ -271,7 +311,10 @@ end;
 procedure TVectArtDarkPopupMenu.Close;
 begin
   CloseChildMenus;
+  SetActiveSubMenuItem(nil);
   FPopup.Visible := False;
+  if FParentMenu <> nil then
+    FParentMenu.SetActiveSubMenuItem(nil);
 end;
 
 procedure TVectArtDarkPopupMenu.ClearItems;
@@ -279,6 +322,7 @@ var
   Menu: TVectArtDarkPopupMenu;
 begin
   Close;
+  FHoveredItem := nil;
   for Menu in FChildMenus do
     if Menu.FParentMenu = Self then
       Menu.FParentMenu := nil;
@@ -403,17 +447,34 @@ end;
 
 procedure TVectArtDarkPopupMenu.ItemMouseEnter(Sender: TObject);
 var
+  Item: TPanel;
   SubMenu: TVectArtDarkPopupMenu;
 begin
+  if not (Sender is TPanel) then Exit;
+  Item := TPanel(Sender);
+  if (FHoveredItem <> nil) and (FHoveredItem <> FActiveSubMenuItem) then
+    TVectArtDarkMenuItem(FHoveredItem).SetState(dmisNormal);
+  FHoveredItem := Item;
   SubMenu := nil;
-  if (Sender is TPanel) and
-    FSubMenus.TryGetValue(TPanel(Sender), SubMenu) then
+  if FSubMenus.TryGetValue(Item, SubMenu) then
   begin
     CloseChildMenus(SubMenu);
-    OpenSubMenu(TPanel(Sender), SubMenu);
+    SetActiveSubMenuItem(Item);
+    OpenSubMenu(Item, SubMenu);
   end
-  else
+  else begin
     CloseChildMenus;
+    SetActiveSubMenuItem(nil);
+    TVectArtDarkMenuItem(Item).SetState(dmisHover);
+  end;
+end;
+
+procedure TVectArtDarkPopupMenu.ItemMouseLeave(Sender: TObject);
+begin
+  if not (Sender is TPanel) then Exit;
+  if FHoveredItem = Sender then FHoveredItem := nil;
+  if Sender <> FActiveSubMenuItem then
+    TVectArtDarkMenuItem(Sender).SetState(dmisNormal);
 end;
 
 procedure TVectArtDarkPopupMenu.Open;
@@ -497,6 +558,16 @@ begin
       ItemOrigin.X := Item.ClientToScreen(Point(-SubMenu.Popup.Width, 0)).X;
   end;
   SubMenu.OpenAtScreenPointCore(ItemOrigin, False);
+end;
+
+procedure TVectArtDarkPopupMenu.SetActiveSubMenuItem(Item: TPanel);
+begin
+  if FActiveSubMenuItem = Item then Exit;
+  if FActiveSubMenuItem <> nil then
+    TVectArtDarkMenuItem(FActiveSubMenuItem).SetState(dmisNormal);
+  FActiveSubMenuItem := Item;
+  if FActiveSubMenuItem <> nil then
+    TVectArtDarkMenuItem(FActiveSubMenuItem).SetState(dmisSubMenuActive);
 end;
 
 function TVectArtDarkPopupMenu.OwnsControl(AControl: TControl): Boolean;

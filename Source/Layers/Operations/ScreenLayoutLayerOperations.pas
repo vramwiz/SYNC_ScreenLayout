@@ -9,7 +9,8 @@ uses
 
 type
   TVectArtLayerAction = (vlaAdd, vlaDuplicate, vlaDelete,
-    vlaMoveForward, vlaMoveBackward);
+    vlaMoveForward, vlaMoveBackward, vlaMoveToFront, vlaMoveToBack,
+    vlaRotateLeft90, vlaRotateRight90);
 
   TVectArtLayerOperations = class
   private
@@ -19,7 +20,8 @@ type
     procedure AddRectangle;
     function CanMove(Delta: Integer): Boolean;
     procedure DeleteSelectedLayers;
-    procedure MoveSelectedLayers(Delta: Integer);
+    procedure MoveSelectedLayers(Delta: Integer; ToEdge: Boolean = False);
+    procedure RotateSelectedLayers(Degrees: Single);
     function NextRectangleName: string;
     function SelectedLayersEditable: Boolean;
   public
@@ -37,9 +39,10 @@ implementation
 uses
   System.Math, System.SysUtils, System.Generics.Collections, Vcl.Graphics,
   ScreenLayoutEditCommands, ScreenLayoutDeleteLayersCommand,
-  ScreenLayoutGroupCommands,
+  ScreenLayoutGroupCommands, ScreenLayoutGroupTransformCommands,
   ScreenLayoutLayerDuplication,
-  ScreenLayoutLayerStructureCommands, ScreenLayoutTextCommands;
+  ScreenLayoutLayerGeometry, ScreenLayoutLayerStructureCommands,
+  ScreenLayoutTextCommands;
 
 const
   DEFAULT_RECTANGLE_WIDTH = 320;
@@ -101,16 +104,21 @@ begin
       if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) then
         Result := CanEditOpenGroupChild(FEditorState)
       else Result := SelectedLayersEditable;
-    vlaMoveForward:
+    vlaMoveForward, vlaMoveToFront:
       if CanEditOpenGroupChild(FEditorState) then
         Result := CanMoveOpenGroupChild(FEditorState, 1)
       else
         Result := SelectedLayersEditable and CanMove(1);
-    vlaMoveBackward:
+    vlaMoveBackward, vlaMoveToBack:
       if CanEditOpenGroupChild(FEditorState) then
         Result := CanMoveOpenGroupChild(FEditorState, -1)
       else
         Result := SelectedLayersEditable and CanMove(-1);
+    vlaRotateLeft90, vlaRotateRight90:
+      if CanEditOpenGroupChild(FEditorState) then
+        Result := True
+      else
+        Result := SelectedLayersEditable;
   end;
 end;
 
@@ -178,10 +186,25 @@ begin
         MoveOpenGroupChild(FDocument, FEditHistory, FEditorState, -1)
       else
         MoveSelectedLayers(-1);
+    vlaMoveToFront:
+      if CanEditOpenGroupChild(FEditorState) then
+        MoveOpenGroupChild(FDocument, FEditHistory, FEditorState,
+          FEditorState.OpenGroup.ChildCount)
+      else
+        MoveSelectedLayers(1, True);
+    vlaMoveToBack:
+      if CanEditOpenGroupChild(FEditorState) then
+        MoveOpenGroupChild(FDocument, FEditHistory, FEditorState,
+          -FEditorState.OpenGroup.ChildCount)
+      else
+        MoveSelectedLayers(-1, True);
+    vlaRotateLeft90: RotateSelectedLayers(-90);
+    vlaRotateRight90: RotateSelectedLayers(90);
   end;
 end;
 
-procedure TVectArtLayerOperations.MoveSelectedLayers(Delta: Integer);
+procedure TVectArtLayerOperations.MoveSelectedLayers(Delta: Integer;
+  ToEdge: Boolean);
 var
   AfterSelection: TArray<Integer>;
   BeforeSelection: TArray<Integer>;
@@ -191,35 +214,76 @@ begin
   Command := nil;
   if FEditHistory <> nil then
     Command := TVectArtCompoundCommand.Create;
-  if Delta > 0 then
-  begin
-    for I := FDocument.LayerCount - 2 downto 1 do
-      if FDocument.IsLayerSelected(I) and
-        not FDocument.IsLayerSelected(I + 1) then
-      begin
-        BeforeSelection := FDocument.GetSelectedLayerIndices;
-        FDocument.MoveLayer(I, I + 1);
-        AfterSelection := FDocument.GetSelectedLayerIndices;
-        if Command <> nil then
-          Command.Add(TVectArtMoveLayerCommand.Create(FDocument, I, I + 1,
-            BeforeSelection, AfterSelection));
-      end;
-  end
+  repeat
+    if Delta > 0 then
+    begin
+      for I := FDocument.LayerCount - 2 downto 1 do
+        if FDocument.IsLayerSelected(I) and
+          not FDocument.IsLayerSelected(I + 1) then
+        begin
+          BeforeSelection := FDocument.GetSelectedLayerIndices;
+          FDocument.MoveLayer(I, I + 1);
+          AfterSelection := FDocument.GetSelectedLayerIndices;
+          if Command <> nil then
+            Command.Add(TVectArtMoveLayerCommand.Create(FDocument, I, I + 1,
+              BeforeSelection, AfterSelection));
+        end;
+    end
+    else
+    begin
+      for I := 2 to FDocument.LayerCount - 1 do
+        if FDocument.IsLayerSelected(I) and
+          not FDocument.IsLayerSelected(I - 1) then
+        begin
+          BeforeSelection := FDocument.GetSelectedLayerIndices;
+          FDocument.MoveLayer(I, I - 1);
+          AfterSelection := FDocument.GetSelectedLayerIndices;
+          if Command <> nil then
+            Command.Add(TVectArtMoveLayerCommand.Create(FDocument, I, I - 1,
+              BeforeSelection, AfterSelection));
+        end;
+    end;
+  until not ToEdge or not CanMove(Delta);
+  if (Command <> nil) and (Command.Count > 0) then
+    FEditHistory.AddApplied(Command)
+  else
+    Command.Free;
+end;
+
+procedure TVectArtLayerOperations.RotateSelectedLayers(Degrees: Single);
+var
+  Bounds: TRectF;
+  CandidateBounds: TRectF;
+  Center: TPointF;
+  Command: TVectArtCompoundCommand;
+  I: Integer;
+  Indices: TArray<Integer>;
+  Layers: TArray<TVectArtLayer>;
+  RotateCommand: TScreenLayoutRotateLayerCommand;
+begin
+  if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) then
+    Layers := FEditorState.GetOpenGroupChildren
   else
   begin
-    for I := 2 to FDocument.LayerCount - 1 do
-      if FDocument.IsLayerSelected(I) and
-        not FDocument.IsLayerSelected(I - 1) then
-      begin
-        BeforeSelection := FDocument.GetSelectedLayerIndices;
-        FDocument.MoveLayer(I, I - 1);
-        AfterSelection := FDocument.GetSelectedLayerIndices;
-        if Command <> nil then
-          Command.Add(TVectArtMoveLayerCommand.Create(FDocument, I, I - 1,
-            BeforeSelection, AfterSelection));
-      end;
+    Indices := FDocument.GetSelectedLayerIndices;
+    SetLength(Layers, Length(Indices));
+    for I := 0 to High(Indices) do Layers[I] := FDocument[Indices[I]];
   end;
-  if (Command <> nil) and (Command.Count > 0) then
+  if Length(Layers) = 0 then Exit;
+  if not TryGetScreenLayoutLayerBounds(Layers[0], Bounds) then Exit;
+  for I := 1 to High(Layers) do
+    if TryGetScreenLayoutLayerBounds(Layers[I], CandidateBounds) then
+      Bounds := TRectF.Union(Bounds, CandidateBounds);
+  Center := Bounds.CenterPoint;
+  Command := TVectArtCompoundCommand.Create;
+  for I := 0 to High(Layers) do
+  begin
+    RotateCommand := TScreenLayoutRotateLayerCommand.Create(FDocument,
+      Layers[I], Center, Degrees);
+    RotateCommand.Execute;
+    Command.Add(RotateCommand);
+  end;
+  if FEditHistory <> nil then
     FEditHistory.AddApplied(Command)
   else
     Command.Free;
