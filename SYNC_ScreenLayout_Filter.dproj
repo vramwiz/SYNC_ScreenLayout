@@ -1,9 +1,9 @@
-﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
         <ProjectGuid>{4B56112D-6EA3-47BF-B94D-1D70483AE918}</ProjectGuid>
         <ProjectVersion>20.4</ProjectVersion>
         <FrameworkType>None</FrameworkType>
-        <Config Condition="'$(Config)'==''">Debug</Config>
+        <Config Condition="'$(Config)'==''">Release</Config>
         <Platform Condition="'$(Platform)'==''">Win64</Platform>
         <ProjectName Condition="'$(ProjectName)'==''">SYNC_ScreenLayout_Filter</ProjectName>
         <TargetedPlatforms>2</TargetedPlatforms>
@@ -24,7 +24,6 @@
         <CfgParent>Cfg_1</CfgParent>
         <Cfg_1>true</Cfg_1>
         <Base>true</Base>
-        <DCC_Define>DEBUG;$(DCC_Define)</DCC_Define>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Release' or '$(Cfg_2)'!=''">
         <Cfg_2>true</Cfg_2>
@@ -38,7 +37,7 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
-        <DCC_UnitSearchPath>Lib\VerticalScrollBar;Lib\ColorPicker;Lib\InputMethod;Source\Core\Commands\Layer;Source\Core\Commands\Shape;Source\Core\Commands\Text;Source\ObjectProperties;Source\ObjectProperties\Color;Source\ObjectProperties\Filters;Source\ObjectProperties\Geometry;Source\Rendering\Paint;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>Source\Layers\List;Source\Layers\Operations;Source\Layers\Clipboard;Source\Core\Commands\Layer\Group;Source\Core\Commands\Layer\Transform;Lib\VerticalScrollBar;Lib\ColorPicker;Lib\InputMethod;Source\Core\Commands\Layer;Source\Core\Commands\Shape;Source\Core\Commands\Text;Source\ObjectProperties;Source\ObjectProperties\Color;Source\ObjectProperties\Filters;Source\ObjectProperties\Geometry;Source\Rendering\Paint;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <DCC_DcuOutput>$(MSBuildProjectDirectory)\$(Platform)\$(ProjectName)\$(Config)\DCU</DCC_DcuOutput>
         <GenDll>true</GenDll>
         <SanitizedProjectName>SYNC_ScreenLayout_Filter</SanitizedProjectName>
@@ -79,6 +78,8 @@
         <DCCReference Include="Lib\ShortcutAction\ShortcutAction.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas"/>
+        <DCCReference Include="Source\Editor\Creation\ScreenLayoutPlacementPreview.pas"/>
+        <DCCReference Include="Source\ObjectProperties\Color\ScreenLayoutColorHistory.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutMainForm.pas">
             <Form>MainForm</Form>
         </DCCReference>
@@ -94,6 +95,8 @@
         <DCCReference Include="Source\Shell\Toolbars\ScreenLayoutTextToolbarOperations.pas"/>
         <DCCReference Include="Source\Shell\Toolbars\ScreenLayoutLineStyleControls.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutCanvasSettingsDialog.pas"/>
+        <DCCReference Include="Source\Core\Geometry\ScreenLayoutProjectiveTransform.pas"/>
+        <DCCReference Include="Source\Editor\Interaction\Transform\ScreenLayoutTransformInteraction.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutDocument.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutPaintStyles.pas"/>
         <DCCReference Include="Source\Editor\Interaction\Texture\ScreenLayoutTextureInteraction.pas"/>
@@ -123,7 +126,6 @@
         <DCCReference Include="Source\Core\Geometry\Shape\ScreenLayoutStrokeOutlineGeometry.pas"/>
         <DCCReference Include="Source\Core\Geometry\Shape\ScreenLayoutShapeBooleanOperations.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutLayerGeometry.pas"/>
-        <DCCReference Include="Source\Core\Geometry\ScreenLayoutProjectiveTransform.pas"/>
         <DCCReference Include="Source\Rendering\ScreenLayoutRenderer.pas"/>
         <DCCReference Include="Source\Rendering\Cache\ScreenLayoutCanvasRenderCache.pas"/>
         <DCCReference Include="Source\Rendering\Paint\ScreenLayoutPaintRenderer.pas"/>
@@ -146,12 +148,12 @@
         <DCCReference Include="Source\Core\Commands\Text\ScreenLayoutTextCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\Layer\ScreenLayoutLayerStructureCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\Layer\ScreenLayoutLayerBatchCommands.pas"/>
-        <DCCReference Include="Source\Core\Commands\Layer\ScreenLayoutGroupCommands.pas"/>
-        <DCCReference Include="Source\Core\Commands\Layer\ScreenLayoutGroupChildCommands.pas"/>
-        <DCCReference Include="Source\Core\Commands\Layer\ScreenLayoutGroupTransformCommands.pas"/>
-        <DCCReference Include="Source\Core\Commands\Layer\ScreenLayoutLayerFlipOperations.pas"/>
-        <DCCReference Include="Source\Core\Commands\Layer\ScreenLayoutLayerArrangementOperations.pas"/>
-        <DCCReference Include="Source\Core\Commands\Layer\ScreenLayoutLayerTransformCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\Layer\Group\ScreenLayoutGroupCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\Layer\Group\ScreenLayoutGroupChildCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\Layer\Group\ScreenLayoutGroupTransformCommands.pas"/>
+        <DCCReference Include="Source\Core\Commands\Layer\Transform\ScreenLayoutLayerFlipOperations.pas"/>
+        <DCCReference Include="Source\Core\Commands\Layer\Transform\ScreenLayoutLayerArrangementOperations.pas"/>
+        <DCCReference Include="Source\Core\Commands\Layer\Transform\ScreenLayoutLayerTransformCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutFilterCommands.pas"/>
         <DCCReference Include="Source\Core\Commands\ScreenLayoutPaintCommands.pas"/>
         <DCCReference Include="Source\Core\Model\ScreenLayoutEditHistory.pas"/>
@@ -160,7 +162,6 @@
         <DCCReference Include="Source\Persistence\ScreenLayoutDocumentJsonWriter.pas"/>
         <DCCReference Include="Source\Editor\ScreenLayoutCanvas.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutCanvasInteraction.pas"/>
-        <DCCReference Include="Source\Editor\Interaction\Transform\ScreenLayoutTransformInteraction.pas"/>
         <DCCReference Include="Source\Core\Geometry\ScreenLayoutSnapGeometry.pas"/>
         <DCCReference Include="Source\Editor\Interaction\Text\ScreenLayoutTextPathCharacterInteraction.pas"/>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutContextMenuInteraction.pas"/>
@@ -180,11 +181,18 @@
             <DesignClass>TFrame</DesignClass>
         </DCCReference>
         <DCCReference Include="Source\Editor\Interaction\ScreenLayoutSelectionGeometry.pas"/>
-        <DCCReference Include="Source\Layers\ScreenLayoutLayerList.pas"/>
-        <DCCReference Include="Source\Layers\ScreenLayoutLayerRenderer.pas"/>
-        <DCCReference Include="Source\Layers\ScreenLayoutLayerActions.pas"/>
-        <DCCReference Include="Source\Layers\ScreenLayoutLayerOperations.pas"/>
-        <DCCReference Include="Source\Layers\ScreenLayoutLayerDuplication.pas"/>
+        <DCCReference Include="Source\Layers\List\ScreenLayoutLayerList.pas"/>
+        <DCCReference Include="Source\Layers\List\ScreenLayoutLayerItemPainter.pas"/>
+        <DCCReference Include="Source\Layers\List\ScreenLayoutLayerListStyle.pas"/>
+        <DCCReference Include="Source\Layers\List\ScreenLayoutLayerSelection.pas"/>
+        <DCCReference Include="Source\Layers\List\ScreenLayoutLayerThumbnailCache.pas"/>
+        <DCCReference Include="Source\Layers\Clipboard\ScreenLayoutObjectClipboard.pas"/>
+        <DCCReference Include="Source\Core\Commands\Layer\ScreenLayoutInsertObjectsCommand.pas"/>
+        <DCCReference Include="Source\Core\Commands\Layer\ScreenLayoutDeleteLayersCommand.pas"/>
+        <DCCReference Include="Source\Layers\List\ScreenLayoutLayerRenderer.pas"/>
+        <DCCReference Include="Source\Layers\Operations\ScreenLayoutLayerActions.pas"/>
+        <DCCReference Include="Source\Layers\Operations\ScreenLayoutLayerOperations.pas"/>
+        <DCCReference Include="Source\Layers\Operations\ScreenLayoutLayerDuplication.pas"/>
         <DCCReference Include="Source\Layers\ScreenLayoutLayerPanelFrame.pas">
             <Form>LayerPanelFrame</Form>
             <DesignClass>TFrame</DesignClass>

@@ -16,7 +16,7 @@ uses
   ScreenLayoutEditorState in
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
   ScreenLayoutLayerArrangementOperations in
-    '..\Source\Core\Commands\Layer\ScreenLayoutLayerArrangementOperations.pas',
+    '..\Source\Core\Commands\Layer\Transform\ScreenLayoutLayerArrangementOperations.pas',
   ScreenLayoutDocumentJson in
     '..\Source\Persistence\ScreenLayoutDocumentJson.pas';
 

@@ -7,7 +7,7 @@ interface
 uses
   System.Classes, System.Generics.Collections, System.SysUtils, System.Types,
   Vcl.Controls, Vcl.ExtCtrls, ScreenLayoutDocument, ScreenLayoutEditorState,
-  VectArtDarkMenuGroup, VectArtDarkPopupMenu;
+  VectArtDarkMenuGroup, VectArtDarkPopupMenu, ScreenLayoutEditHistory;
 
 type
   // 表示直前の選択を固定し、項目の適用判定と実行対象を提供者へ渡す。
@@ -54,9 +54,11 @@ type
     FContributors: TObjectList<TScreenLayoutObjectMenuContributor>;
     FDocument: TVectArtDocument;
     FEditorState: TVectArtEditorState;
+    FEditHistory: TVectArtEditHistory;
     FHitLayerIndices: TArray<Integer>;
     FHost: TWinControl;
     FMenu: TVectArtDarkPopupMenu;
+    procedure EditObjectClick(Sender: TObject);
     function CaptureContext: TScreenLayoutObjectMenuContext;
     procedure Rebuild(const Context: TScreenLayoutObjectMenuContext);
     procedure SelectHitLayer(Sender: TObject);
@@ -76,10 +78,14 @@ type
       const LayerIndices: TArray<Integer>); overload;
     // 実行済み項目からポップアップと開いている子メニューを閉じる。
     procedure Close;
+    property EditHistory: TVectArtEditHistory read FEditHistory write FEditHistory;
     property Menu: TVectArtDarkPopupMenu read FMenu;
   end;
 
 implementation
+
+uses
+  ScreenLayoutLayerOperations, ScreenLayoutObjectClipboard;
 
 const
   MENU_ITEM_HEIGHT = 32;
@@ -220,18 +226,28 @@ var
   LayerBuilder: TScreenLayoutObjectMenuBuilder;
   OrderBuilder: TScreenLayoutObjectMenuBuilder;
   Panel: TPanel;
+  Operations: TVectArtLayerOperations;
 begin
   FreeAndNil(FBuilder);
   FBuilder := TScreenLayoutObjectMenuBuilder.Create(FMenu, FHost);
-  FBuilder.AddItem('切り取り', 'Ctrl+X', nil);
-  FBuilder.AddItem('コピー', 'Ctrl+C', nil);
-  FBuilder.AddItem('複製', 'Ctrl+D', nil);
+  Operations := TVectArtLayerOperations.Create;
+  try
+    Operations.Document := FDocument;
+    Operations.EditorState := FEditorState;
+    FBuilder.AddItem('切り取り', 'Ctrl+X', EditObjectClick, Operations.CanExecute(vlaDelete)).Tag := 1;
+    FBuilder.AddItem('コピー', 'Ctrl+C', EditObjectClick,
+      Length(ClipboardSelection(FDocument, FEditorState)) > 0).Tag := 2;
+    FBuilder.AddItem('貼り付け', 'Ctrl+V', EditObjectClick, CanPasteObjects(FEditorState)).Tag := 3;
+    FBuilder.AddItem('複製', 'Ctrl+D', EditObjectClick, Operations.CanExecute(vlaDuplicate)).Tag := 4;
+    FBuilder.AddItem('削除', 'Delete', EditObjectClick, Operations.CanExecute(vlaDelete)).Tag := 5;
+  finally
+    Operations.Free;
+  end;
   OrderBuilder := FBuilder.AddSubMenu('重なり順');
   OrderBuilder.AddItem('最前面へ', nil);
   OrderBuilder.AddItem('前面へ', nil);
   OrderBuilder.AddItem('背面へ', nil);
   OrderBuilder.AddItem('最背面へ', nil);
-  FBuilder.AddItem('削除', 'Delete', nil);
   if (Length(FHitLayerIndices) > 1) and
     ((FEditorState = nil) or (FEditorState.OpenGroup = nil)) then
   begin
@@ -252,6 +268,33 @@ begin
       FBuilder.AddSeparator;
       Contributor.BuildMenu(Context, FBuilder);
     end;
+end;
+
+procedure TScreenLayoutObjectContextMenu.EditObjectClick(Sender: TObject);
+var
+  Operations: TVectArtLayerOperations;
+begin
+  if not (Sender is TPanel) then Exit;
+  Operations := TVectArtLayerOperations.Create;
+  try
+    Operations.Document := FDocument;
+    Operations.EditorState := FEditorState;
+    Operations.EditHistory := FEditHistory;
+    case TPanel(Sender).Tag of
+      1: if Operations.CanExecute(vlaDelete) then
+         begin
+           CopyObjects(FDocument, FEditorState);
+           Operations.Execute(vlaDelete);
+         end;
+      2: CopyObjects(FDocument, FEditorState);
+      3: PasteObjects(FDocument, FEditorState, FEditHistory);
+      4: Operations.Execute(vlaDuplicate);
+      5: Operations.Execute(vlaDelete);
+    end;
+    Close;
+  finally
+    Operations.Free;
+  end;
 end;
 
 procedure TScreenLayoutObjectContextMenu.RegisterContributor(

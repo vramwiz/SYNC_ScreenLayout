@@ -18,7 +18,7 @@ uses
   ScreenLayoutProjectiveTransform,
   ScreenLayoutPaintStyles,
   ScreenLayoutSelectionGeometry,
-  ScreenLayoutShapeCreation, ScreenLayoutCanvasRenderCache,
+  ScreenLayoutShapeCreation, ScreenLayoutPlacementPreview, ScreenLayoutCanvasRenderCache,
   ScreenLayoutTextEditing, ScreenLayoutTextEditOverlay,
   WindowsImeController;
 
@@ -47,6 +47,7 @@ type
     FPointerInside: Boolean;
     FPointerPosition: TPoint;
     FReferenceBackground: TBitmap;
+    FPlacementPreview: TScreenLayoutPlacementPreview; // 確定前の塗り図形画像を所有する。
     FRenderCache: TScreenLayoutCanvasRenderCache; // 文書画像、移動プレビュー、ズーム再利用を所有する。
     FShapeCreation: TVectArtShapeCreation;
     FSkipTextDblClick: Boolean;
@@ -156,6 +157,8 @@ type
     function TransformDragging: Boolean;
     // 変形前の状態へ戻してマウスキャプチャを解放する。
     procedure CancelTransformDrag;
+    // 文字入力中はホスト側のオブジェクト編集ショートカットを抑止する。
+    property TextEditing: Boolean read FTextEditing;
     property CanvasBounds: TRect read FCanvasBounds;
     property Document: TVectArtDocument read FDocument write SetDocument;
     property EditHistory: TVectArtEditHistory read GetEditHistory
@@ -259,6 +262,7 @@ begin
   FReferenceBackground := Vcl.Graphics.TBitmap.Create;
   FReferenceBackground.PixelFormat := pf32bit;
   FRenderCache := TScreenLayoutCanvasRenderCache.Create;
+  FPlacementPreview := TScreenLayoutPlacementPreview.Create;
   FZoomRenderTimer := TTimer.Create(Self);
   FZoomRenderTimer.Enabled := False;
   FZoomRenderTimer.Interval := 140;
@@ -289,6 +293,7 @@ destructor TVectArtCanvasControl.Destroy;
 begin
   FTextEditor.Free;
   FZoomRenderTimer.Free;
+  FPlacementPreview.Free;
   FRenderCache.Free;
   FReferenceBackground.Free;
   FShapeCreation.Free;
@@ -1389,8 +1394,8 @@ begin
     FInteraction.SetVertexStructureEditing(False, False)
   else
     FInteraction.SetVertexStructureEditing(
-      FEditorState.CurrentTool in [vetLine, vetPath, vetTextPath],
-      FEditorState.CurrentTool = vetShape);
+      FEditorState.CurrentTool in [vetLine, vetPath, vetShape, vetTextPath],
+      FEditorState.CurrentTool in [vetPath, vetShape]);
 end;
 
 procedure TVectArtCanvasControl.SyncSelectedPathVertexMode;
@@ -1634,6 +1639,16 @@ begin
     Exit;
   end;
   CalculateCanvasBounds;
+  // ペンの右クリックは頂点編集だけに使い、未命中でもオブジェクトメニューへ渡さない。
+  if (Button = mbRight) and (FEditorState <> nil) and
+    (FEditorState.CurrentTool in [vetLine, vetPath, vetShape, vetTextPath]) then
+  begin
+    CalculateCanvasBounds;
+    ConfigureInteraction;
+    FInteraction.MouseDownSelectedVertex(Button, Shift, X, Y, VertexCaptureNeeded);
+    Invalidate;
+    Exit;
+  end;
   FTextureInteraction.Configure(FDocument, EditHistory, FEditorState, FCanvasBounds, FZoom);
   if FTextureInteraction.MouseDown(Button, X, Y) then
   begin
@@ -1664,6 +1679,7 @@ begin
       Invalidate;
       Exit;
     end;
+    if (FEditorState <> nil) and (FEditorState.CurrentTool <> vetSelect) then Exit;
     LogicalPointValid := TryClientPointToLogical(Point(X, Y), LogicalPoint);
     LayerIndex := FInteraction.LayerAt(X, Y);
     if SelectScreenLayoutContextMenuTarget(FDocument, FEditorState,
@@ -2207,6 +2223,7 @@ begin
   FShapeCreation.Configure(FDocument, EditHistory, FEditorState,
     FCanvasBounds, FZoom);
   UpdateRenderedDocument;
+  FPlacementPreview.Update(FDocument, FEditorState, FShapeCreation.PreviewRect, FCanvasBounds, FZoom);
   if FDirect2DEnabled then
     try
       PaintDirect2D;
@@ -2842,10 +2859,19 @@ begin
         RangeRect := FInteraction.RangeSelectionRect;
         DrawOverlayFrameRect(Direct2DCanvas, RangeRect);
       end;
+      if FPlacementPreview.Bitmap.Width > 0 then
+      begin
+        DocumentBitmap := Direct2DCanvas.CreateBitmap(FPlacementPreview.Bitmap);
+        ReferenceRect := D2D1RectF(FCanvasBounds.Left, FCanvasBounds.Top, FCanvasBounds.Right, FCanvasBounds.Bottom);
+        Direct2DCanvas.RenderTarget.DrawBitmap(DocumentBitmap, @ReferenceRect);
+        DocumentBitmap := nil;
+      end;
       CreationRect := FShapeCreation.PreviewRect;
       if not CreationRect.IsEmpty then
       begin
-        if (FEditorState <> nil) and
+        if FPlacementPreview.Bitmap.Width > 0 then
+          DrawOverlayFrameRect(Direct2DCanvas, CreationRect, clBlack, psDot)
+        else if (FEditorState <> nil) and
           (FEditorState.CurrentTool = vetArcShape) then
         begin
           DrawOverlayPie(Direct2DCanvas, CreationRect,
@@ -2897,7 +2923,7 @@ begin
           DrawOverlayFrameRect(Direct2DCanvas, CreationRect);
         end;
       end;
-      if FShapeCreation.PreviewArc(ArcPreview) then
+      if (FPlacementPreview.Bitmap.Width = 0) and FShapeCreation.PreviewArc(ArcPreview) then
       begin
         DrawOverlayPolyline(Direct2DCanvas, ArcPreview,
           FEditorState.LineStrokeColor, psSolid,
@@ -3488,10 +3514,13 @@ begin
     RangeRect := FInteraction.RangeSelectionRect;
     DrawOverlayFrameRect(Canvas, RangeRect);
   end;
+  DrawPremultipliedBitmap(Canvas, FCanvasBounds, FPlacementPreview.Bitmap);
   CreationRect := FShapeCreation.PreviewRect;
   if not CreationRect.IsEmpty then
   begin
-    if (FEditorState <> nil) and
+    if FPlacementPreview.Bitmap.Width > 0 then
+      DrawOverlayFrameRect(Canvas, CreationRect, clBlack, psDot)
+    else if (FEditorState <> nil) and
       (FEditorState.CurrentTool = vetArcShape) then
     begin
       DrawOverlayPie(Canvas, CreationRect,
@@ -3542,7 +3571,7 @@ begin
       DrawOverlayFrameRect(Canvas, CreationRect);
     end;
   end;
-  if FShapeCreation.PreviewArc(ArcPreview) then
+  if (FPlacementPreview.Bitmap.Width = 0) and FShapeCreation.PreviewArc(ArcPreview) then
   begin
     DrawOverlayPolyline(Canvas, ArcPreview,
       FEditorState.LineStrokeColor, psSolid,

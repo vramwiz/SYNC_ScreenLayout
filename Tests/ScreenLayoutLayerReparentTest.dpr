@@ -1,4 +1,4 @@
-program ScreenLayoutLayerReparentTest;
+﻿program ScreenLayoutLayerReparentTest;
 
 {$APPTYPE CONSOLE}
 
@@ -12,7 +12,7 @@ uses
   ScreenLayoutEditorState in
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
   ScreenLayoutGroupChildCommands in
-    '..\Source\Core\Commands\Layer\ScreenLayoutGroupChildCommands.pas';
+    '..\Source\Core\Commands\Layer\Group\ScreenLayoutGroupChildCommands.pas';
 
 procedure Check(Condition: Boolean; const MessageText: string);
 begin

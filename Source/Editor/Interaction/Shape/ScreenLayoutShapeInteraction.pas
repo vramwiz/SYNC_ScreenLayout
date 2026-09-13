@@ -70,6 +70,8 @@ type
     procedure EndDrag;
     // 右クリック位置の頂点を削除する。頂点を指していた場合にTrueを返す。
     function DeleteVertexAt(X, Y: Integer): Boolean;
+    // 選択中の頂点に命中した場合だけ削除し、変更をUndo履歴へ記録する。
+    function DeleteSelectedVertexAt(X, Y: Integer): Boolean;
     // 種別ボタン位置なら頂点種別を適用し、ボタンを指していた場合にTrueを返す。
     function ApplyVertexKindAt(X, Y: Integer): Boolean;
     // ベジェ制御点位置からドラッグを開始できた場合にTrueを返す。
@@ -534,6 +536,18 @@ begin
   Result := HitTestSegment(X, Y, ContourIndex, SegmentIndex, Parameter);
   if Result then
     InsertVertex(ContourIndex, SegmentIndex, Parameter);
+end;
+
+function TScreenLayoutShapeInteraction.DeleteSelectedVertexAt(X, Y: Integer): Boolean;
+var
+  ContourIndex: Integer;
+  VertexIndex: Integer;
+begin
+  Result := HitTestVertex(X, Y, ContourIndex, VertexIndex) and
+    (VertexIndex = FSelectedVertexIndex) and
+    (ContourIndex = FSelectedContourIndex);
+  if Result then
+    Result := DeleteVertexAt(X, Y);
 end;
 
 function TScreenLayoutShapeInteraction.DeleteVertexAt(X, Y: Integer): Boolean;

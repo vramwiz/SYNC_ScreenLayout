@@ -1,4 +1,4 @@
-﻿// レイヤー一覧の描画方式切替、クリック判定、Document接続を担当する。
+﻿// レイヤー一覧のマウス入力、ドラッグ移動、スクロールと共有モデルの接続を担当する。
 unit ScreenLayoutLayerList;
 
 interface
@@ -6,7 +6,7 @@ interface
 uses
   System.Classes, System.Types, Vcl.Controls, Vcl.Direct2D, Vcl.ExtCtrls,
   ScreenLayoutDocument, ScreenLayoutEditCommands, ScreenLayoutEditHistory,
-  ScreenLayoutEditorState, ScreenLayoutLayerRenderer,
+  ScreenLayoutEditorState, ScreenLayoutLayerRenderer, ScreenLayoutLayerSelection,
   VerticalScrollBarControl;
 
 type
@@ -14,69 +14,62 @@ type
 
   TVectArtLayerListControl = class(TCustomControl)
   private
-    FDirect2DEnabled: Boolean;
-    FDocument: TVectArtDocument;
-    FEditHistory: TVectArtEditHistory;
-    FEditorState: TVectArtEditorState;
-    FDragCandidateIndex: Integer;
-    FDragStartPoint: TPoint;
-    FDraggingLayer: Boolean;
-    FDragDropMode: TScreenLayoutLayerDropMode;
-    FDragIndicatorY: Integer;
-    FDragSourceIndices: TArray<Integer>;
-    FDragSourceGroup: TScreenLayoutGroupLayer;
-    FDragScrollDirection: Integer;
-    FDragScrollTimer: TTimer;
-    FDragTargetIndex: Integer;
-    FDragTargetGroup: TScreenLayoutGroupLayer;
-    FDragTargetParent: TScreenLayoutGroupLayer;
-    FDragTargetSourceIndex: Integer;
-    FHoverTargetGroup: TScreenLayoutGroupLayer;
-    FHoverTimer: TTimer;
-    FRenderer: TVectArtLayerRenderer;
-    FSelectionAnchorIndex: Integer;
-    FScrollBar: TVerticalScrollBarControl;
-    FUpdatingScrollBar: Boolean;
+    FDirect2DEnabled      : Boolean;                     // Direct2D失敗後はGDI描画へ切り替える。
+    FDocument             : TVectArtDocument;            // 編集対象の文書。所有しない。
+    FEditHistory          : TVectArtEditHistory;         // 階層移動と状態変更を記録する履歴。
+    FEditorState          : TVectArtEditorState;         // 開いたグループと選択の共有状態。
+    FDragCandidateIndex   : Integer;                     // 押下した表示行。負値はドラッグ候補なし。
+    FDragStartPoint       : TPoint;                      // ドラッグ開始閾値を判定するクライアント座標。
+    FDraggingLayer        : Boolean;                     // 移動量が閾値を超えてドラッグ中か。
+    FDragDropMode         : TScreenLayoutLayerDropMode;  // 現在のドロップ候補の種別。
+    FDragIndicatorY       : Integer;                     // 行間へ挿入する位置の表示座標。
+    FDragSourceIndices    : TArray<Integer>;             // 移動元コンテナ内の昇順レイヤー位置。
+    FDragSourceGroup      : TScreenLayoutGroupLayer;     // 移動元の親。nilは文書直下。
+    FDragScrollDirection  : Integer;                     // 端での自動スクロール方向。0は停止。
+    FDragScrollTimer      : TTimer;                      // ドラッグ中の端スクロール周期を管理する。
+    FDragTargetIndex      : Integer;                     // ドロップ先の表示行。
+    FDragTargetGroup      : TScreenLayoutGroupLayer;     // グループへ入れる場合の移動先。
+    FDragTargetParent     : TScreenLayoutGroupLayer;     // 並べ替え先の親。nilは文書直下。
+    FDragTargetSourceIndex: Integer;                     // 移動元を除いた後の挿入位置。
+    FHoverTargetGroup     : TScreenLayoutGroupLayer;     // 一定時間ポイントすると展開するグループ。
+    FHoverTimer           : TTimer;                      // グループのホバー展開待ち時間を管理する。
+    FRenderer             : TVectArtLayerRenderer;       // 表示行の配置・当たり判定・描画を所有する。
+    FSelection            : TScreenLayoutLayerSelection; // クリック選択と範囲アンカーを所有する。
+    FScrollBar            : TVerticalScrollBarControl;   // 文書の積層順に対応する縦スクロールUI。
+    FUpdatingScrollBar    : Boolean;                     // 表示更新によるスクロール通知の再入を抑止する。
     function DragSourcesEditable: Boolean;
     function IsDragSourceLayer(Layer: TVectArtLayer): Boolean;
     function LayerBounds: TRect;
     procedure ResetDragState;
     procedure RestoreDragSourceContext;
     procedure DragScrollTimerTick(Sender: TObject);
-    procedure SelectGroupChildRange(AnchorIndex, TargetIndex: Integer;
-      KeepExisting: Boolean);
-    function SelectedSourceIndices(
-      Parent: TScreenLayoutGroupLayer): TArray<Integer>;
+    function SelectedSourceIndices(Parent: TScreenLayoutGroupLayer): TArray<Integer>;
     function ScrollBarWidth: Integer;
     procedure ScrollBarChanged(Sender: TObject);
     procedure SetHoverTarget(Value: TScreenLayoutGroupLayer);
     procedure SetDragScrollDirection(Value: Integer);
     procedure SyncRendererContext;
     procedure HoverTimerTick(Sender: TObject);
-    procedure ToggleGroupExpanded(Group: TScreenLayoutGroupLayer;
-      Parent: TScreenLayoutGroupLayer);
+    procedure ToggleGroupExpanded(Group: TScreenLayoutGroupLayer; Parent: TScreenLayoutGroupLayer);
     procedure UpdateScrollBar;
     procedure PaintDirect2D;
     procedure PaintGDI;
     procedure SetDocument(const Value: TVectArtDocument);
   protected
-    function DoMouseWheel(Shift: TShiftState; WheelDelta: Integer;
-      MousePos: TPoint): Boolean; override;
-    procedure MouseDown(Button: TMouseButton; Shift: TShiftState;
-      X, Y: Integer); override;
+    function DoMouseWheel(Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint): Boolean; override;
+    procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
-    procedure MouseUp(Button: TMouseButton; Shift: TShiftState;
-      X, Y: Integer); override;
+    procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure Paint; override;
     procedure Resize; override;
   public
+    // 描画・選択の委譲先とドラッグ用タイマーを生成する。
     constructor Create(AOwner: TComponent); override;
+    // 所有する描画・選択処理を破棄する。子コントロールとタイマーはOwnerに従う。
     destructor Destroy; override;
     property Document: TVectArtDocument read FDocument write SetDocument;
-    property EditHistory: TVectArtEditHistory read FEditHistory
-      write FEditHistory;
-    property EditorState: TVectArtEditorState read FEditorState
-      write FEditorState;
+    property EditHistory: TVectArtEditHistory read FEditHistory write FEditHistory;
+    property EditorState: TVectArtEditorState read FEditorState write FEditorState;
   end;
 
 implementation
@@ -88,14 +81,14 @@ uses
 
 const
   COLOR_LIST_BACKGROUND = TColor($001A1A1A);
-  COLOR_DROP_TARGET = TColor($00D69C4A);
-  LAYER_DRAG_THRESHOLD = 5;
-  DRAG_SCROLL_INTERVAL = 50;
-  DRAG_SCROLL_MARGIN = 28;
-  DRAG_SCROLL_PIXELS = 12;
-  GROUP_HOVER_OPEN_DELAY = 700;
-  LAYER_SCROLL_BAR_WIDTH = 14;
-  LAYER_WHEEL_ROWS = 3;
+  COLOR_DROP_TARGET     = TColor($00D69C4A);
+  LAYER_DRAG_THRESHOLD  = 5;
+  DRAG_SCROLL_INTERVAL  = 50;
+  DRAG_SCROLL_MARGIN    = 28;
+  DRAG_SCROLL_PIXELS    = 12;
+  GROUP_HOVER_OPEN_DELAY= 700;
+  LAYER_SCROLL_BAR_WIDTH= 14;
+  LAYER_WHEEL_ROWS      = 3;
 
 constructor TVectArtLayerListControl.Create(AOwner: TComponent);
 begin
@@ -106,6 +99,7 @@ begin
   TabStop := True;
   FDirect2DEnabled := TDirect2DCanvas.Supported;
   FRenderer := TVectArtLayerRenderer.Create;
+  FSelection := TScreenLayoutLayerSelection.Create;
   FDragScrollTimer := TTimer.Create(Self);
   FDragScrollTimer.Enabled := False;
   FDragScrollTimer.Interval := DRAG_SCROLL_INTERVAL;
@@ -118,7 +112,8 @@ begin
   FScrollBar.Parent := Self;
   FScrollBar.Visible := False;
   FScrollBar.OnChange := ScrollBarChanged;
-  FSelectionAnchorIndex := -1;
+  FSelection.ResetAnchor;
+  FSelection.ResetClick;
   FDragCandidateIndex := -1;
   FDragDropMode := sldmNone;
   FDragIndicatorY := -1;
@@ -230,7 +225,7 @@ begin
   FDragDropMode := sldmIntoGroup;
   FDragTargetGroup := Target;
   FDragTargetIndex := -1;
-  FSelectionAnchorIndex := -1;
+  FSelection.ResetAnchor;
   SyncRendererContext;
   UpdateScrollBar;
   Invalidate;
@@ -250,7 +245,7 @@ begin
   end
   else
     FEditorState.OpenGroupInDocument(FDocument, Group);
-  FSelectionAnchorIndex := -1;
+  FSelection.ResetAnchor;
   ResetDragState;
   Invalidate;
 end;
@@ -262,6 +257,7 @@ end;
 
 destructor TVectArtLayerListControl.Destroy;
 begin
+  FSelection.Free;
   FRenderer.Free;
   inherited Destroy;
 end;
@@ -279,6 +275,7 @@ var
 begin
   if (Button = mbLeft) and (FDocument <> nil) then
   begin
+    ResetDragState;
     SyncRendererContext;
     if CanFocus then
       SetFocus;
@@ -292,11 +289,12 @@ begin
       if (Layer is TScreenLayoutGroupLayer) and
         PtInRect(FRenderer.ExpandButtonRect(ItemRect), Point(X, Y)) then
       begin
-        if ssDouble in Shift then
+        if (ssDouble in Shift) and not (ssCtrl in Shift) and not (ssShift in Shift) then
           ToggleGroupExpanded(TScreenLayoutGroupLayer(Layer), Parent);
         Exit;
       end;
-      if (ssDouble in Shift) and (Layer is TScreenLayoutGroupLayer) and
+      if (ssDouble in Shift) and not (ssCtrl in Shift) and not (ssShift in Shift) and
+        (Layer is TScreenLayoutGroupLayer) and
         (FEditorState <> nil) then
       begin
         ToggleGroupExpanded(TScreenLayoutGroupLayer(Layer), Parent);
@@ -342,55 +340,9 @@ begin
       if (FEditorState <> nil) and
         (FEditorState.SelectedFilter <> nil) then
         FEditorState.SelectFilter(nil, nil);
-      if Parent <> nil then
-      begin
-        if FEditorState.OpenGroup <> Parent then
-          FEditorState.OpenGroupInDocument(FDocument, Parent);
-        if ssShift in Shift then
-        begin
-          if FSelectionAnchorIndex <= 0 then
-            FSelectionAnchorIndex := SourceIndex + 1;
-          SelectGroupChildRange(FSelectionAnchorIndex, SourceIndex + 1,
-            ssCtrl in Shift);
-        end
-        else if ssCtrl in Shift then
-        begin
-          FEditorState.ToggleOpenGroupChild(Layer);
-          FSelectionAnchorIndex := SourceIndex + 1;
-        end
-        else
-        begin
-          if not FEditorState.IsOpenGroupChildSelected(Layer) or
-            (FEditorState.OpenGroupChildCount <= 1) then
-            FEditorState.OpenGroupChild := Layer;
-          FSelectionAnchorIndex := SourceIndex + 1;
-        end;
-      end
-      else if ssShift in Shift then
-      begin
-        FEditorState.OpenGroup := nil;
-        if FSelectionAnchorIndex <= 0 then
-          if FDocument.SelectedIndex > 0 then
-            FSelectionAnchorIndex := FDocument.SelectedIndex
-          else
-            FSelectionAnchorIndex := SourceIndex;
-        FDocument.SelectLayerRange(FSelectionAnchorIndex, SourceIndex,
-          ssCtrl in Shift);
-      end
-      else if ssCtrl in Shift then
-      begin
-        FEditorState.OpenGroup := nil;
-        FDocument.ToggleSelectedLayer(SourceIndex);
-        FSelectionAnchorIndex := SourceIndex;
-      end
-      else
-      begin
-        FEditorState.OpenGroup := nil;
-        if not FDocument.IsLayerSelected(SourceIndex) or
-          (FDocument.SelectionCount <= 1) then
-          FDocument.SelectedIndex := SourceIndex;
-        FSelectionAnchorIndex := SourceIndex;
-      end;
+      FSelection.SelectLayer(FDocument, FEditorState, Parent, Layer, SourceIndex, Shift);
+      if FSelection.PendingLayer <> nil then MouseCapture := True;
+      Invalidate;
       if not (ssShift in Shift) and not (ssCtrl in Shift) and
         not Layer.Locked then
       begin
@@ -400,7 +352,7 @@ begin
         FDragSourceIndices := SelectedSourceIndices(Parent);
         if not DragSourcesEditable then
         begin
-          ResetDragState;
+          FDragCandidateIndex := -1;
           Exit;
         end;
         FDragTargetIndex := Index;
@@ -411,6 +363,14 @@ begin
         MouseCapture := True;
       end;
       Exit;
+    end;
+    if not (ssCtrl in Shift) and not (ssShift in Shift) then
+    begin
+      if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) then
+        FEditorState.SetOpenGroupChildren([]);
+      FDocument.SetSelectedLayers([]);
+      FSelection.ResetAnchor;
+      Invalidate;
     end;
   end;
   inherited MouseDown(Button, Shift, X, Y);
@@ -515,7 +475,21 @@ var
   Command: TVectArtEditCommand;
   DestinationIndex: Integer;
   MoveApplied: Boolean;
+  Index: Integer;
 begin
+  if (Button = mbLeft) and not FDraggingLayer and (FSelection.PendingLayer <> nil) then
+  begin
+    SyncRendererContext;
+    Index := FRenderer.LayerIndexAt(LayerBounds, Y);
+    if (Index > 0) and (FRenderer.LayerAt(Index) = FSelection.PendingLayer) and
+      PtInRect(LayerBounds, Point(X, Y)) then
+    begin
+      FSelection.CompleteClick(FRenderer.LayerAt(Index), FRenderer.LayerSourceIndexAt(Index));
+    end;
+    ResetDragState;
+    Invalidate;
+    Exit;
+  end;
   if (Button = mbLeft) and (FDragCandidateIndex > 0) then
   begin
     MouseCapture := False;
@@ -536,7 +510,7 @@ begin
       else
         Command.Free;
       MoveApplied := True;
-      FSelectionAnchorIndex := -1;
+      FSelection.ResetAnchor;
     end
     else if FDraggingLayer and (FDragDropMode = sldmReorder) and
       (FDragTargetSourceIndex >= 0) then
@@ -550,7 +524,7 @@ begin
       else
         Command.Free;
       MoveApplied := True;
-      FSelectionAnchorIndex := -1;
+      FSelection.ResetAnchor;
     end;
     if FDraggingLayer and not MoveApplied then
       RestoreDragSourceContext;
@@ -582,6 +556,7 @@ begin
   SetDragScrollDirection(0);
   SetHoverTarget(nil);
   MouseCapture := False;
+  FSelection.ResetClick;
   FDragCandidateIndex := -1;
   FDragDropMode := sldmNone;
   FDragIndicatorY := -1;
@@ -621,37 +596,6 @@ begin
     Result := Indices.ToArray;
   finally
     Indices.Free;
-  end;
-end;
-
-procedure TVectArtLayerListControl.SelectGroupChildRange(AnchorIndex,
-  TargetIndex: Integer; KeepExisting: Boolean);
-var
-  I: Integer;
-  FirstIndex: Integer;
-  LastIndex: Integer;
-  Layer: TVectArtLayer;
-  Selected: TList<TVectArtLayer>;
-begin
-  if (FEditorState = nil) or (FEditorState.OpenGroup = nil) then
-    Exit;
-  Selected := TList<TVectArtLayer>.Create;
-  try
-    if KeepExisting then
-      for Layer in FEditorState.GetOpenGroupChildren do
-        Selected.Add(Layer);
-    FirstIndex := Min(AnchorIndex, TargetIndex) - 1;
-    LastIndex := Max(AnchorIndex, TargetIndex) - 1;
-    for I := FirstIndex to LastIndex do
-      if (I >= 0) and (I < FEditorState.OpenGroup.ChildCount) then
-      begin
-        Layer := FEditorState.OpenGroup[I];
-        if Selected.IndexOf(Layer) < 0 then
-          Selected.Add(Layer);
-      end;
-    FEditorState.SetOpenGroupChildren(Selected.ToArray);
-  finally
-    Selected.Free;
   end;
 end;
 
@@ -778,8 +722,9 @@ procedure TVectArtLayerListControl.SetDocument(
 begin
   if FDocument = Value then
     Exit;
+  ResetDragState;
   FDocument := Value;
-  FSelectionAnchorIndex := -1;
+  FSelection.ResetAnchor;
   FDragCandidateIndex := -1;
   FDragTargetIndex := -1;
   FDraggingLayer := False;

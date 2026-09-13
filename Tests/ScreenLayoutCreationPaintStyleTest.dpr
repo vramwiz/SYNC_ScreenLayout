@@ -1,4 +1,4 @@
-program ScreenLayoutCreationPaintStyleTest;
+﻿program ScreenLayoutCreationPaintStyleTest;
 
 {$APPTYPE CONSOLE}
 
@@ -11,7 +11,7 @@ uses
   Vcl.Graphics,
   ScreenLayoutDocument in '..\Source\Core\Model\ScreenLayoutDocument.pas',
   ScreenLayoutEditHistory in
-    '..\Source\Core\Commands\ScreenLayoutEditHistory.pas',
+    '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutEditorState in
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
   ScreenLayoutPaintStyles in

@@ -34,6 +34,8 @@ type
     FZoom: Single;
     function AdjustInputPoint(const PointValue: TPoint;
       Shift: TShiftState; ConstrainToPrevious: Boolean): TPoint;
+    // 始点の近傍では両軸を同じ頂点へ吸着し、閉じ位置を示すガイドを更新する。
+    function SnapToPathStart(var PointValue: TPoint; Shift: TShiftState): Boolean;
     function ClampToCanvas(const Point: TPoint): TPoint;
     procedure CreateArc;
     procedure CreateArcShape;
@@ -108,7 +110,7 @@ const
   FREEHAND_SIMPLIFY_TOLERANCE = 1.5; // 簡略化で許容する画面距離（px）。
   FREEHAND_WIDTH_SAMPLE_DISTANCE = 8; // 幅情報を保存する最小画面距離（px）。
   FREEHAND_WIDTH_CHANGE = 0.025;      // 短い区間でも保持する筆圧変化量。
-  PATH_CLOSE_DISTANCE         = 8;
+  PATH_CLOSE_DISTANCE         = 8;   // 始点への吸着と図形確定に使う画面距離（px）。
   SHAPE_PREVIEW_CURVE_STEPS   = 16;
 
 procedure ConfigureShapeContourSegments(var Contour: TScreenLayoutContour);
@@ -169,6 +171,34 @@ begin
     Round(Anchor.Y + Sin(Radians) * Distance));
 end;
 
+function TVectArtShapeCreation.SnapToPathStart(var PointValue: TPoint; Shift: TShiftState): Boolean;
+var
+  Guide: TScreenLayoutSnapGuide;
+  Start: TPointF;
+  Radius: Single;
+begin
+  Result := False;
+  if (Length(FPathPoints) < 2) or (ssAlt in Shift) or (ssShift in Shift) then
+    Exit;
+  if Hypot(PointValue.X - FPathPoints[0].X, PointValue.Y - FPathPoints[0].Y) > PATH_CLOSE_DISTANCE then
+    Exit;
+  PointValue := FPathPoints[0];
+  Start := TPointF.Create(
+    ScreenToLogicalX(PointValue.X, FCanvasBounds, FZoom, FDocument.CanvasLayer.Width),
+    ScreenToLogicalY(PointValue.Y, FCanvasBounds, FZoom, FDocument.CanvasLayer.Height));
+  Radius := PATH_CLOSE_DISTANCE / FZoom;
+  Guide := Default(TScreenLayoutSnapGuide);
+  Guide.Axis := slsaX;
+  Guide.StartPoint := TPointF.Create(Start.X, Start.Y - Radius);
+  Guide.EndPoint := TPointF.Create(Start.X, Start.Y + Radius);
+  FSnapGuides := [Guide];
+  Guide.Axis := slsaY;
+  Guide.StartPoint := TPointF.Create(Start.X - Radius, Start.Y);
+  Guide.EndPoint := TPointF.Create(Start.X + Radius, Start.Y);
+  FSnapGuides := FSnapGuides + [Guide];
+  Result := True;
+end;
+
 function TVectArtShapeCreation.AdjustInputPoint(const PointValue: TPoint;
   Shift: TShiftState; ConstrainToPrevious: Boolean): TPoint;
 var
@@ -190,6 +220,9 @@ var
   SnappedPoint: TPointF;
 begin
   Result := ClampToCanvas(PointValue);
+  // 始点への点吸着を、角度・グリッド・他オブジェクトの軸吸着より優先する。
+  if ConstrainToPrevious and SnapToPathStart(Result, Shift) then
+    Exit;
   AngleSnapped := False;
   ConstrainHorizontal := False;
   if ConstrainToPrevious then

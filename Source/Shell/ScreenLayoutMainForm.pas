@@ -14,7 +14,7 @@ uses
   ScreenLayoutEditHistory, ScreenLayoutEditorState,
   ScreenLayoutEditorWorkspaceFrame, ScreenLayoutLayerPanelFrame,
   ScreenLayoutLineToolbar,
-  ScreenLayoutLayerOperations, ScreenLayoutEditActionsUI,
+  ScreenLayoutObjectClipboard, ScreenLayoutLayerOperations, ScreenLayoutEditActionsUI,
   ScreenLayoutGroupCommands,
   ScreenLayoutGeometryPropertiesFrame,
   ScreenLayoutObjectPropertiesFrame, ScreenLayoutToolFrames,
@@ -106,6 +106,9 @@ type
     procedure UpdateGeometrySettingsAvailability;
     procedure UpdateToolMenuItems;
     procedure WMDropFiles(var Message: TWMDropFiles); message WM_DROPFILES;
+  protected
+    // 外部ホストによる文書初期化後、表示直前の使用色を取り込む。
+    procedure DoShow; override;
   public
     // 単独アプリだけがJSONの読込・保存メニューを生成するための初期化口。
     procedure EnableStandaloneFileActions;
@@ -259,6 +262,7 @@ begin
   FMenuGroup.RegisterMenu(FViewMenu);
   FObjectContextMenu := TScreenLayoutObjectContextMenu.Create(Self, Self,
     FMenuGroup, FDocument, FEditorState);
+  FObjectContextMenu.EditHistory := FEditHistory;
   FObjectContextMenu.RegisterContributor(
     TScreenLayoutArrangementMenuContributor.Create(FObjectContextMenu,
       FDocument, FEditHistory, FEditorState));
@@ -560,12 +564,19 @@ begin
     Key := 0;
     Exit;
   end;
+  if (FEditorFrame <> nil) and FEditorFrame.CanvasControl.TextEditing then Exit;
   if (FShortcuts <> nil) and FShortcuts.KeyDown(Key, Shift) then
     Exit;
   if (FEditorFrame <> nil) and
     (GetFocus = FEditorFrame.CanvasControl.Handle) and
     HandleSelectionNudge(FDocument, FEditHistory, Key, Shift) then
     Key := 0;
+end;
+
+procedure TMainForm.DoShow;
+begin
+  FObjectPropertiesFrame.LoadColorHistory;
+  inherited;
 end;
 
 procedure TMainForm.LoadDocument;
@@ -604,6 +615,7 @@ begin
       if not TryLoadVectArtDocumentFromJsonFile(OpenDialog.FileName,
         FDocument, SkippedReferenceCount, ErrorMessage) then
         raise EConvertError.Create(ErrorMessage);
+      FObjectPropertiesFrame.LoadColorHistory;
       FCurrentDocumentFileName := OpenDialog.FileName;
       FEditHistory.Clear;
       Caption := 'ScreenDesignMaker - ' +
@@ -869,6 +881,34 @@ begin
       Result := IsEditingSurfaceFocused and (FDocument <> nil) and
         (FDocument.LayerCount > 1);
     end);
+  FShortcuts.Add(Ord('C'), [ssCtrl],
+    procedure
+    begin
+      CopyObjects(FDocument, FEditorState);
+    end,
+    function: Boolean
+    begin
+      Result := IsEditingSurfaceFocused and (Length(ClipboardSelection(FDocument, FEditorState)) > 0);
+    end);
+  FShortcuts.Add(Ord('V'), [ssCtrl],
+    procedure
+    begin
+      PasteObjects(FDocument, FEditorState, FEditHistory);
+    end,
+    function: Boolean
+    begin
+      Result := IsEditingSurfaceFocused and CanPasteObjects(FEditorState);
+    end);
+  FShortcuts.Add(Ord('X'), [ssCtrl],
+    procedure
+    begin
+      CopyObjects(FDocument, FEditorState);
+      FLayerFrame.RunLayerAction(vlaDelete);
+    end,
+    function: Boolean
+    begin
+      Result := IsEditingSurfaceFocused and (FLayerFrame <> nil) and FLayerFrame.CanRunLayerAction(vlaDelete);
+    end);
   FShortcuts.Add(Ord('D'), [ssCtrl],
     procedure
     begin
@@ -963,11 +1003,18 @@ end;
 
 procedure TMainForm.SelectAllLayers;
 var
+  Layers: TArray<TVectArtLayer>;
   I: Integer;
   Indices: TArray<Integer>;
 begin
-  if (FDocument = nil) or (FDocument.LayerCount <= 1) then
+  if FDocument = nil then Exit;
+  if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) then
+  begin
+    SetLength(Layers, FEditorState.OpenGroup.ChildCount);
+    for I := 0 to High(Layers) do Layers[I] := FEditorState.OpenGroup[I];
+    FEditorState.SetOpenGroupChildren(Layers);
     Exit;
+  end;
   SetLength(Indices, FDocument.LayerCount - 1);
   for I := 1 to FDocument.LayerCount - 1 do
     Indices[I - 1] := I;

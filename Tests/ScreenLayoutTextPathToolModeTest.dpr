@@ -1,4 +1,4 @@
-program ScreenLayoutTextPathToolModeTest;
+﻿program ScreenLayoutTextPathToolModeTest;
 
 {$APPTYPE CONSOLE}
 
@@ -29,7 +29,7 @@ uses
   ScreenLayoutEditHistory in
     '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutGroupCommands in
-    '..\Source\Core\Commands\Layer\ScreenLayoutGroupCommands.pas',
+    '..\Source\Core\Commands\Layer\Group\ScreenLayoutGroupCommands.pas',
   ScreenLayoutTextCommands in
     '..\Source\Core\Commands\Text\ScreenLayoutTextCommands.pas',
   ScreenLayoutEditorState in

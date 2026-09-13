@@ -420,6 +420,57 @@ begin
       Exit(True);
 end;
 
+// ズームとツールを変えて、始点吸着の優先順位とクリック確定位置を検証する。
+procedure CheckPathStartSnap;
+var
+  Creation: TVectArtShapeCreation;
+  Document: TVectArtDocument;
+  State: TVectArtEditorState;
+  Points: TArray<TPoint>;
+  Tool: TVectArtEditorTool;
+  Scale: Integer;
+begin
+  Creation := TVectArtShapeCreation.Create;
+  Document := TVectArtDocument.Create;
+  State := TVectArtEditorState.Create;
+  try
+    Document.SetCanvasSize(400, 300);
+    for Scale := 1 to 2 do
+      for Tool in [vetPath, vetShape, vetTextPath] do
+      begin
+        State.CurrentTool := Tool;
+        Creation.Configure(Document, nil, State, Rect(0, 0, 400 * Scale, 300 * Scale), Scale);
+        Creation.MouseDown(mbLeft, [ssAlt], 113, 117);
+        Creation.MouseDown(mbLeft, [ssAlt], 200, 160);
+        Creation.MouseDown(mbLeft, [ssAlt], 170, 220);
+        Check(Creation.MouseMove([], 120, 117) and Creation.PreviewPath(Points), 'start snap preview');
+        Check(Points[High(Points)] = Point(113, 117), 'start must beat nearby grid at seven pixels');
+        Check(HasGuideAxis(Creation.SnapGuides, slsaX) and
+          HasGuideAxis(Creation.SnapGuides, slsaY), 'start snap cross guides');
+        Creation.MouseMove([ssAlt], 120, 117);
+        Creation.PreviewPath(Points);
+        Check((Points[High(Points)] = Point(120, 117)) and
+          (Length(Creation.SnapGuides) = 0), 'Alt must disable start snap');
+        Creation.MouseMove([ssShift], 120, 117);
+        Creation.PreviewPath(Points);
+        Check(Points[High(Points)].X = 170, 'Shift must preserve direction constraint');
+        Creation.MouseDown(mbLeft, [], 120, 117);
+        if Tool = vetShape then
+          Check(not Creation.Active, 'shape must close at snapped start')
+        else
+        begin
+          Creation.PreviewPath(Points);
+          Check(Points[High(Points) - 1] = Point(113, 117), 'clicked endpoint must equal start');
+        end;
+        Creation.CancelPath;
+      end;
+  finally
+    State.Free;
+    Document.Free;
+    Creation.Free;
+  end;
+end;
+
 procedure CheckCreationModifiers;
 var
   Creation: TVectArtShapeCreation;
@@ -609,6 +660,7 @@ begin
   finally
     Document.Free;
   end;
+  CheckPathStartSnap;
   CheckCreationModifiers;
   CheckFreehandCreation;
   CheckMoveModifiers;

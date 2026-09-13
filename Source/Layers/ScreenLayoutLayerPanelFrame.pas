@@ -11,9 +11,9 @@ uses
 type
   TLayerPanelFrame = class(TToolPlaceholderFrame)
   private
-    FLayerList: TVectArtLayerListControl;
+    FLayerList   : TVectArtLayerListControl;
     FLayerActions: TVectArtLayerActionsControl;
-    FContext: IVectArtDesignerContext;
+    FContext     : IVectArtDesignerContext;
     procedure SetContext(const Value: IVectArtDesignerContext);
   public
     // 一覧と操作バーを生成し、幅をサムネイル主体の初期値へ設定する。
@@ -38,8 +38,8 @@ uses
 {$R ScreenLayoutLayerPanelFrame.dfm}
 
 const
-  COLOR_PANEL_BACKGROUND = TColor($00212121);
-  LAYER_PANEL_DOCK_WIDTH  = 150; // 文字列を持たない行と状態列が欠けない初期幅。
+  COLOR_PANEL_BACKGROUND= TColor($00212121);
+  LAYER_PANEL_DOCK_WIDTH= 150;               // 文字列を持たない行と状態列が欠けない初期幅。
 
 function TLayerPanelFrame.CanRunLayerAction(
   Action: TVectArtLayerAction): Boolean;

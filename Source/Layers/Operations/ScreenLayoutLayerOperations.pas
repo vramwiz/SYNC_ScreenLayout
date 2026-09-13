@@ -13,9 +13,9 @@ type
 
   TVectArtLayerOperations = class
   private
-    FDocument: TVectArtDocument;
-    FEditHistory: TVectArtEditHistory;
-    FEditorState: TVectArtEditorState;
+    FDocument   : TVectArtDocument;    // 操作対象。所有しない。
+    FEditHistory: TVectArtEditHistory; // 操作のUndo／Redo記録先。
+    FEditorState: TVectArtEditorState; // グループ内の選択と作成既定を参照する。
     procedure AddRectangle;
     function CanMove(Delta: Integer): Boolean;
     procedure DeleteSelectedLayers;
@@ -23,105 +23,28 @@ type
     function NextRectangleName: string;
     function SelectedLayersEditable: Boolean;
   public
+    // 現在の階層・選択・ロック状態で操作可能かを返す。
     function CanExecute(Action: TVectArtLayerAction): Boolean;
+    // 操作可能な場合だけ文書へ反映し、変更を編集履歴へ記録する。
     procedure Execute(Action: TVectArtLayerAction);
     property Document: TVectArtDocument read FDocument write FDocument;
-    property EditHistory: TVectArtEditHistory read FEditHistory
-      write FEditHistory;
-    property EditorState: TVectArtEditorState read FEditorState
-      write FEditorState;
+    property EditHistory: TVectArtEditHistory read FEditHistory write FEditHistory;
+    property EditorState: TVectArtEditorState read FEditorState write FEditorState;
   end;
 
 implementation
 
 uses
-  System.Math, System.SysUtils, Vcl.Graphics,
-  ScreenLayoutEditCommands,
+  System.Math, System.SysUtils, System.Generics.Collections, Vcl.Graphics,
+  ScreenLayoutEditCommands, ScreenLayoutDeleteLayersCommand,
   ScreenLayoutGroupCommands,
   ScreenLayoutLayerDuplication,
   ScreenLayoutLayerStructureCommands, ScreenLayoutTextCommands;
 
 const
   DEFAULT_RECTANGLE_WIDTH = 320;
-  DEFAULT_RECTANGLE_HEIGHT = 240;
+  DEFAULT_RECTANGLE_HEIGHT= 240;
   DEFAULT_RECTANGLE_COLOR = TColor($00E2904A);
-
-type
-  TScreenLayoutDeleteLayersCommand = class(TVectArtEditCommand)
-  private
-    FAfterSelection: TArray<Integer>;
-    FBeforeSelection: TArray<Integer>;
-    FDeletedLayers: TArray<TVectArtLayer>;
-    FDocument: TVectArtDocument;
-    FIndices: TArray<Integer>;
-    FLayersInDocument: Boolean;
-  public
-    constructor Create(ADocument: TVectArtDocument;
-      const Indices, BeforeSelection: TArray<Integer>);
-    destructor Destroy; override;
-    procedure Execute; override;
-    procedure Undo; override;
-  end;
-
-constructor TScreenLayoutDeleteLayersCommand.Create(
-  ADocument: TVectArtDocument; const Indices,
-  BeforeSelection: TArray<Integer>);
-begin
-  inherited Create;
-  FDocument := ADocument;
-  FIndices := Copy(Indices);
-  FBeforeSelection := Copy(BeforeSelection);
-  SetLength(FDeletedLayers, Length(FIndices));
-  FLayersInDocument := True;
-end;
-
-destructor TScreenLayoutDeleteLayersCommand.Destroy;
-var
-  Layer: TVectArtLayer;
-begin
-  if not FLayersInDocument then
-    for Layer in FDeletedLayers do
-      Layer.Free;
-  inherited Destroy;
-end;
-
-procedure TScreenLayoutDeleteLayersCommand.Execute;
-var
-  I: Integer;
-  SelectionIndex: Integer;
-begin
-  FDocument.BeginUpdate;
-  try
-    for I := High(FIndices) downto 0 do
-      FDeletedLayers[I] := FDocument.ExtractLayer(FIndices[I]);
-    FLayersInDocument := False;
-    if FDocument.LayerCount > 1 then
-    begin
-      SelectionIndex := Min(FIndices[0], FDocument.LayerCount - 1);
-      FAfterSelection := [SelectionIndex];
-    end
-    else
-      FAfterSelection := nil;
-    FDocument.SetSelectedLayers(FAfterSelection);
-  finally
-    FDocument.EndUpdate;
-  end;
-end;
-
-procedure TScreenLayoutDeleteLayersCommand.Undo;
-var
-  I: Integer;
-begin
-  FDocument.BeginUpdate;
-  try
-    for I := 0 to High(FIndices) do
-      FDocument.InsertLayer(FIndices[I], FDeletedLayers[I]);
-    FLayersInDocument := True;
-    FDocument.SetSelectedLayers(FBeforeSelection);
-  finally
-    FDocument.EndUpdate;
-  end;
-end;
 
 procedure TVectArtLayerOperations.AddRectangle;
 var
@@ -163,6 +86,10 @@ begin
   Result := FDocument <> nil;
   if not Result or (Action = vlaAdd) then
     Exit;
+  if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
+    not CanEditOpenGroupChild(FEditorState) then Exit(False);
+  if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) and
+    FEditorState.OpenGroup.Locked then Exit(False);
   case Action of
     vlaDuplicate:
       if CanEditOpenGroupChild(FEditorState) then
@@ -171,7 +98,9 @@ begin
         Result := CanDuplicateSelectedGroups(FDocument) or
           CanDuplicateSelectedLayers(FDocument);
     vlaDelete:
-      Result := CanEditOpenGroupChild(FEditorState) or SelectedLayersEditable;
+      if (FEditorState <> nil) and (FEditorState.OpenGroup <> nil) then
+        Result := CanEditOpenGroupChild(FEditorState)
+      else Result := SelectedLayersEditable;
     vlaMoveForward:
       if CanEditOpenGroupChild(FEditorState) then
         Result := CanMoveOpenGroupChild(FEditorState, 1)
@@ -211,6 +140,7 @@ begin
   SelectedIndices := FDocument.GetSelectedLayerIndices;
   if Length(SelectedIndices) = 0 then Exit;
   BeforeSelection := Copy(SelectedIndices);
+  TArray.Sort<Integer>(SelectedIndices);
   Command := TScreenLayoutDeleteLayersCommand.Create(FDocument,
     SelectedIndices, BeforeSelection);
   Command.Execute;
@@ -326,11 +256,7 @@ begin
     Exit;
   for I := 0 to FDocument.LayerCount - 1 do
     if FDocument.IsLayerSelected(I) and
-      ((I = 0) or FDocument[I].Locked or
-       not ((FDocument[I] is TVectArtRectangleLayer) or
-         (FDocument[I] is TVectArtPathLayer) or
-         (FDocument[I] is TScreenLayoutShapeLayer) or
-         (FDocument[I] is TVectArtImageLayer))) then
+      ((I = 0) or FDocument[I].Locked) then
       Exit(False);
 end;
 

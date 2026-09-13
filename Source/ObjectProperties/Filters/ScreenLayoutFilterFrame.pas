@@ -39,6 +39,8 @@ type
     procedure FilterValueGestureStart(Sender: TObject; Index: Integer);
     procedure SetContext(const Value: IVectArtDesignerContext);
     procedure UpdateControlState;
+  protected
+    procedure Resize; override;
   public
     // レイアウト変更時に一体で載せ替えられる3領域を生成する。
     constructor Create(AOwner: TComponent); override;
@@ -257,6 +259,15 @@ begin
   FFilterList.OnValueGestureStart := FilterValueGestureStart;
   FDetailsFrame.OnChanged := FilterSelectionChanged;
   UpdateControlState;
+end;
+
+procedure TScreenLayoutFilterFrame.Resize;
+begin
+  inherited;
+  if (FDetailsFrame = nil) or (FHeaderPanel = nil) then Exit;
+  // 補助設定より先に一覧1行分を確保し、狭い高さでもスクロール操作を残す。
+  FDetailsFrame.Height := EnsureRange(ClientHeight - FHeaderPanel.Height - MulDiv(38, CurrentPPI, 96),
+    0, MulDiv(DETAIL_HEIGHT, CurrentPPI, 96));
 end;
 
 procedure TScreenLayoutFilterFrame.EnsureAddMenu;

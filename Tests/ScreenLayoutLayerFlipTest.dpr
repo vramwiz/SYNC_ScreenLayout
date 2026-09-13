@@ -16,9 +16,9 @@ uses
   ScreenLayoutEditorState in
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
   ScreenLayoutGroupCommands in
-    '..\Source\Core\Commands\Layer\ScreenLayoutGroupCommands.pas',
+    '..\Source\Core\Commands\Layer\Group\ScreenLayoutGroupCommands.pas',
   ScreenLayoutLayerFlipOperations in
-    '..\Source\Core\Commands\Layer\ScreenLayoutLayerFlipOperations.pas',
+    '..\Source\Core\Commands\Layer\Transform\ScreenLayoutLayerFlipOperations.pas',
   ScreenLayoutTextOutlineGeometry in
     '..\Source\Core\Geometry\Text\ScreenLayoutTextOutlineGeometry.pas',
   ScreenLayoutDocumentJson in

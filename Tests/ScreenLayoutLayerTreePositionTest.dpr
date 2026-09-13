@@ -11,7 +11,7 @@ uses
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
   ScreenLayoutRenderer in '..\Source\Rendering\ScreenLayoutRenderer.pas',
   ScreenLayoutLayerRenderer in
-    '..\Source\Layers\ScreenLayoutLayerRenderer.pas';
+    '..\Source\Layers\List\ScreenLayoutLayerRenderer.pas';
 
 procedure Check(Condition: Boolean; const MessageText: string);
 begin

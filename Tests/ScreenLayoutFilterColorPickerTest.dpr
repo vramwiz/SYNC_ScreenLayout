@@ -3,6 +3,7 @@
 {$APPTYPE CONSOLE}
 
 uses
+  ScreenLayoutColorHistory, ScreenLayoutPatternStyle,
   System.Classes,
   System.SysUtils,
   System.Math,
@@ -16,6 +17,8 @@ uses
   ColorPickerSVArea in '..\Lib\ColorPicker\ColorPickerSVArea.pas',
   HorizontalTrackBarControl in
     '..\Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas',
+  VerticalScrollBarControl in
+    '..\Lib\VerticalScrollBar\VerticalScrollBarControl.pas',
   ScreenLayoutColorPickerFrame in
     '..\Source\ObjectProperties\Color\ScreenLayoutColorPickerFrame.pas',
   ScreenLayoutColorTargetSelector in
@@ -25,7 +28,7 @@ uses
   ScreenLayoutEditCommands in
     '..\Source\Core\Commands\ScreenLayoutEditCommands.pas',
   ScreenLayoutEditHistory in
-    '..\Source\Core\Commands\ScreenLayoutEditHistory.pas',
+    '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutEditorState in
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
   ScreenLayoutFilterCommands in
@@ -41,6 +44,8 @@ uses
     '..\Source\ObjectProperties\ScreenLayoutObjectPropertySelection.pas';
 
 type
+  TColorHistoryAccess = class(TScreenLayoutColorHistory);
+  TColorPickerFrameAccess = class(TScreenLayoutColorPickerFrame);
   TColorPickerSVAreaAccess = class(TColorPickerSVArea);
   TColorTargetSelectorAccess = class(TScreenLayoutColorTargetSelector);
 
@@ -50,8 +55,55 @@ begin
     raise Exception.Create(MessageText);
 end;
 
+// 入れ子のグループ、パターン、グラデーション中間点を含めて収集する。
+procedure CheckColorCollection;
+var
+  Palette: TScreenLayoutColorHistory;
+  Document: TVectArtDocument;
+  Group: TScreenLayoutGroupLayer;
+  Layer: TVectArtRectangleLayer;
+  Style: TScreenLayoutPaintStyle;
+  Expected, Actual: TColor;
+  Found: Boolean;
+begin
+  Palette := TScreenLayoutColorHistory.Create(nil);
+  Document := TVectArtDocument.Create;
+  try
+    Group := TScreenLayoutGroupLayer.Create('Group');
+    Document.InsertLayer(Document.LayerCount, Group);
+    Layer := TVectArtRectangleLayer.Create('Gradient', TRectF.Create(0, 0, 10, 10), clRed);
+    Group.AddChild(Layer);
+    Style := TScreenLayoutPaintStyle.Solid(clRed);
+    Style.PrepareLinearGradient(clRed);
+    Style.Kind := slpkGradient;
+    Style.GradientEndColor := clBlue;
+    Style.SetGradientStopColor(Style.AddGradientStop(0.5), clYellow);
+    Layer.PaintStyle := Style;
+    Layer := TVectArtRectangleLayer.Create('Pattern', TRectF.Create(20, 0, 30, 10), clLime);
+    Group.AddChild(Layer);
+    Style := TScreenLayoutPaintStyle.Solid(clLime);
+    Style.Kind := slpkPattern;
+    Style.Pattern := TScreenLayoutPatternStyle.Create(slptHatch, clLime);
+    Layer.PaintStyle := Style;
+    Palette.LoadDocument(Document);
+    for Expected in [clRed, clBlue, clYellow, clLime] do
+    begin
+      Found := False;
+      for Actual in Palette.Colors do Found := Found or (Actual = Expected);
+      Check(Found, 'nested document color missing');
+    end;
+    Palette.LoadDocument(nil);
+    Check(Length(Palette.Colors) = 0, 'reload retained old history');
+  finally
+    Document.Free;
+    Palette.Free;
+  end;
+end;
+
 procedure Run;
 var
+  Palette: TScreenLayoutColorHistory;
+  HistoryCount: Integer;
   KindSelector: TComboBox;
   Kind: TScreenLayoutGradientKind;
   FrameDC: HDC;
@@ -78,6 +130,7 @@ var
   Outline: TScreenLayoutOutlineFilter;
   Blur: TScreenLayoutBlurFilter;
   Shadow: TScreenLayoutShadowFilter;
+  ScrollBar: TVerticalScrollBarControl;
   StopOpacity: Single;
   SelectedId: Integer;
   StopColor: TColor;
@@ -92,6 +145,8 @@ begin
   EditorState := TVectArtEditorState.Create;
   History := TVectArtEditHistory.Create;
   try
+    Data := Default(TVectArtRectangleData);
+    Data.PaintStyle := TScreenLayoutPaintStyle.Solid(clBlue);
     Data.Bounds := TRectF.Create(-20, -20, 20, 20);
     Data.FillColor := clBlue;
     Data.Locked := False;
@@ -272,8 +327,12 @@ begin
           SameValue(Layer.PaintStyle.LinearStart.Y, 0.5), 'radial kind did not start at object center');
       end;
       Controller.Refresh;
-      Frame.SetBounds(0, 0, 160, 273);
+      Frame.SetBounds(0, 0, 160, 538);
       FixedPickerTop := FixedSVArea.Top;
+      Form.ClientWidth := Frame.Width;
+      Form.ClientHeight := Frame.Height;
+      TargetSelector.Visible := False;
+      Frame.LoadColorHistory(Document);
       Bitmap := TBitmap.Create;
       Png := TPngImage.Create;
       try
@@ -296,9 +355,25 @@ begin
       end;
       Frame.SelectPaintKind(slpkSolid);
       Check(not KindSelector.Visible, 'solid mode did not hide kinds');
-      Check((Frame.Height = 273) and FixedTargetSelector.Visible and
+      Check((Frame.Height = 538) and FixedTargetSelector.Visible and
         (FixedTargetSelector.Top = FixedTargetTop) and (ModeSelector.Top = FixedModeTop) and
         (FixedSVArea.Top = FixedPickerTop), 'solid mode moved the fixed color layout');
+      Frame.Height := 330;
+      ScrollBar := nil;
+      for I := 0 to Frame.ComponentCount - 1 do
+        if Frame.Components[I] is TVerticalScrollBarControl then
+          ScrollBar := TVerticalScrollBarControl(Frame.Components[I]);
+      Check((ScrollBar <> nil) and ScrollBar.Visible and (ScrollBar.Maximum = 208),
+        'short color panel did not show the expected scroll range');
+      TColorPickerFrameAccess(Frame).DoMouseWheel([], -WHEEL_DELTA, Point(0, 0));
+      Check((ScrollBar.Position > 0) and (FixedSVArea.Top < FixedPickerTop),
+        'color panel wheel did not reveal lower controls');
+      ScrollBar.Position := ScrollBar.Maximum;
+      Check(FixedSVArea.Top + FixedSVArea.Height <= Frame.ClientHeight,
+        'color panel could not scroll the picker into view');
+      Frame.Height := 538;
+      Check(not ScrollBar.Visible and (ScrollBar.Position = 0) and
+        (FixedSVArea.Top = FixedPickerTop), 'full color panel did not reset scrolling');
       Check(Layer.PaintStyle.Kind = slpkSolid,
         Format('solid mode did not replace the selected gradient (frame=%d, layer=%d)',
           [Ord(Frame.PaintStyle.Kind), Ord(Layer.PaintStyle.Kind)]));
@@ -320,18 +395,37 @@ begin
         if Frame.Controls[I] is TColorPickerSVArea then
           SVArea := TColorPickerSVArea(Frame.Controls[I]);
       Check(SVArea <> nil, 'SV picker control was not created');
+      Palette := nil;
+      for I := 0 to Frame.ComponentCount - 1 do
+        if Frame.Components[I] is TScreenLayoutColorHistory then
+          Palette := TScreenLayoutColorHistory(Frame.Components[I]);
+      Check(Palette <> nil, 'color history missing');
+      Frame.LoadColorHistory(Document);
+      Check(Length(Palette.Colors) > 0, 'document colors were not imported');
+      Palette.AddColor(clRed);
+      HistoryCount := Length(Palette.Colors);
+      Palette.AddColor(clRed);
+      Check((Length(Palette.Colors) = HistoryCount) and (Palette.Colors[0] = clRed), 'duplicate history');
       TColorPickerSVAreaAccess(SVArea).MouseDown(mbLeft, [],
         SVArea.Width - 1, 0);
+      Check(Length(Palette.Colors) = HistoryCount, 'drag added an intermediate color');
       TColorPickerSVAreaAccess(SVArea).MouseUp(mbLeft, [],
         SVArea.Width - 1, 0);
       Check((ColorToRGB(Outline.Color) = ColorToRGB(SVArea.Color)) and
         (ColorToRGB(Outline.Color) <> ColorToRGB(clBlack)),
         'picker did not edit the selected outline color');
+      Check(Palette.Colors[0] = ColorToRGB(SVArea.Color), 'committed color missing');
       Check(History.CanUndo, 'filter color gesture did not create history');
       History.Undo;
       Check(ColorToRGB(Outline.Color) = ColorToRGB(clBlack),
         'filter color undo did not restore the original value');
 
+      Palette.SetBounds(0, 0, 160, 78);
+      TColorHistoryAccess(Palette).MouseDown(mbLeft, [], 110, 47);
+      Check(ColorToRGB(Outline.Color) = ColorToRGB(clRed), 'basic color did not apply to filter');
+      Check(Palette.Colors[0] = clRed, 'basic color was not promoted');
+      History.Undo;
+      Check(ColorToRGB(Outline.Color) = ColorToRGB(clBlack), 'palette selection undo');
       EditorState.SelectFilter(Layer, Shadow);
       Controller.Refresh;
       Check(Frame.ColorEnabled and Frame.OpacityEnabled,
@@ -379,6 +473,7 @@ end;
 begin
   try
     Application.Initialize;
+    CheckColorCollection;
     Run;
     Writeln('PASS');
   except

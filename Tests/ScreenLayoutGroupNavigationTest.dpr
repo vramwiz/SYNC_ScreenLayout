@@ -1,4 +1,4 @@
-program ScreenLayoutGroupNavigationTest;
+﻿program ScreenLayoutGroupNavigationTest;
 
 {$APPTYPE CONSOLE}
 
@@ -14,9 +14,9 @@ uses
   ScreenLayoutEditorState in
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
   ScreenLayoutGroupChildCommands in
-    '..\Source\Core\Commands\Layer\ScreenLayoutGroupChildCommands.pas',
+    '..\Source\Core\Commands\Layer\Group\ScreenLayoutGroupChildCommands.pas',
   ScreenLayoutGroupCommands in
-    '..\Source\Core\Commands\Layer\ScreenLayoutGroupCommands.pas';
+    '..\Source\Core\Commands\Layer\Group\ScreenLayoutGroupCommands.pas';
 
 procedure Check(Condition: Boolean; const MessageText: string);
 begin

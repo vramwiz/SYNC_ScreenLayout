@@ -8,12 +8,18 @@ uses
   Vcl.StdCtrls, ColorPickerHueBar, ColorPickerSVArea,
   HorizontalTrackBarControl, ScreenLayoutGradientKindCombo,
   ScreenLayoutPaintStyles, ScreenLayoutTextureControl, ScreenLayoutPaintModeSelector,
-  ScreenLayoutColorTargetSelector, ScreenLayoutPatternControl, ScreenLayoutPatternStyle;
+  ScreenLayoutColorHistory, ScreenLayoutDocument, ScreenLayoutColorTargetSelector,
+  ScreenLayoutPatternControl, ScreenLayoutPatternStyle, VerticalScrollBarControl;
 
 type
   TScreenLayoutColorPickerFrame = class(TFrame)
   private
+    FColorHistory: TScreenLayoutColorHistory; // 所有する基本色・確定色履歴の表示。
+    FHistoryGestureActive: Boolean; // 色ドラッグ中だけ履歴の確定を待つ。
+    FHistoryStartColor: TColor; // 変更のないクリックを履歴へ追加しないための開始色。
     FPatternControl: TScreenLayoutPatternControl; // パターン専用の定義別編集UI。
+    FScrollBar: TVerticalScrollBarControl;        // 表示高が不足する時だけ使う暗色の縦スクロールUI。
+    FUpdatingScrollBar: Boolean;                  // Resize中の範囲同期によるOnChange再入を抑止する。
     FOnPaintGestureStart: TNotifyEvent; // 共通塗り連続編集の開始。
     FOnPaintGestureEnd: TNotifyEvent;   // 共通塗り連続編集の終了。
     FTextureControl: TScreenLayoutTextureControl; // テクスチャモードだけで表示する画像設定。
@@ -41,6 +47,8 @@ type
     FSVArea: TColorPickerSVArea;
     FTitleLabel: TLabel;
     FUpdating: Boolean;
+    procedure HistorySelected(Sender: TObject; Color: TColor);
+    procedure ScrollBarChanged(Sender: TObject);
     procedure PatternChanged(Sender: TObject);
     procedure PatternSlotSelected(Sender: TObject);
     procedure PaintGestureStart(Sender: TObject);
@@ -73,9 +81,13 @@ type
     procedure SyncControls;
     procedure TextureChanged(Sender: TObject);
   protected
+    function DoMouseWheel(Shift: TShiftState; WheelDelta: Integer;
+      MousePos: TPoint): Boolean; override;
     procedure Resize; override;
     procedure SetParent(AParent: TWinControl); override;
   public
+    // エディタを開いた時点の使用色を履歴へ取り込む。同期による色設定では追加しない。
+    procedure LoadColorHistory(Document: TVectArtDocument);
     property OnPaintGestureStart: TNotifyEvent read FOnPaintGestureStart write FOnPaintGestureStart;
     property OnPaintGestureEnd: TNotifyEvent read FOnPaintGestureEnd write FOnPaintGestureEnd;
     // 色選択、選択色表示、不透明度トラックバーを埋め込み可能な状態で生成する。
@@ -138,6 +150,8 @@ const
   HUE_BAR_WIDTH = 16;
   MODE_CONTENT_TOP = 122; // この位置より下だけをモード切り替えで変更する。
   PICKER_GAP = 4;
+  SCROLL_CONTENT_HEIGHT = 538; // 全モードで共通の仮想表示高。狭い親ではこの範囲をスクロールする。
+  SCROLL_BAR_WIDTH = 14;
 
 constructor TScreenLayoutColorPickerFrame.Create(AOwner: TComponent);
 begin
@@ -145,6 +159,7 @@ begin
   Color := COLOR_BACKGROUND;
   ParentBackground := False;
   DoubleBuffered := True;
+  Constraints.MinHeight := MulDiv(330, CurrentPPI, 96);
   Height := MulDiv(538, CurrentPPI, 96);
 
   FTitleLabel := TLabel.Create(Self);
@@ -204,6 +219,10 @@ begin
   FOpacityTrackBar.OnMouseUp := OpacityMouseUp;
   FOpacityTrackBar.Position := 100;
 
+  FColorHistory := TScreenLayoutColorHistory.Create(Self);
+  FColorHistory.Parent := Self;
+  FColorHistory.OnSelect := HistorySelected;
+
   FHueBar := TColorPickerHueBar.Create(Self);
   FHueBar.Parent := Self;
   FHueBar.OnChange := HueBarChange;
@@ -233,7 +252,44 @@ begin
   FPatternControl.OnSlotSelect := PatternSlotSelected;
   FPatternControl.OnGestureStart := PaintGestureStart;
   FPatternControl.OnGestureEnd := PaintGestureEnd;
+  FScrollBar := TVerticalScrollBarControl.Create(Self);
+  FScrollBar.Parent := Self;
+  FScrollBar.Visible := False;
+  FScrollBar.OnChange := ScrollBarChanged;
   SyncControls;
+end;
+
+function TScreenLayoutColorPickerFrame.DoMouseWheel(Shift: TShiftState;
+  WheelDelta: Integer; MousePos: TPoint): Boolean;
+begin
+  Result := (FScrollBar <> nil) and FScrollBar.Visible and (WheelDelta <> 0);
+  if Result then
+    FScrollBar.Position := FScrollBar.Position - MulDiv(WheelDelta,
+      FScrollBar.SmallChange * 3, WHEEL_DELTA)
+  else
+    Result := inherited DoMouseWheel(Shift, WheelDelta, MousePos);
+end;
+
+procedure TScreenLayoutColorPickerFrame.LoadColorHistory(Document: TVectArtDocument);
+begin
+  FColorHistory.LoadDocument(Document);
+end;
+
+procedure TScreenLayoutColorPickerFrame.HistorySelected(Sender: TObject; Color: TColor);
+begin
+  if FUpdating or not FColorEnabled or (FPaintStyle.Kind = slpkTexture) then Exit;
+  ColorMouseDown(Self, mbLeft, [], 0, 0);
+  try
+    SetSelectedColor(Color);
+    if FPaintStyle.Kind = slpkPattern then
+    begin
+      if Assigned(FOnPaintStyleChange) then FOnPaintStyleChange(Self);
+    end
+    else if Assigned(FOnChange) then FOnChange(Self);
+  finally
+    ColorMouseUp(Self, mbLeft, [], 0, 0);
+  end;
+  FColorHistory.AddColor(Color);
 end;
 
 procedure TScreenLayoutColorPickerFrame.PaintGestureStart(Sender: TObject);
@@ -317,6 +373,11 @@ end;
 procedure TScreenLayoutColorPickerFrame.ColorMouseDown(Sender: TObject;
   Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 begin
+  if (Button = mbLeft) and FColorEnabled then
+  begin
+    FHistoryGestureActive := True;
+    FHistoryStartColor := FColor;
+  end;
   if (FPaintStyle.Kind = slpkPattern) and (Button = mbLeft) then
   begin
     PaintGestureStart(Self);
@@ -330,6 +391,12 @@ end;
 procedure TScreenLayoutColorPickerFrame.ColorMouseUp(Sender: TObject;
   Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 begin
+  if (Button = mbLeft) and FHistoryGestureActive then
+  begin
+    FHistoryGestureActive := False;
+    if FColorEnabled and (ColorToRGB(FHistoryStartColor) <> ColorToRGB(FColor)) then
+      FColorHistory.AddColor(FColor);
+  end;
   if (FPaintStyle.Kind = slpkPattern) and (Button = mbLeft) then
   begin
     PaintGestureEnd(Self);
@@ -460,6 +527,9 @@ end;
 
 procedure TScreenLayoutColorPickerFrame.Resize;
 var
+  BarWidth: Integer;
+  ContentHeight: Integer;
+  ContentWidth: Integer;
   HueWidth: Integer;
   SelectorSize: Integer;
   Margin: Integer;
@@ -467,6 +537,8 @@ var
   PickerHeight: Integer;
   PickerTop: Integer;
   ContentTop: Integer;
+  HistoryHeight: Integer;
+  ScrollOffset: Integer;
 begin
   inherited Resize;
   if FSVArea = nil then
@@ -476,34 +548,62 @@ begin
   HueWidth := MulDiv(HUE_BAR_WIDTH, CurrentPPI, 96);
   SelectorSize := MulDiv(COLOR_SELECTOR_SIZE, CurrentPPI, 96);
   ContentTop := MulDiv(MODE_CONTENT_TOP, CurrentPPI, 96);
-  PickerHeight := Min(MulDiv(COLOR_PICKER_HEIGHT, CurrentPPI, 96),
-    Max(ClientHeight - ContentTop - Margin - PickerGap, 1));
-  FTitleLabel.SetBounds(0, 0, ClientWidth, MulDiv(26, CurrentPPI, 96));
-  FOpacityLabel.SetBounds(Margin, MulDiv(28, CurrentPPI, 96),
+  ContentHeight := MulDiv(SCROLL_CONTENT_HEIGHT, CurrentPPI, 96);
+  BarWidth := MulDiv(SCROLL_BAR_WIDTH, CurrentPPI, 96);
+  FUpdatingScrollBar := True;
+  try
+    FScrollBar.Visible := (Parent <> nil) and (ClientHeight < ContentHeight);
+    FScrollBar.SmallChange := MulDiv(24, CurrentPPI, 96);
+    FScrollBar.LargeChange := Max(ClientHeight - FScrollBar.SmallChange,
+      FScrollBar.SmallChange);
+    FScrollBar.SetRange(Max(ContentHeight - ClientHeight, 0), Max(ClientHeight, 1));
+    FScrollBar.SetBounds(Max(ClientWidth - BarWidth, 0), 0, BarWidth, ClientHeight);
+  finally
+    FUpdatingScrollBar := False;
+  end;
+  if FScrollBar.Visible then
+    ContentWidth := Max(ClientWidth - BarWidth, 1)
+  else
+    ContentWidth := ClientWidth;
+  ScrollOffset := FScrollBar.Position;
+  PickerHeight := MulDiv(COLOR_PICKER_HEIGHT, CurrentPPI, 96);
+  FTitleLabel.SetBounds(0, -ScrollOffset, ContentWidth, MulDiv(26, CurrentPPI, 96));
+  FOpacityLabel.SetBounds(Margin, MulDiv(28, CurrentPPI, 96) - ScrollOffset,
     MulDiv(48, CurrentPPI, 96), MulDiv(24, CurrentPPI, 96));
   FOpacityTrackBar.SetBounds(Margin + MulDiv(48, CurrentPPI, 96),
-    MulDiv(28, CurrentPPI, 96),
-    Max(ClientWidth - Margin * 2 - MulDiv(48, CurrentPPI, 96), 1), MulDiv(24, CurrentPPI, 96));
-  FColorTargetSelector.SetBounds(Margin, MulDiv(58, CurrentPPI, 96),
-    Max(ClientWidth - Margin * 2, SelectorSize), SelectorSize);
-  FModeSelector.SetBounds(Margin, MulDiv(90, CurrentPPI, 96),
-    Min(ClientWidth - Margin * 2,
+    MulDiv(28, CurrentPPI, 96) - ScrollOffset,
+    Max(ContentWidth - Margin * 2 - MulDiv(48, CurrentPPI, 96), 1), MulDiv(24, CurrentPPI, 96));
+  FColorTargetSelector.SetBounds(Margin, MulDiv(58, CurrentPPI, 96) - ScrollOffset,
+    Max(ContentWidth - Margin * 2, SelectorSize), SelectorSize);
+  FModeSelector.SetBounds(Margin, MulDiv(90, CurrentPPI, 96) - ScrollOffset,
+    Min(ContentWidth - Margin * 2,
       MulDiv(SCREEN_LAYOUT_PAINT_MODE_BUTTON_SIZE * 4 +
       SCREEN_LAYOUT_PAINT_MODE_BUTTON_GAP * 3, CurrentPPI, 96)),
     MulDiv(SCREEN_LAYOUT_PAINT_MODE_BUTTON_SIZE, CurrentPPI, 96));
-  FGradientKindSelector.SetBounds(Margin, ContentTop,
-    Max(ClientWidth - Margin * 2, 1), MulDiv(24, CurrentPPI, 96));
-  PickerTop := ClientHeight - Margin - PickerHeight;
-  FHueBar.SetBounds(Max(ClientWidth - Margin - HueWidth, Margin),
-    PickerTop, HueWidth, PickerHeight);
-  FSVArea.SetBounds(Margin, PickerTop,
+  FGradientKindSelector.SetBounds(Margin, ContentTop - ScrollOffset,
+    Max(ContentWidth - Margin * 2, 1), MulDiv(24, CurrentPPI, 96));
+  PickerTop := ContentHeight - Margin - PickerHeight;
+  HistoryHeight := MulDiv(78, CurrentPPI, 96);
+  FColorHistory.SetBounds(Margin, PickerTop - HistoryHeight - PickerGap - ScrollOffset,
+    Max(ContentWidth - Margin * 2, 1), HistoryHeight);
+  FHueBar.SetBounds(Max(ContentWidth - Margin - HueWidth, Margin),
+    PickerTop - ScrollOffset, HueWidth, PickerHeight);
+  FSVArea.SetBounds(Margin, PickerTop - ScrollOffset,
     Max(FHueBar.Left - PickerGap - Margin, 1), PickerHeight);
   if FTextureControl <> nil then
-    FTextureControl.SetBounds(Margin, ContentTop,
-      Max(ClientWidth - Margin * 2, 1), Max(PickerTop - ContentTop - PickerGap, 1));
+    FTextureControl.SetBounds(Margin, ContentTop - ScrollOffset,
+      Max(ContentWidth - Margin * 2, 1),
+      Max(PickerTop - HistoryHeight - PickerGap - ContentTop - PickerGap, 1));
   if FPatternControl <> nil then
-    FPatternControl.SetBounds(Margin, ContentTop,
-      Max(ClientWidth - Margin * 2, 1), Max(PickerTop - ContentTop - PickerGap, 1));
+    FPatternControl.SetBounds(Margin, ContentTop - ScrollOffset,
+      Max(ContentWidth - Margin * 2, 1),
+      Max(PickerTop - HistoryHeight - PickerGap - ContentTop - PickerGap, 1));
+end;
+
+procedure TScreenLayoutColorPickerFrame.ScrollBarChanged(Sender: TObject);
+begin
+  if not FUpdatingScrollBar then
+    Resize;
 end;
 
 procedure TScreenLayoutColorPickerFrame.SetOpacity(Value: Integer);
@@ -520,6 +620,7 @@ end;
 procedure TScreenLayoutColorPickerFrame.SetColorEnabled(Value: Boolean);
 begin
   FColorEnabled := Value;
+  FColorHistory.Enabled := Value and (FPaintStyle.Kind <> slpkTexture);
   FTextureControl.Enabled := Value and FPaintModeEnabled;
   FPatternControl.Enabled := Value and FPaintModeEnabled;
   FGradientKindSelector.Enabled := Value and FPaintModeEnabled and (FPaintStyle.Kind = slpkGradient);
@@ -558,6 +659,7 @@ begin
     FGradientKindSelector.SetPendingItemIndex(Ord(FPaintStyle.GradientKind));
   FGradientKindSelector.Enabled := FPaintModeEnabled and FColorEnabled and (FPaintStyle.Kind = slpkGradient);
   FGradientKindSelector.Visible := FPaintStyle.Kind = slpkGradient;
+  FColorHistory.Enabled := FColorEnabled and (FPaintStyle.Kind <> slpkTexture);
   FHueBar.Enabled := FColorEnabled and (FPaintStyle.Kind <> slpkTexture);
   FSVArea.Enabled := FColorEnabled and (FPaintStyle.Kind <> slpkTexture);
   FColorTargetSelector.Enabled := FColorEnabled and (FPaintStyle.Kind <> slpkTexture);

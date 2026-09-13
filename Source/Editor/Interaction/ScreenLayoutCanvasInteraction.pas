@@ -3032,6 +3032,10 @@ begin
   Y := SourcePoint.Y;
   if Button = mbRight then
   begin
+    // 選択済み頂点への右クリックは、ツールに関係なく削除を優先する。
+    if FPathInteraction.DeleteSelectedVertexAt(X, Y) or
+      FShapeInteraction.DeleteSelectedVertexAt(X, Y) then
+      Exit(True);
     if FPathInteraction.DeleteWidthPointAt(X, Y) then
       Exit(True);
     if FPathStructureEditingEnabled and

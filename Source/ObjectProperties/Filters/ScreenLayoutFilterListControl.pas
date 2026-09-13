@@ -5,7 +5,7 @@ interface
 
 uses
   System.Classes, System.Types, Vcl.Controls, Vcl.Graphics,
-  ScreenLayoutDocument, ScreenLayoutFilters;
+  ScreenLayoutDocument, ScreenLayoutFilters, VerticalScrollBarControl;
 
 type
   TScreenLayoutFilterIndexEvent = procedure(Sender: TObject;
@@ -17,6 +17,9 @@ type
 
   TScreenLayoutFilterListControl = class(TCustomControl)
   private
+    FScrollBar: TVerticalScrollBarControl; // 所有する共通の暗色スクロールバー。
+    FScrollOffset: Integer; // 一覧先頭からの画面ピクセル単位の移動量。
+    FUpdatingScrollBar: Boolean; // 範囲同期時のOnChange再入を抑止する。
     FDragCandidateIndex: Integer;
     FDragStartPoint: TPoint;
     FDragTargetIndex: Integer;
@@ -30,6 +33,10 @@ type
     FOnValueGestureStart: TScreenLayoutFilterIndexEvent;
     FSelectedIndex: Integer;
     FSliderDragIndex: Integer;
+    function ContentWidth: Integer;
+    procedure ScrollBarChanged(Sender: TObject);
+    procedure UpdateScrollBar;
+    procedure EnsureSelectionVisible;
     function FilterIndexAt(Y: Integer): Integer;
     function HandleRect(Index: Integer): TRect;
     function RowHeight: Integer;
@@ -39,6 +46,8 @@ type
     procedure SetLayer(const Value: TVectArtLayer);
     procedure SetSelectedIndex(const Value: Integer);
   protected
+    procedure Resize; override;
+    function DoMouseWheel(Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint): Boolean; override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState;
       X, Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
@@ -137,11 +146,77 @@ begin
   FDragTargetIndex := -1;
   FSelectedIndex := -1;
   FSliderDragIndex := -1;
+  FScrollBar := TVerticalScrollBarControl.Create(Self);
+  FScrollBar.Parent := Self;
+  FScrollBar.Visible := False;
+  FScrollBar.OnChange := ScrollBarChanged;
+end;
+
+function TScreenLayoutFilterListControl.ContentWidth: Integer;
+begin
+  Result := ClientWidth;
+  if (FScrollBar <> nil) and FScrollBar.Visible then
+    Result := Max(Result - FScrollBar.Width, 0);
+end;
+
+procedure TScreenLayoutFilterListControl.UpdateScrollBar;
+var
+  MaximumOffset, BarWidth: Integer;
+begin
+  if FScrollBar = nil then Exit;
+  MaximumOffset := 0;
+  if FLayer <> nil then MaximumOffset := Max(FLayer.FilterCount * RowHeight - ClientHeight, 0);
+  FUpdatingScrollBar := True;
+  try
+    BarWidth := MulDiv(14, CurrentPPI, 96);
+    FScrollBar.SetBounds(Max(ClientWidth - BarWidth, 0), 0, BarWidth, ClientHeight);
+    FScrollBar.Visible := MaximumOffset > 0;
+    FScrollBar.SmallChange := RowHeight;
+    FScrollBar.LargeChange := Max(ClientHeight - RowHeight, RowHeight);
+    FScrollBar.SetRange(MaximumOffset, Max(ClientHeight, 1));
+    FScrollOffset := EnsureRange(FScrollOffset, 0, MaximumOffset);
+    FScrollBar.Position := FScrollOffset;
+  finally
+    FUpdatingScrollBar := False;
+  end;
+  Invalidate;
+end;
+
+procedure TScreenLayoutFilterListControl.ScrollBarChanged(Sender: TObject);
+begin
+  if FUpdatingScrollBar then Exit;
+  FScrollOffset := FScrollBar.Position;
+  Invalidate;
+end;
+
+procedure TScreenLayoutFilterListControl.EnsureSelectionVisible;
+begin
+  UpdateScrollBar;
+  if FSelectedIndex < 0 then Exit;
+  if FSelectedIndex * RowHeight < FScrollOffset then
+    FScrollBar.Position := FSelectedIndex * RowHeight
+  else if (FSelectedIndex + 1) * RowHeight > FScrollOffset + ClientHeight then
+    FScrollBar.Position := Min(FSelectedIndex * RowHeight, (FSelectedIndex + 1) * RowHeight - ClientHeight);
+end;
+
+procedure TScreenLayoutFilterListControl.Resize;
+begin
+  inherited;
+  UpdateScrollBar;
+end;
+
+function TScreenLayoutFilterListControl.DoMouseWheel(Shift: TShiftState; WheelDelta: Integer;
+  MousePos: TPoint): Boolean;
+begin
+  UpdateScrollBar;
+  Result := FScrollBar.Visible and (WheelDelta <> 0);
+  if Result then FScrollBar.Position := FScrollOffset - MulDiv(WheelDelta, RowHeight * 3, WHEEL_DELTA);
 end;
 
 function TScreenLayoutFilterListControl.FilterIndexAt(Y: Integer): Integer;
 begin
-  Result := Y div RowHeight;
+  if (Y < 0) or (Y >= ClientHeight) then Exit(-1);
+  Result := (Y + FScrollOffset) div RowHeight;
   if (FLayer = nil) or (Result < 0) or (Result >= FLayer.FilterCount) then
     Result := -1;
 end;
@@ -150,7 +225,7 @@ function TScreenLayoutFilterListControl.HandleRect(Index: Integer): TRect;
 var
   Top: Integer;
 begin
-  Top := Index * RowHeight;
+  Top := Index * RowHeight - FScrollOffset;
   Result := Rect(MulDiv(5, CurrentPPI, 96),
     Top + MulDiv(12, CurrentPPI, 96), MulDiv(17, CurrentPPI, 96),
     Top + MulDiv(26, CurrentPPI, 96));
@@ -160,21 +235,25 @@ procedure TScreenLayoutFilterListControl.MouseDown(Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
   Index: Integer;
+  HitSwitch, HitSlider, HitHandle: Boolean;
 begin
   inherited;
-  if Button <> mbLeft then
+  if (Button <> mbLeft) or (X < 0) or (X >= ContentWidth) then
     Exit;
   Index := FilterIndexAt(Y);
+  HitSwitch := (Index >= 0) and PtInRect(SwitchRect(Index), Point(X, Y));
+  HitSlider := (Index >= 0) and PtInRect(SliderRect(Index), Point(X, Y));
+  HitHandle := (Index >= 0) and PtInRect(HandleRect(Index), Point(X, Y));
   SelectedIndex := Index;
   if Index < 0 then
     Exit;
-  if PtInRect(SwitchRect(Index), Point(X, Y)) then
+  if HitSwitch then
   begin
     if Assigned(FOnToggleEnabled) then
       FOnToggleEnabled(Self, Index);
     Exit;
   end;
-  if PtInRect(SliderRect(Index), Point(X, Y)) then
+  if HitSlider then
   begin
     FSliderDragIndex := Index;
     MouseCapture := True;
@@ -183,7 +262,7 @@ begin
     UpdateSliderValue(Index, X);
     Exit;
   end;
-  if PtInRect(HandleRect(Index), Point(X, Y)) then
+  if HitHandle then
   begin
     FDragCandidateIndex := Index;
     FDragStartPoint := Point(X, Y);
@@ -210,7 +289,10 @@ begin
     (Abs(Y - FDragStartPoint.Y) < DRAG_THRESHOLD) then
     Exit;
   FDragging := True;
-  TargetIndex := EnsureRange(Y div RowHeight, 0, FLayer.FilterCount - 1);
+  MouseCapture := True;
+  if Y < 0 then FScrollBar.Position := FScrollOffset - RowHeight
+  else if Y >= ClientHeight then FScrollBar.Position := FScrollOffset + RowHeight;
+  TargetIndex := EnsureRange((Y + FScrollOffset) div RowHeight, 0, FLayer.FilterCount - 1);
   if FDragTargetIndex <> TargetIndex then
   begin
     FDragTargetIndex := TargetIndex;
@@ -236,6 +318,7 @@ begin
     MouseCapture := False;
     Exit;
   end;
+  MouseCapture := False;
   FromIndex := FDragCandidateIndex;
   ToIndex := FDragTargetIndex;
   FDragCandidateIndex := -1;
@@ -280,8 +363,9 @@ begin
   for I := 0 to FLayer.FilterCount - 1 do
   begin
     Filter := FLayer.Filters[I];
-    RowRect := Rect(0, I * RowHeight, ClientWidth,
-      (I + 1) * RowHeight - 1);
+    RowRect := Rect(0, I * RowHeight - FScrollOffset, ContentWidth,
+      (I + 1) * RowHeight - FScrollOffset - 1);
+    if (RowRect.Bottom <= 0) or (RowRect.Top >= ClientHeight) then Continue;
     if I = FSelectedIndex then
       Canvas.Brush.Color := COLOR_ROW_SELECTED
     else
@@ -317,9 +401,9 @@ begin
       DT_NOPREFIX);
     Canvas.Brush.Style := bsSolid;
 
-    ColorRect := Rect(Max(ClientWidth - MulDiv(24, CurrentPPI, 96),
+    ColorRect := Rect(Max(ContentWidth - MulDiv(24, CurrentPPI, 96),
       MulDiv(104, CurrentPPI, 96)), RowRect.Top + MulDiv(9, CurrentPPI, 96),
-      ClientWidth - MulDiv(6, CurrentPPI, 96),
+      ContentWidth - MulDiv(6, CurrentPPI, 96),
       RowRect.Bottom - MulDiv(9, CurrentPPI, 96));
     SliderRect := Self.SliderRect(I);
     InflateRect(SliderRect, 0, -7);
@@ -367,8 +451,8 @@ var
   ColorLeft: Integer;
   Top: Integer;
 begin
-  Top := Index * RowHeight;
-  ColorLeft := Max(ClientWidth - MulDiv(24, CurrentPPI, 96),
+  Top := Index * RowHeight - FScrollOffset;
+  ColorLeft := Max(ContentWidth - MulDiv(24, CurrentPPI, 96),
     MulDiv(104, CurrentPPI, 96));
   Result := Rect(MulDiv(100, CurrentPPI, 96),
     Top + MulDiv(10, CurrentPPI, 96),
@@ -385,8 +469,13 @@ procedure TScreenLayoutFilterListControl.SetLayer(
   const Value: TVectArtLayer);
 begin
   if FLayer = Value then
+  begin
+    UpdateScrollBar;
     Exit;
+  end;
   FLayer := Value;
+  FScrollOffset := 0;
+  UpdateScrollBar;
   FSelectedIndex := -1;
   FDragCandidateIndex := -1;
   FSliderDragIndex := -1;
@@ -425,6 +514,7 @@ begin
   if FSelectedIndex = NewValue then
     Exit;
   FSelectedIndex := NewValue;
+  EnsureSelectionVisible;
   Invalidate;
   if Assigned(FOnSelectionChanged) then
     FOnSelectionChanged(Self);
@@ -434,7 +524,7 @@ function TScreenLayoutFilterListControl.SwitchRect(Index: Integer): TRect;
 var
   Top: Integer;
 begin
-  Top := Index * RowHeight;
+  Top := Index * RowHeight - FScrollOffset;
   Result := Rect(MulDiv(22, CurrentPPI, 96),
     Top + MulDiv(12, CurrentPPI, 96), MulDiv(43, CurrentPPI, 96),
     Top + MulDiv(26, CurrentPPI, 96));

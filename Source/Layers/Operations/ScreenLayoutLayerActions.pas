@@ -21,8 +21,7 @@ type
     procedure SetEditHistory(const Value: TVectArtEditHistory);
     procedure SetEditorState(const Value: TVectArtEditorState);
   protected
-    procedure MouseDown(Button: TMouseButton; Shift: TShiftState;
-      X, Y: Integer); override;
+    procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure Paint; override;
   public
     constructor Create(AOwner: TComponent); override;
@@ -32,10 +31,8 @@ type
     procedure RunLayerAction(Action: TVectArtLayerAction);
     procedure RefreshState;
     property Document: TVectArtDocument read GetDocument write SetDocument;
-    property EditHistory: TVectArtEditHistory read GetEditHistory
-      write SetEditHistory;
-    property EditorState: TVectArtEditorState read GetEditorState
-      write SetEditorState;
+    property EditHistory: TVectArtEditHistory read GetEditHistory write SetEditHistory;
+    property EditorState: TVectArtEditorState read GetEditorState write SetEditorState;
   end;
 
 implementation
@@ -44,12 +41,12 @@ uses
   Vcl.Graphics, Winapi.Windows;
 
 const
-  BUTTON_COUNT = 5;
-  BUTTON_SIZE = 34;
-  COLOR_BACKGROUND = TColor($00212121);
-  COLOR_BUTTON = TColor($002B2B2B);
-  COLOR_DISABLED = TColor($006A6A6A);
-  COLOR_ICON = TColor($00D8D8D8);
+  BUTTON_COUNT    = 5;
+  BUTTON_SIZE     = 34;
+  COLOR_BACKGROUND= TColor($00212121);
+  COLOR_BUTTON    = TColor($002B2B2B);
+  COLOR_DISABLED  = TColor($006A6A6A);
+  COLOR_ICON      = TColor($00D8D8D8);
 
 function TVectArtLayerActionsControl.ButtonRect(Index: Integer): TRect;
 begin

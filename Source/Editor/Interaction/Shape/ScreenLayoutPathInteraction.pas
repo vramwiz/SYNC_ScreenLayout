@@ -68,6 +68,8 @@ type
     procedure EndDrag;
     // 指定位置の頂点を削除し、成功時はUndo履歴へ記録する。
     function DeleteVertexAt(X, Y: Integer): Boolean;
+    // 選択中の頂点に命中した場合だけ削除し、変更をUndo履歴へ記録する。
+    function DeleteSelectedVertexAt(X, Y: Integer): Boolean;
     // 指定位置の頂点種別ボタンを適用し、成功時はUndo履歴へ記録する。
     function ApplyVertexKindAt(X, Y: Integer): Boolean;
     // 指定位置のベジェ制御点を捕捉し、ドラッグを開始できた場合にTrueを返す。
@@ -572,6 +574,16 @@ begin
   if FEditHistory <> nil then
     FEditHistory.AddApplied(TScreenLayoutPathVerticesCommand.Create(
       FDocument, FDocument.SelectedIndex, OldVertices, NewVertices, True));
+end;
+
+function TScreenLayoutPathInteraction.DeleteSelectedVertexAt(X, Y: Integer): Boolean;
+var
+  VertexIndex: Integer;
+begin
+  Result := HitTestVertex(X, Y, VertexIndex) and
+    (VertexIndex = FSelectedVertexIndex);
+  if Result then
+    Result := DeleteVertexAt(X, Y);
 end;
 
 function TScreenLayoutPathInteraction.DeleteVertexAt(X,

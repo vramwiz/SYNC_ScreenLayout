@@ -1,4 +1,4 @@
-program ScreenLayoutFilterLifecycleTest;
+﻿program ScreenLayoutFilterLifecycleTest;
 
 {$APPTYPE CONSOLE}
 
@@ -16,9 +16,9 @@ uses
   ScreenLayoutEditHistory in
     '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutGroupCommands in
-    '..\Source\Core\Commands\Layer\ScreenLayoutGroupCommands.pas',
+    '..\Source\Core\Commands\Layer\Group\ScreenLayoutGroupCommands.pas',
   ScreenLayoutLayerOperations in
-    '..\Source\Layers\ScreenLayoutLayerOperations.pas';
+    '..\Source\Layers\Operations\ScreenLayoutLayerOperations.pas';
 
 procedure Check(Condition: Boolean; const MessageText: string);
 begin

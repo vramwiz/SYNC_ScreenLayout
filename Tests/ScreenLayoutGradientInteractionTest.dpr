@@ -14,7 +14,7 @@ uses
   ScreenLayoutEditorState in
     '..\Source\Core\Model\ScreenLayoutEditorState.pas',
   ScreenLayoutEditHistory in
-    '..\Source\Core\Commands\ScreenLayoutEditHistory.pas',
+    '..\Source\Core\Model\ScreenLayoutEditHistory.pas',
   ScreenLayoutGradientInteraction in
     '..\Source\Editor\Interaction\Gradient\ScreenLayoutGradientInteraction.pas',
   ScreenLayoutPaintStyles in

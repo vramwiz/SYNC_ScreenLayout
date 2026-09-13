@@ -17,6 +17,8 @@ type
     FFilterFrame: TScreenLayoutFilterFrame;
     procedure PropertyControllerChanged(Sender: TObject);
     procedure SetContext(const Value: IVectArtDesignerContext);
+  protected
+    procedure Resize; override;
   public
     // 独立したフィルターFrameと下部固定の色選択Frameを生成する。
     constructor Create(AOwner: TComponent); override;
@@ -24,6 +26,8 @@ type
     destructor Destroy; override;
     // Documentと選択状態からフィルターおよび色選択を再同期する。
     procedure RefreshFromDocument;
+    // 文書読込後または画面を開いた際に、使用色で履歴を初期化する。
+    procedure LoadColorHistory;
     // Contextを交換すると、各子Frameへ同じ編集サービスを接続する。
     property Context: IVectArtDesignerContext read FContext write SetContext;
   end;
@@ -31,7 +35,7 @@ type
 implementation
 
 uses
-  Winapi.Windows, Vcl.Graphics;
+  Winapi.Windows, Vcl.Graphics, System.Math;
 
 {$R ScreenLayoutObjectPropertiesFrame.dfm}
 
@@ -62,6 +66,18 @@ begin
   FColorController.OnChanged := PropertyControllerChanged;
 end;
 
+procedure TObjectPropertiesFrame.Resize;
+var
+  PickerHeight: Integer;
+begin
+  inherited;
+  if FColorPickerFrame = nil then Exit;
+  // ヘッダー・1行・補助設定を優先して確保し、色ピッカーは最小高さまで縮める。
+  PickerHeight := EnsureRange(ClientHeight - MulDiv(184, CurrentPPI, 96),
+    FColorPickerFrame.Constraints.MinHeight, MulDiv(COLOR_PICKER_PANEL_HEIGHT, CurrentPPI, 96));
+  if FColorPickerFrame.Height <> PickerHeight then FColorPickerFrame.Height := PickerHeight;
+end;
+
 destructor TObjectPropertiesFrame.Destroy;
 begin
   FColorController.Free;
@@ -77,6 +93,11 @@ procedure TObjectPropertiesFrame.RefreshFromDocument;
 begin
   FColorController.Refresh;
   FFilterFrame.RefreshFromDocument;
+end;
+
+procedure TObjectPropertiesFrame.LoadColorHistory;
+begin
+  if FContext <> nil then FColorPickerFrame.LoadColorHistory(FContext.Document);
 end;
 
 procedure TObjectPropertiesFrame.SetContext(

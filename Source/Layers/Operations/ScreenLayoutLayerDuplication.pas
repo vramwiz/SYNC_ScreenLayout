@@ -1,4 +1,4 @@
-// 選択レイヤーをフィルターを含む完全なオブジェクトとして複製する。
+﻿// 選択レイヤーをフィルターを含む完全なオブジェクトとして複製する。
 unit ScreenLayoutLayerDuplication;
 
 interface
@@ -20,16 +20,16 @@ uses
   ScreenLayoutLayerGeometry;
 
 const
-  DUPLICATE_OFFSET = 24;
+  DUPLICATE_OFFSET= 24;
 
 type
   TScreenLayoutDuplicateLayersCommand = class(TVectArtEditCommand)
   private
-    FBeforeSelection: TArray<Integer>;
-    FDocument: TVectArtDocument;
-    FDuplicates: TArray<TVectArtLayer>;
+    FBeforeSelection     : TArray<Integer>;
+    FDocument            : TVectArtDocument;
+    FDuplicates          : TArray<TVectArtLayer>;
     FDuplicatesInDocument: Boolean;
-    FIndices: TArray<Integer>;
+    FIndices             : TArray<Integer>;
   public
     constructor Create(ADocument: TVectArtDocument;
       const BeforeSelection, Indices: TArray<Integer>;

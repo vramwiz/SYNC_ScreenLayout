@@ -7,7 +7,7 @@ interface
 uses
   System.Types, ScreenLayoutDocument, ScreenLayoutEditorState;
 
-// HitLayerIndexと論理座標の当たり先を選択へ反映し、メニューを表示できる対象があればTrueを返す。
+// HitLayerIndexと論理座標の当たり先を選択へ反映し、メニューを表示できればTrueを返す。空白上でも貼り付け用に表示する。
 // 既存の複数選択内を右クリックした場合は選択を維持し、未選択対象だけを単一選択へ切り替える。
 function SelectScreenLayoutContextMenuTarget(Document: TVectArtDocument;
   EditorState: TVectArtEditorState; HitLayerIndex: Integer;
@@ -40,7 +40,11 @@ begin
     end;
   end;
   if HitLayerIndex <= 0 then
-    Exit;
+  begin
+    if EditorState <> nil then EditorState.SetOpenGroupChildren([]);
+    Document.SetSelectedLayers([]);
+    Exit(True);
+  end;
   if not Document.IsLayerSelected(HitLayerIndex) then
     Document.SelectedIndex := HitLayerIndex;
   Result := True;
