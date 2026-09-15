@@ -1,10 +1,10 @@
-// Codex向けScreenLayout専用JSONプロトコルを解析し、Documentと履歴へ安全に接続する。
+﻿// Codex向けScreenLayout専用JSONプロトコルを解析し、Documentと履歴へ安全に接続する。
 unit ScreenLayoutAutomationProtocol;
 
 interface
 
 uses
-  ScreenLayoutDocument, ScreenLayoutEditHistory, ScreenLayoutEditorState;
+  ScreenLayoutDocument, ScreenLayoutEditHistory, ScreenLayoutEditorState, ScreenLayoutCanvas;
 
 const
   SCREEN_LAYOUT_AUTOMATION_PIPE_SHORT_NAME = 'ScreenDesignMaker.v1';
@@ -15,12 +15,13 @@ const
 // VCLスレッド上で1要求を処理し、必ずJSON応答を返す。
 function HandleScreenLayoutAutomationRequest(const RequestText: string;
   Document: TVectArtDocument; EditHistory: TVectArtEditHistory;
-  EditorState: TVectArtEditorState): string;
+  EditorState: TVectArtEditorState; Canvas: TVectArtCanvasControl = nil): string;
 
 implementation
 
 uses
-  System.Hash, System.JSON, System.SysUtils,
+  System.Hash, System.JSON, System.SysUtils, Vcl.Graphics,
+  ScreenLayoutAutomationVisuals, ScreenLayoutAutomationText, ScreenLayoutAutomationLayout,
   ScreenLayoutAutomationDocumentCommand, ScreenLayoutDocumentJson;
 
 const
@@ -131,12 +132,21 @@ begin
   Commands.Add('get_capabilities');
   Commands.Add('get_editor_state');
   Commands.Add('get_document');
+  Commands.Add('get_canvas_snapshot');
+  Commands.Add('render_preview');
+  Commands.Add('measure_text');
+  Commands.Add('list_fonts');
+  Commands.Add('get_layout_geometry');
+  Commands.Add('get_creation_schema');
   Commands.Add('preview_replace_document');
   Commands.Add('replace_document');
   Commands.Add('undo');
   Commands.Add('redo');
   ResultJson.AddPair('commands', Commands);
   ResultJson.AddPair('pipe', SCREEN_LAYOUT_AUTOMATION_PIPE_NAME);
+  ResultJson.AddPair('max_image_edge', TJSONNumber.Create(2048));
+  ResultJson.AddPair('image_transport', 'local_png_path');
+  ResultJson.AddPair('background_token_supported', TJSONBool.Create(True));
   ResultJson.AddPair('max_request_bytes', TJSONNumber.Create(
     MAX_REQUEST_CHARS));
   Result := OkResponse(Command, TJSONPair.Create('capabilities', ResultJson));
@@ -258,16 +268,90 @@ begin
   Result := OkResponse(Command, TJSONPair.Create('change', ResultJson));
 end;
 
+function CheckVisualState(const Command: string; Root: TJSONObject;
+  Document: TVectArtDocument; Canvas: TVectArtCanvasControl;
+  RequireTokens: Boolean): string;
+var
+  Token: string;
+begin
+  Result := '';
+  if Canvas = nil then
+    Exit(ErrorResponse(Command, 'editor_unavailable', 'Canvas is not available.'));
+  if Canvas.TextEditing or Canvas.TransformDragging then
+    Exit(ErrorResponse(Command, 'editor_busy', 'Finish the current text edit or transform first.'));
+  if RequireTokens then
+    if not JsonString(Root, 'state_token', Token) or
+      (Token <> StateToken(SerializeVectArtDocument(Document))) then
+      Exit(ErrorResponse(Command, 'state_changed', 'Get a new canvas snapshot.'));
+  if RequireTokens or (Root.GetValue('background_token') <> nil) then
+    if not JsonString(Root, 'background_token', Token) or
+      (Token <> Canvas.ReferenceBackgroundToken) then
+      Exit(ErrorResponse(Command, 'background_changed', 'Get a new canvas snapshot.'));
+end;
+
+function HandleVisual(const Command: string; Root: TJSONObject;
+  Document: TVectArtDocument; Canvas: TVectArtCanvasControl; Preview: Boolean): string;
+var
+  Target: TVectArtDocument;
+  Background: TBitmap;
+  Snapshot, Images: TJSONObject;
+  JsonText, ErrorMessage: string;
+  MaxEdge: Integer;
+  Value: TJSONValue;
+begin
+  Result := CheckVisualState(Command, Root, Document, Canvas, Preview);
+  if Result <> '' then Exit;
+  MaxEdge := 1280;
+  Value := Root.GetValue('max_edge');
+  if Value <> nil then
+    if not (Value is TJSONNumber) or not TryStrToInt(Value.Value, MaxEdge) then
+      Exit(ErrorResponse(Command, 'invalid_argument', 'max_edge must be an integer.'));
+  if (MaxEdge < 64) or (MaxEdge > 2048) then
+    Exit(ErrorResponse(Command, 'invalid_argument', 'max_edge must be from 64 to 2048.'));
+  Target := nil;
+  Background := TBitmap.Create;
+  Snapshot := TJSONObject.Create;
+  try
+    JsonText := SerializeVectArtDocument(Document);
+    Snapshot.AddPair('state_token', StateToken(JsonText));
+    Snapshot.AddPair('background_token', Canvas.ReferenceBackgroundToken);
+    if Preview then
+    begin
+      if not ValidateIncomingDocument(Root, JsonText, ErrorMessage) then
+        Exit(ErrorResponse(Command, 'invalid_document', ErrorMessage));
+      Target := TVectArtDocument.Create;
+      if not TryDeserializeVectArtDocument(JsonText, Target, ErrorMessage) then
+        Exit(ErrorResponse(Command, 'invalid_document', ErrorMessage));
+    end;
+    Canvas.CopyReferenceBackground(Background);
+    if Preview then
+      Images := BuildScreenLayoutAutomationImages(Target, Background, MaxEdge)
+    else
+      Images := BuildScreenLayoutAutomationImages(Document, Background, MaxEdge);
+    Snapshot.AddPair('images', Images);
+    Snapshot.AddPair('document', TJSONObject.ParseJSONValue(JsonText));
+    Snapshot.AddPair('candidate_state_token', StateToken(JsonText));
+    Snapshot.AddPair('applied', TJSONBool.Create(False));
+    Result := OkResponse(Command, TJSONPair.Create('snapshot', Snapshot));
+    Snapshot := nil;
+  finally
+    Snapshot.Free;
+    Background.Free;
+    Target.Free;
+  end;
+end;
+
 function HandleScreenLayoutAutomationRequest(const RequestText: string;
   Document: TVectArtDocument; EditHistory: TVectArtEditHistory;
-  EditorState: TVectArtEditorState): string;
+  EditorState: TVectArtEditorState; Canvas: TVectArtCanvasControl): string;
 var
   Command: string;
   Json: TJSONValue;
   Root: TJSONObject;
+  Geometry: TJSONObject;
 begin
   Command := '';
-  if Length(RequestText) > MAX_REQUEST_CHARS then
+  if TEncoding.UTF8.GetByteCount(RequestText) > MAX_REQUEST_CHARS then
     Exit(ErrorResponse(Command, 'request_too_large',
       'The request exceeds the 4 MiB limit.'));
   if (Document = nil) or (EditHistory = nil) then
@@ -288,12 +372,35 @@ begin
         Result := BuildEditorState(Command, Document, EditHistory)
       else if SameText(Command, 'get_document') then
         Result := BuildDocument(Command, Document)
+      else if SameText(Command, 'get_canvas_snapshot') then
+        Result := HandleVisual(Command, Root, Document, Canvas, False)
+      else if SameText(Command, 'render_preview') then
+        Result := HandleVisual(Command, Root, Document, Canvas, True)
+      else if SameText(Command, 'measure_text') then
+        Result := OkResponse(Command, TJSONPair.Create('measurement', MeasureScreenLayoutAutomationText(Root)))
+      else if SameText(Command, 'list_fonts') then
+        Result := OkResponse(Command, TJSONPair.Create('fonts', ScreenLayoutAutomationFonts))
+      else if SameText(Command, 'get_creation_schema') then
+        Result := OkResponse(Command, TJSONPair.Create('schema', ScreenLayoutAutomationCreationSchema))
+      else if SameText(Command, 'get_layout_geometry') then
+      begin
+        Geometry := ScreenLayoutAutomationGeometry(Document);
+        Geometry.AddPair('state_token', StateToken(SerializeVectArtDocument(Document)));
+        Result := OkResponse(Command, TJSONPair.Create('geometry', Geometry));
+      end
       else if SameText(Command, 'preview_replace_document') then
         Result := HandleReplace(Command, Root, Document, EditHistory,
           EditorState, False)
       else if SameText(Command, 'replace_document') then
+      begin
+        if Root.GetValue('background_token') <> nil then
+        begin
+          Result := CheckVisualState(Command, Root, Document, Canvas, True);
+          if Result <> '' then Exit;
+        end;
         Result := HandleReplace(Command, Root, Document, EditHistory,
-          EditorState, True)
+          EditorState, True);
+      end
       else if SameText(Command, 'undo') then
         Result := HandleHistory(Command, Root, Document, EditHistory,
           EditorState, True)
@@ -304,6 +411,8 @@ begin
         Result := ErrorResponse(Command, 'unknown_command',
           'The command is not supported.');
     except
+      on E: EArgumentException do
+        Result := ErrorResponse(Command, 'invalid_argument', E.Message);
       on E: Exception do
         Result := ErrorResponse(Command, 'internal_error', E.Message);
     end;

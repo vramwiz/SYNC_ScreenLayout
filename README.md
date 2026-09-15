@@ -348,3 +348,7 @@ ScreenDesignMakerはPer-Monitor V2 DPI対応で、Windowsの表示倍率に合�
 ScreenDesignMakerまたはAviUtl2の「画面レイアウト - 編集」を開いている間は、専用Named Pipeから
 現在のDocumentを取得し、検証後の変更を1回のUndo単位で反映できる。Codexへ操作させる場合は、最初に
 [`CODEX_AUTOMATION.md`](CODEX_AUTOMATION.md)を読ませる。
+
+背景と合成画像の取得、未適用案の画像プレビュー、文字計測、フォント一覧、配置範囲、文字・装飾の
+作成例も取得できる。Codexが画像を見て人物や余白を判断し、編集可能な文字・図形として配置する。
+参照背景が変わった場合も古い配置案を検出し、画像を取得し直してから編集する。

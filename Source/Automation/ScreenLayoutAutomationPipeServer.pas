@@ -1,15 +1,15 @@
-// ScreenLayout編集画面の生存期間だけ専用Named Pipeを公開する。
+﻿// ScreenLayout編集画面の生存期間だけ専用Named Pipeを公開する。
 unit ScreenLayoutAutomationPipeServer;
 
 interface
 
 uses
   Winapi.Windows, ScreenLayoutDocument, ScreenLayoutEditHistory,
-  ScreenLayoutEditorState;
+  ScreenLayoutEditorState, ScreenLayoutCanvas;
 
 function StartScreenLayoutAutomationPipeServer(NotifyWindow: HWND;
   Document: TVectArtDocument; EditHistory: TVectArtEditHistory;
-  EditorState: TVectArtEditorState; out ErrorMessage: string): Boolean;
+  EditorState: TVectArtEditorState; Canvas: TVectArtCanvasControl; out ErrorMessage: string): Boolean;
 procedure StopScreenLayoutAutomationPipeServer;
 procedure ProcessScreenLayoutAutomationPipeMessage(WParam: WPARAM);
 // 表示時に確定したForm Handleを通知先として再設定する。
@@ -29,12 +29,13 @@ type
     FDocument: TVectArtDocument;       // MainForm所有。サーバー停止まで生存する。
     FEditHistory: TVectArtEditHistory; // MainForm所有。
     FEditorState: TVectArtEditorState; // MainForm所有。
+    FCanvas: TVectArtCanvasControl; // MainForm所有。背景画像の複写に使用する。
     FThread: TPipeServerTThread;
     procedure Receive(Sender: TObject; const ReceivedStr: string;
       var SendStr: string);
   public
     constructor Create(NotifyWindow: HWND; Document: TVectArtDocument;
-      EditHistory: TVectArtEditHistory; EditorState: TVectArtEditorState);
+      EditHistory: TVectArtEditHistory; EditorState: TVectArtEditorState; Canvas: TVectArtCanvasControl);
     destructor Destroy; override;
     procedure ProcessMessage(WParam: WPARAM);
     procedure UpdateNotifyWindow(NotifyWindow: HWND);
@@ -45,12 +46,13 @@ var
 
 constructor TScreenLayoutAutomationPipeServer.Create(NotifyWindow: HWND;
   Document: TVectArtDocument; EditHistory: TVectArtEditHistory;
-  EditorState: TVectArtEditorState);
+  EditorState: TVectArtEditorState; Canvas: TVectArtCanvasControl);
 begin
   inherited Create;
   FDocument := Document;
   FEditHistory := EditHistory;
   FEditorState := EditorState;
+  FCanvas := Canvas;
   FThread := TPipeServerTThread.Create(
     SCREEN_LAYOUT_AUTOMATION_PIPE_SHORT_NAME, PIPE_BUFFER_SIZE, True, 1,
     NotifyWindow);
@@ -80,7 +82,7 @@ procedure TScreenLayoutAutomationPipeServer.Receive(Sender: TObject;
   const ReceivedStr: string; var SendStr: string);
 begin
   SendStr := HandleScreenLayoutAutomationRequest(ReceivedStr, FDocument,
-    FEditHistory, FEditorState);
+    FEditHistory, FEditorState, FCanvas);
 end;
 
 procedure TScreenLayoutAutomationPipeServer.ProcessMessage(WParam: WPARAM);
@@ -98,7 +100,7 @@ end;
 
 function StartScreenLayoutAutomationPipeServer(NotifyWindow: HWND;
   Document: TVectArtDocument; EditHistory: TVectArtEditHistory;
-  EditorState: TVectArtEditorState; out ErrorMessage: string): Boolean;
+  EditorState: TVectArtEditorState; Canvas: TVectArtCanvasControl; out ErrorMessage: string): Boolean;
 begin
   Result := False;
   ErrorMessage := '';
@@ -109,7 +111,7 @@ begin
   end;
   try
     Server := TScreenLayoutAutomationPipeServer.Create(NotifyWindow,
-      Document, EditHistory, EditorState);
+      Document, EditHistory, EditorState, Canvas);
     Result := True;
   except
     on E: Exception do

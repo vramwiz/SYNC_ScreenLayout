@@ -47,6 +47,7 @@ type
     FPointerInside: Boolean;
     FPointerPosition: TPoint;
     FReferenceBackground: TBitmap;
+    FReferenceBackgroundToken: string; // 参照背景だけの更新もAIの配置案から検出する。
     FPlacementPreview: TScreenLayoutPlacementPreview; // 確定前の塗り図形画像を所有する。
     FRenderCache: TScreenLayoutCanvasRenderCache; // 文書画像、移動プレビュー、ズーム再利用を所有する。
     FShapeCreation: TVectArtShapeCreation;
@@ -152,6 +153,9 @@ type
     // 外部ホストのRGBA8画像をDocumentに含めない参照背景として設定する。
     procedure SetReferenceBackgroundRgba(const Pixels: TBytes;
       Width, Height: Integer);
+    // 呼出側所有のBitmapへ参照背景を複写する。背景なしなら空画像にする。
+    procedure CopyReferenceBackground(Target: TBitmap);
+    property ReferenceBackgroundToken: string read FReferenceBackgroundToken;
     // コントロール座標が用紙内なら、中央原点の文書座標へ変換する。
     function TryClientPointToLogical(const ClientPoint: TPoint;
       out LogicalPoint: TPointF): Boolean;
@@ -251,8 +255,12 @@ begin
 end;
 
 constructor TVectArtCanvasControl.Create(AOwner: TComponent);
+var
+  Token: TGUID;
 begin
   inherited Create(AOwner);
+  CreateGUID(Token);
+  FReferenceBackgroundToken := GUIDToString(Token);
   Color := COLOR_EDITOR_SURROUND;
   ControlStyle := ControlStyle + [csOpaque];
   DoubleBuffered := True;
@@ -3676,7 +3684,10 @@ var
   Source: PByte;
   X: Integer;
   Y: Integer;
+  Token: TGUID;
 begin
+  CreateGUID(Token);
+  FReferenceBackgroundToken := GUIDToString(Token);
   FReferenceBackground.SetSize(0, 0);
   if (Width <= 0) or (Height <= 0) or
     (Length(Pixels) <> NativeInt(Width) * Height * 4) then
@@ -3702,6 +3713,11 @@ begin
     end;
   end;
   Invalidate;
+end;
+
+procedure TVectArtCanvasControl.CopyReferenceBackground(Target: TBitmap);
+begin
+  Target.Assign(FReferenceBackground);
 end;
 
 procedure TVectArtCanvasControl.Resize;

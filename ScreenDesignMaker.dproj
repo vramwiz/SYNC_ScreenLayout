@@ -75,6 +75,9 @@
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas"/>
         <DCCReference Include="Lib\Pipe\PipeServerTThread.pas"/>
+        <DCCReference Include="Source\Automation\ScreenLayoutAutomationVisuals.pas"/>
+        <DCCReference Include="Source\Automation\ScreenLayoutAutomationText.pas"/>
+        <DCCReference Include="Source\Automation\ScreenLayoutAutomationLayout.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationProtocol.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationPipeServer.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationDocumentCommand.pas"/>

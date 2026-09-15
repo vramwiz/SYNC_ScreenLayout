@@ -1,5 +1,22 @@
 # SYNC_ScreenLayout 開発ノート
 
+- AIによるサムネイル制作へ向け、Named Pipeに`get_canvas_snapshot`、`render_preview`、
+  `measure_text`、`list_fonts`、`get_layout_geometry`、`get_creation_schema`を追加した。
+  背景、Documentの透明描画、合成結果をローカルPNGで返し、中央原点の文書座標への変換情報を付ける。
+  AviUtl2の参照背景はDocument外のため、Canvasから複写する専用APIと`background_token`を追加した。
+  画像制作のプレビューと適用ではDocumentと背景の両トークンを照合し、古い背景に基づく案を拒否する。
+  未適用プレビューは一時Documentと共通レンダラーを使い、選択とUndoを変更しない。
+  文字計測は通常横書きのSkia組版を共有し、表示行、寸法、収まり、解決フォントを返す。
+  配置範囲は変形後の幾何範囲で、影・縁取りを含む正確な見た目は合成PNGで確認する。
+  作成例は文字（縁取り・影付き）、四角、楕円、三角形Shapeを現行Writerで生成する。
+  空き領域・被写体の意味判断は画像を読んだCodexが担当し、アプリに顔検出器は追加しない。
+  `CODEX_AUTOMATION.md`を画像取得・配置判断・文字計測・試し描画・一括適用の手順へ更新した。
+  従来の「画像を返さない」制限は撤回し、一時PNGの絶対パスを返す。PNGは一時フォルダーに保持する。
+  専用テストで画素の上下・色・透明度、座標、プレビュー非変更、背景／文書競合、文字計測、
+  作成例JSON、Undo／Redoを確認した。関連3テストと全4構成が警告0・エラー0で成功し、
+  Release版Named Pipeの実通信で取得・プレビュー・適用・Undo、PNG表示を確認した。
+  AviUtl2配置先auf2とRelease DLLのSHA-256も一致した。
+
 - 開いているScreenDesignMaker／画面レイアウト編集画面をCodexから操作する専用Named Pipe
   `\\.\pipe\ScreenDesignMaker.v1`を追加した。Aul2MIRAIのPipeスレッドライブラリをプロジェクト内へ
   コピーし、ScreenLayout固有の状態取得、完全Document取得、置換プレビュー、一括置換、Undo／Redoを
@@ -231,6 +248,8 @@
 
 - `Setup/make_release_zip.bat`は、ReleaseビルドでAviUtl2へ配置したプラグイン本体と`sk4d.dll`を
   `SYNC_ScreenLayout`ルートフォルダへまとめ、`Setup/SYNC_ScreenLayout.zip`を生成する。
+  `CODEX_AUTOMATION.md`も同じフォルダへ同梱し、別環境のCodexへ操作仕様と実制作の知識を配布する。
+  ガイドはプロジェクト直下の最新版を取得し、存在しなければZIP作成を失敗させる。
   `Setup/SYNC_ScreenLayout.catalog.json`はGitHub Releaseから同名ZIPを取得し、
   `{pluginsDir}/SYNC_ScreenLayout`へ配置する。初回カタログ版は`v1.0.0`、2026-09-06とし、
   主プラグインのXXH3-128で検出する。ライセンス宣言、カタログ画像、公開済みGitタグがないため、

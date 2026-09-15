@@ -69,6 +69,9 @@
         <DCCReference Include="Source\PlacementPlugin\ScreenLayoutPluginDocument.pas"/>
         <DCCReference Include="Source\PlacementPlugin\ScreenLayoutEditorHost.pas"/>
         <DCCReference Include="Lib\Pipe\PipeServerTThread.pas"/>
+        <DCCReference Include="Source\Automation\ScreenLayoutAutomationVisuals.pas"/>
+        <DCCReference Include="Source\Automation\ScreenLayoutAutomationText.pas"/>
+        <DCCReference Include="Source\Automation\ScreenLayoutAutomationLayout.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationProtocol.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationPipeServer.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationDocumentCommand.pas"/>

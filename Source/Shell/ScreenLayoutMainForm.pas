@@ -326,7 +326,7 @@ begin
   HistoryChanged(FEditHistory);
   EditorStateChanged(FEditorState);
   FAutomationPipeStarted := StartScreenLayoutAutomationPipeServer(Handle,
-    FDocument, FEditHistory, FEditorState, ErrorMessage);
+    FDocument, FEditHistory, FEditorState, FEditorFrame.CanvasControl, ErrorMessage);
   if not FAutomationPipeStarted then
     lblStatus.Caption := 'Codex pipe: ' + ErrorMessage;
 end;
