@@ -1,5 +1,14 @@
 # SYNC_ScreenLayout 開発ノート
 
+- 開いているScreenDesignMaker／画面レイアウト編集画面をCodexから操作する専用Named Pipe
+  `\\.\pipe\ScreenDesignMaker.v1`を追加した。Aul2MIRAIのPipeスレッドライブラリをプロジェクト内へ
+  コピーし、ScreenLayout固有の状態取得、完全Document取得、置換プレビュー、一括置換、Undo／Redoを
+  JSON命令として実装した。置換は現行Document JSON Readerで一時Documentへ事前検証し、`state_token`で
+  同時編集を拒否し、全体を1回のUndo履歴へ登録する。PNGや画面画像は返さず、結果は開いている編集画面へ
+  即時反映する。Codexが学習する接続方法、命令、必須手順、サムネイル制作規則を
+  `CODEX_AUTOMATION.md`へ記載した。単独Releaseアプリとの実通信で取得、プレビュー、適用、古いトークンの
+  拒否、Undo、Redo、復元を確認した。
+
 - 左ツールパレットの最下部へ、次に配置する図形の作成既定色を示す28px角相当の色見本を追加した。
   10個のツールボタン間隔を3px相当へ詰め、既定の58×480px相当のパレット内へ収める。黒と白の二重枠で
   暗色・明色のどちらも判別でき、EditorStateの作成色変更通知で再描画する。96 DPIの実描画ピクセル一致

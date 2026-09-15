@@ -21,7 +21,8 @@ uses
   ScreenLayoutToolPaletteFrame, ScreenLayoutObjectContextMenu,
   ScreenLayoutTextContextMenu, ScreenLayoutPathContextMenu,
   ScreenLayoutTransformContextMenu,
-  ScreenLayoutArrangementContextMenu;
+  ScreenLayoutArrangementContextMenu,
+  PipeServerTThread, ScreenLayoutAutomationPipeServer;
 
 type
   TMainForm = class(TForm)
@@ -70,6 +71,7 @@ type
     FToolPaletteFrame: TToolPaletteFrame;
     FViewMenu: TVectArtDarkPopupMenu;
     FLayoutEditing: Boolean;
+    FAutomationPipeStarted: Boolean; // このFormが専用Pipeを所有している間だけTrue。
     FLayoutFileName: string;
     FMenuGroup: TVectArtDarkMenuGroup;
     FLayerMenuItem: TPanel;
@@ -108,6 +110,7 @@ type
     procedure UpdateGeometrySettingsAvailability;
     procedure UpdateToolMenuItems;
     procedure WMDropFiles(var Message: TWMDropFiles); message WM_DROPFILES;
+    procedure WMAutomationPipe(var Message: TMessage); message WM_PIPE_NOTIFY;
   protected
     // 外部ホストによる文書初期化後、表示直前の使用色を取り込む。
     procedure DoShow; override;
@@ -204,6 +207,7 @@ end;
 procedure TMainForm.FormCreate(Sender: TObject);
 var
   DarkModeEnabled: BOOL;
+  ErrorMessage: string;
   LayoutFolder: string;
 begin
   DarkModeEnabled := True;
@@ -321,6 +325,10 @@ begin
   InitializeShortcuts;
   HistoryChanged(FEditHistory);
   EditorStateChanged(FEditorState);
+  FAutomationPipeStarted := StartScreenLayoutAutomationPipeServer(Handle,
+    FDocument, FEditHistory, FEditorState, ErrorMessage);
+  if not FAutomationPipeStarted then
+    lblStatus.Caption := 'Codex pipe: ' + ErrorMessage;
 end;
 
 procedure TMainForm.CanvasSettingsRequest(Sender: TObject);
@@ -579,6 +587,9 @@ procedure TMainForm.DoShow;
 begin
   FObjectPropertiesFrame.LoadColorHistory;
   inherited;
+  // AviUtl2内のモーダル表示では生成後にHandleが変わるため、表示時の値へ更新する。
+  if FAutomationPipeStarted then
+    UpdateScreenLayoutAutomationPipeNotifyWindow(Handle);
 end;
 
 procedure TMainForm.LoadDocument;
@@ -759,6 +770,11 @@ end;
 
 procedure TMainForm.FormDestroy(Sender: TObject);
 begin
+  if FAutomationPipeStarted then
+  begin
+    StopScreenLayoutAutomationPipeServer;
+    FAutomationPipeStarted := False;
+  end;
   if FFileDropCaptionEnabled then
     DragAcceptFiles(Handle, False);
   SaveLayoutSettings;
@@ -787,6 +803,12 @@ begin
   FreeAndNil(FEditorState);
   FreeAndNil(FDocument);
   FinalizeSkiaRuntime;
+end;
+
+procedure TMainForm.WMAutomationPipe(var Message: TMessage);
+begin
+  ProcessScreenLayoutAutomationPipeMessage(Message.WParam);
+  Message.Result := 0;
 end;
 
 procedure TMainForm.SetFileDropCaptionEnabled(const Value: Boolean);

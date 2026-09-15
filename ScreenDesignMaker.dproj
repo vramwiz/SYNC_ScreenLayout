@@ -74,6 +74,10 @@
         <DCCReference Include="Lib\ShortcutAction\ShortcutAction.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarRenderer.pas"/>
         <DCCReference Include="Lib\HorizontalTrackBar\HorizontalTrackBarControl.pas"/>
+        <DCCReference Include="Lib\Pipe\PipeServerTThread.pas"/>
+        <DCCReference Include="Source\Automation\ScreenLayoutAutomationProtocol.pas"/>
+        <DCCReference Include="Source\Automation\ScreenLayoutAutomationPipeServer.pas"/>
+        <DCCReference Include="Source\Automation\ScreenLayoutAutomationDocumentCommand.pas"/>
         <DCCReference Include="Source\Editor\Creation\ScreenLayoutPlacementPreview.pas"/>
         <DCCReference Include="Source\ObjectProperties\Color\ScreenLayoutColorHistory.pas"/>
         <DCCReference Include="Source\Shell\ScreenLayoutMainForm.pas">

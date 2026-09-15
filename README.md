@@ -343,3 +343,8 @@ ScreenDesignMakerはPer-Monitor V2 DPI対応で、Windowsの表示倍率に合�
 - フィルター一覧から追加、削除、有効／無効、並べ替え、主要値の変更ができる。
 - 縁取り幅、影の相対位置、ぼかし範囲はキャンバス上の効果枠とハンドルから直接編集できる。
 - フィルターの順序、状態、設定値は複製、グループ操作、Undo／Redo、version 15 JSONへ引き継がれる。
+# Codexから編集画面を操作する
+
+ScreenDesignMakerまたはAviUtl2の「画面レイアウト - 編集」を開いている間は、専用Named Pipeから
+現在のDocumentを取得し、検証後の変更を1回のUndo単位で反映できる。Codexへ操作させる場合は、最初に
+[`CODEX_AUTOMATION.md`](CODEX_AUTOMATION.md)を読ませる。
