@@ -1,10 +1,10 @@
-﻿// AviUtl2の合成済みフレームバッファを編集画面用RGBAイメージとして保持する。
+﻿// AviUtl2の合成済みフレームバッファを編集画面用に元の画素形式で保持する。
 unit ScreenLayoutFrameCapture;
 
 interface
 
 uses
-  AviUtl2FilterTypes, System.SysUtils, Winapi.Windows;
+  AviUtl2FilterTypes, System.SysUtils, Winapi.Windows, Winapi.DXGIFormat;
 
 type
   TScreenLayoutFrameCapture = class
@@ -23,17 +23,22 @@ type
   public
     constructor Create;
     destructor Destroy; override;
-    // 現在の合成済みフレームをCPUから参照できるRGBA8配列へ複製する。
+    // 現在の合成済みフレームを元形式のCPU所有バッファへ複製する。
     procedure Capture(Video: PFILTER_PROC_VIDEO);
-    // 保持中の画像を呼び出し側所有の配列として複製する。
+    // 保持中の画像をロック内で複製し、ロック外でRGBA8へ変換する。
     function CopyRgba(out Pixels: TBytes; out Width, Height: Integer;
       out Status: string): Boolean;
   end;
 
+// 元形式の密詰め画像を独立したRGBA8配列へ変換する。不正な入力ではFalseを返す。
+function ConvertScreenLayoutFramebufferToRgba(const RawPixels: TBytes;
+  Width, Height: Integer; TextureFormat: DXGI_FORMAT;
+  out Pixels: TBytes): Boolean;
+
 implementation
 
 uses
-  System.Math, Winapi.D3D11, Winapi.DXGIFormat;
+  System.Math, Winapi.D3D11;
 
 const
   MAX_CAPTURE_DIMENSION = 16384;
@@ -102,6 +107,74 @@ begin
   Result := Round(Value * 255);
 end;
 
+function ConvertScreenLayoutFramebufferToRgba(const RawPixels: TBytes;
+  Width, Height: Integer; TextureFormat: DXGI_FORMAT;
+  out Pixels: TBytes): Boolean;
+var
+  Destination, Source: PByte;
+  SourceWords: PPixelWords;
+  RowBytes: NativeInt;
+  I, X, Y, PixelSize: Integer;
+begin
+  Pixels := nil;
+  Result := False;
+  PixelSize := BytesPerPixel(TextureFormat);
+  if (Width <= 0) or (Height <= 0) or
+    (Width > MAX_CAPTURE_DIMENSION) or (Height > MAX_CAPTURE_DIMENSION) or
+    (PixelSize = 0) then
+    Exit;
+  RowBytes := NativeInt(Width) * PixelSize;
+  if Length(RawPixels) <> RowBytes * Height then
+    Exit;
+  SetLength(Pixels, NativeInt(Width) * Height * 4);
+  Destination := @Pixels[0];
+  for Y := 0 to Height - 1 do
+  begin
+    Source := @RawPixels[NativeInt(Y) * RowBytes];
+    case TextureFormat of
+      DXGI_FORMAT_R8G8B8A8_UNORM,
+      DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        Move(Source^, Destination^, NativeInt(Width) * 4);
+      DXGI_FORMAT_B8G8R8A8_UNORM,
+      DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+        for X := 0 to Width - 1 do
+        begin
+          Destination[X * 4] := Source[X * 4 + 2];
+          Destination[X * 4 + 1] := Source[X * 4 + 1];
+          Destination[X * 4 + 2] := Source[X * 4];
+          Destination[X * 4 + 3] := Source[X * 4 + 3];
+        end;
+      DXGI_FORMAT_R16G16B16A16_UNORM,
+      DXGI_FORMAT_R16G16B16A16_FLOAT:
+        begin
+          SourceWords := PPixelWords(Source);
+          for X := 0 to Width - 1 do
+          begin
+            I := X * 4;
+            if TextureFormat = DXGI_FORMAT_R16G16B16A16_UNORM then
+            begin
+              Destination[I] := SourceWords[0] div 257;
+              Destination[I + 1] := SourceWords[1] div 257;
+              Destination[I + 2] := SourceWords[2] div 257;
+              Destination[I + 3] := SourceWords[3] div 257;
+            end
+            else
+            begin
+              Destination[I] := FloatToByte(HalfToSingle(SourceWords[0]));
+              Destination[I + 1] := FloatToByte(HalfToSingle(SourceWords[1]));
+              Destination[I + 2] := FloatToByte(HalfToSingle(SourceWords[2]));
+              Destination[I + 3] := Round(EnsureRange(
+                HalfToSingle(SourceWords[3]), 0.0, 1.0) * 255);
+            end;
+            Inc(SourceWords);
+          end;
+        end;
+    end;
+    Inc(Destination, NativeInt(Width) * 4);
+  end;
+  Result := True;
+end;
+
 constructor TScreenLayoutFrameCapture.Create;
 begin
   inherited Create;
@@ -147,18 +220,15 @@ var
   Device: ID3D11Device;
   TextureFormat: DXGI_FORMAT;
   Height: Integer;
-  I: Integer;
   Mapped: D3D11_MAPPED_SUBRESOURCE;
-  PixelCount: NativeInt;
+  RowBytes: NativeInt;
   Source: PByte;
   SourceDesc: D3D11_TEXTURE2D_DESC;
   SourcePointer: Pointer;
   SourceTexture: ID3D11Texture2D;
-  SourceWords: PPixelWords;
   StagingDesc: D3D11_TEXTURE2D_DESC;
   StagingTexture: ID3D11Texture2D;
   Width: Integer;
-  X: Integer;
   Y: Integer;
 begin
   if not FInitialized then
@@ -250,52 +320,19 @@ begin
         Exit;
       end;
       try
-        PixelCount := NativeInt(Width) * Height;
-        SetLength(FPixels, PixelCount * 4);
+        RowBytes := NativeInt(Width) * BytesPerPixel(TextureFormat);
+        if (Mapped.pData = nil) or (Mapped.RowPitch < RowBytes) then
+        begin
+          ClearImage('Invalid framebuffer row pitch or mapped data.');
+          Exit;
+        end;
+        SetLength(FPixels, RowBytes * Height);
         Destination := @FPixels[0];
         for Y := 0 to Height - 1 do
         begin
           Source := PByte(Mapped.pData) + NativeInt(Y) * Mapped.RowPitch;
-          case TextureFormat of
-            DXGI_FORMAT_R8G8B8A8_UNORM,
-            DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
-              Move(Source^, Destination^, NativeInt(Width) * 4);
-            DXGI_FORMAT_B8G8R8A8_UNORM,
-            DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
-              for X := 0 to Width - 1 do
-              begin
-                Destination[X * 4] := Source[X * 4 + 2];
-                Destination[X * 4 + 1] := Source[X * 4 + 1];
-                Destination[X * 4 + 2] := Source[X * 4];
-                Destination[X * 4 + 3] := Source[X * 4 + 3];
-              end;
-            DXGI_FORMAT_R16G16B16A16_UNORM,
-            DXGI_FORMAT_R16G16B16A16_FLOAT:
-              begin
-                SourceWords := PPixelWords(Source);
-                for X := 0 to Width - 1 do
-                begin
-                  I := X * 4;
-                  if TextureFormat = DXGI_FORMAT_R16G16B16A16_UNORM then
-                  begin
-                    Destination[I] := SourceWords[0] div 257;
-                    Destination[I + 1] := SourceWords[1] div 257;
-                    Destination[I + 2] := SourceWords[2] div 257;
-                    Destination[I + 3] := SourceWords[3] div 257;
-                  end
-                  else
-                  begin
-                    Destination[I] := FloatToByte(HalfToSingle(SourceWords[0]));
-                    Destination[I + 1] := FloatToByte(HalfToSingle(SourceWords[1]));
-                    Destination[I + 2] := FloatToByte(HalfToSingle(SourceWords[2]));
-                    Destination[I + 3] := Round(EnsureRange(
-                      HalfToSingle(SourceWords[3]), 0.0, 1.0) * 255);
-                  end;
-                  Inc(SourceWords);
-                end;
-              end;
-          end;
-          Inc(Destination, NativeInt(Width) * 4);
+          Move(Source^, Destination^, RowBytes);
+          Inc(Destination, RowBytes);
         end;
       finally
         Context.Unmap(StagingTexture, 0);
@@ -317,6 +354,9 @@ end;
 
 function TScreenLayoutFrameCapture.CopyRgba(out Pixels: TBytes;
   out Width, Height: Integer; out Status: string): Boolean;
+var
+  RawPixels: TBytes;
+  TextureFormat: DXGI_FORMAT;
 begin
   Pixels := nil;
   Width := 0;
@@ -327,16 +367,20 @@ begin
   EnterCriticalSection(FLock);
   try
     Status := FStatus;
-    Result := (FWidth > 0) and (FHeight > 0) and
-      (Length(FPixels) = NativeInt(FWidth) * FHeight * 4);
-    if Result then
-    begin
-      Pixels := Copy(FPixels);
-      Width := FWidth;
-      Height := FHeight;
-    end;
+    RawPixels := Copy(FPixels);
+    Width := FWidth;
+    Height := FHeight;
+    TextureFormat := DXGI_FORMAT(FFormat);
   finally
     LeaveCriticalSection(FLock);
+  end;
+  // 再生側の次フレーム保存を、編集用の色変換で待たせない。
+  Result := ConvertScreenLayoutFramebufferToRgba(RawPixels, Width, Height,
+    TextureFormat, Pixels);
+  if not Result then
+  begin
+    Width := 0;
+    Height := 0;
   end;
 end;
 

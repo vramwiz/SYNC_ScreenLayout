@@ -71,24 +71,12 @@ end;
 
 var
   TestTexture: ID3D11Texture2D;
-  InputRequested, FramebufferRequested: Boolean;
+  FramebufferRequested: Boolean;
 
 function GetTestTexture: Pointer; cdecl;
 begin
   FramebufferRequested := True;
   Result := Pointer(TestTexture);
-end;
-
-function GetTestInput: Pointer; cdecl;
-begin
-  InputRequested := True;
-  Result := Pointer(TestTexture);
-end;
-
-function GetMissingInput: Pointer; cdecl;
-begin
-  InputRequested := True;
-  Result := nil;
 end;
 
 procedure TestGpuCapture;
@@ -138,25 +126,14 @@ begin
       Check(ConvertScreenLayoutFramebufferToRgba(Raw, 3, 2, Formats[F], Expected), 'expected');
       for N := 0 to 1 do
       begin
+        FramebufferRequested := False;
         Capture.Capture(@Video);
+        Check(FramebufferRequested, 'capture framebuffer');
         Check(Capture.CopyRgba(Pixels, Width, Height, Status), 'capture: ' + Status);
         Check((Width = 3) and (Height = 2), 'capture dimensions');
         Check(CompareMem(@Pixels[0], @Expected[0], Length(Expected)), 'GPU roundtrip');
       end;
-      InputRequested := False;
-      FramebufferRequested := False;
-      Video.GetImageTexture2D := GetTestInput;
-      Capture.Capture(@Video);
-      Check(InputRequested and not FramebufferRequested, 'prefer filter input');
-      Check(Capture.CopyRgba(Pixels, Width, Height, Status), 'input capture');
-      Check(CompareMem(@Pixels[0], @Expected[0], Length(Expected)), 'input pixels');
-      InputRequested := False;
-      FramebufferRequested := False;
-      Video.GetImageTexture2D := GetMissingInput;
-      Capture.Capture(@Video);
-      Check(InputRequested and FramebufferRequested, 'missing input fallback');
-      Check(Capture.CopyRgba(Pixels, Width, Height, Status), 'fallback capture');
-      Video.GetImageTexture2D := nil;
+
     end;
     Capture.Capture(nil);
     Check(not Capture.CopyRgba(Pixels, Width, Height, Status), 'clear old frame');

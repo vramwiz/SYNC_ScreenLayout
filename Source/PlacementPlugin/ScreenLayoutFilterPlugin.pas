@@ -17,8 +17,8 @@ implementation
 
 uses
   PluginFilterTable, ScreenLayoutEditorHost, ScreenLayoutFilterContext,
-  System.UITypes, System.IOUtils, TextRendererSkiaBootstrap, TextRendererSkiaRuntime,
-  Vcl.Dialogs, Winapi.Windows;
+  System.UITypes, TextRendererSkiaBootstrap, TextRendererSkiaRuntime,
+  Vcl.Dialogs;
 
 const
   FILTER_EFFECT_NAME = '画面レイアウト';
@@ -29,20 +29,6 @@ var
   LayoutDataItem: TFILTER_ITEM_STRING;
   ScreenLayoutContexts: TScreenLayoutFilterContexts;
   ScreenLayoutSkiaAcquired: Boolean;
-
-// 編集時だけ記録し、背景取得失敗と対象コンテキストの不一致を切り分ける。
-procedure LogBackground(const MessageText: string);
-begin
-  try
-    TFile.AppendAllText(TPath.Combine(TPath.GetTempPath,
-      'ScreenLayoutBackground.log'),
-      FormatDateTime('yyyy-mm-dd hh:nn:ss.zzz', Now) +
-      Format(' pid=%d deferred-capture-v2 %s', [GetCurrentProcessId, MessageText]) +
-      sLineBreak, TEncoding.UTF8);
-  except
-    // 診断ファイルを書けなくても編集を続行する。
-  end;
-end;
 
 procedure EditButtonCallback(Edit: PEDIT_SECTION); cdecl;
 var
@@ -83,10 +69,7 @@ begin
     BackgroundHeight := 0;
     CanvasWidth := 0;
     CanvasHeight := 0;
-    BackgroundStatus := 'No matching capture context.';
     ObjectLocation := Edit^.GetObjectLayerFrame(Obj);
-    LogBackground(Format('edit layer=%d start=%d end=%d',
-      [ObjectLocation.Layer, ObjectLocation.StartFrame, ObjectLocation.EndFrame]));
     if ScreenLayoutContexts <> nil then
     begin
       Context := ScreenLayoutContexts.FindByObjectLocation(
@@ -99,9 +82,6 @@ begin
         Context.CopyOutputSize(CanvasWidth, CanvasHeight);
       end;
     end;
-    LogBackground(Format('background=%dx%d bytes=%d output=%dx%d status=%s',
-      [BackgroundWidth, BackgroundHeight, Length(BackgroundPixels),
-       CanvasWidth, CanvasHeight, BackgroundStatus]));
     if (CanvasWidth <= 0) or (CanvasHeight <= 0) then
     begin
       // 映像コールバック前の編集では、取得済みの参照背景寸法を代替値にする。
