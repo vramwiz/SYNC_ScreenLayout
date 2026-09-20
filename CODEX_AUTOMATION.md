@@ -364,9 +364,173 @@ max_width／max_heightは0で無制限。max_widthは実際に折り返しへ使
 
 ## 現在の制限
 
+以下の配置支援命令も併せて使用する。利用前に`get_capabilities.commands`で接続先の対応を確認する。
+
 - 初版はDocument全体の取得・検証・置換であり、レイヤー単位の永続ID操作ではない。
 - PNGはローカルファイルで返し、Pipeへ画像のBase64や生ピクセルを詰め込まない。
 - Pipeのアクセス範囲はローカルWindowsの既定Named Pipeセキュリティに従う。
 - 1要求中に複数の独立したUndo単位は作れない。
 - 編集画面が複数ある場合、最初にPipeを取得した画面だけが操作対象となる。
 - レイヤー単位の永続ID操作と自動的な被写体マスク生成は未実装。
+
+## 配置支援の追加命令（2026-09-19）
+
+### 共通の使い方
+
+`measure_text_layer`、`fit_text`、`analyze_layout`はすべて、最新スナップショットの
+`state_token`と`background_token`を必須とする。`document`を省略すると現在の文書を、
+指定するとその未適用案を検証して使用する。**編集画面、選択、Undo履歴は変更しない。**
+
+成功時のデータは`result`に入り、`applied=false`、元文書の`state_token`、
+`background_token`、計測・調整対象案の`candidate_state_token`を返す。
+`fit_text`だけは調整後の完全な`result.document`も返す。
+複数の文字を順に調整するときは、返された文書案を次の要求の`document`へ渡す。
+元文書を適用していない間は、要求の`state_token`をcandidateのトークンへ変更しない。
+
+`layer_path`は現在の文書内の位置であり、永続IDではない。通常文字の命令では
+`/layers/2/layers/1`のようなグループ内パスも使える。
+不正な型・範囲・対象は`invalid_argument`、文書JSON不正は`invalid_document`となる。
+文書・背景が変われば`state_changed`／`background_changed`、文字編集・変形操作中は`editor_busy`。
+いずれもエラー時に変更は適用しない。
+
+### measure_text_layer：実レイヤーの文字枠と表示行を測る
+
+```powershell
+$measured = Invoke-ScreenDesignMaker @{
+  command = 'measure_text_layer'
+  state_token = $stateToken; background_token = $backgroundToken
+  document = $document
+  layer_path = '/layers/0'
+}
+if ($measured.status -ne 'ok') { throw ($measured | ConvertTo-Json -Depth 100) }
+$measured.result
+```
+
+- 通常横書き文字を対象とし、文字パスは拒否する。
+- `layout_width`／`layout_height`は実際の折り返し・明示改行・個別字間を含む組版寸法。
+- `scale_x`／`scale_y`は文字枠の寸法を組版寸法で割った表示倍率。回転・射影変形前の値。
+- `frame`は元の文字枠。`lines`は表示行の文字列、組版幅、表示座標の`baseline_start`、
+  `cell_quad`（左上、右上、右下、左下の順）を返す。
+- 行セルには左右配置、枠倍率、反転、回転、射影変形を反映する。行間を含むセルの四隅であり、
+  字形の輪郭や縁取り・影の範囲ではない。描画範囲は`analyze_layout`で確認する。
+- `font_family_requested`／`font_family_resolved`で書体の解決先を確認できる。
+  `visible`／`locked`は祖先グループの状態も含む。不透明度や他レイヤーによる隠れは別扱い。
+
+従来の`measure_text`は、文字を作る前にフォント候補と折り返し幅を調べる用途に向く。
+作成後の文字枠を評価するときは`measure_text_layer`を使う。
+
+### fit_text：指定領域へ文字を収めた文書案を作る
+
+```powershell
+$fit = Invoke-ScreenDesignMaker @{
+  command = 'fit_text'
+  state_token = $stateToken; background_token = $backgroundToken
+  document = $document
+  layer_path = '/layers/0'
+  target_bounds = @{ left = -600; top = -350; right = -80; bottom = -80 }
+  margin = 24
+  fit_mode = 'uniform'
+  alignment = 'bottomRight'
+  wrap_width = 0
+}
+if ($fit.status -ne 'ok') { throw ($fit | ConvertTo-Json -Depth 100) }
+$document = $fit.result.document
+```
+
+上記座標は例であり、実際には背景画像の`mapping`から変換した配置候補を使う。
+
+| 引数 | 意味・制限 |
+| --- | --- |
+| `target_bounds` | 必須。文書座標のleft／top／right／bottom。各値-100000～100000、正の幅と高さ |
+| `margin` | 四辺から内側へ確保する余白。0～10000、既定0。枠が消える指定は拒否 |
+| `fit_mode` | `uniform`（既定）は組版の縦横比を保つ最大倍率。`frame`はX／Y独立倍率で枠全体を満たす |
+| `alignment` | topLeft／topCenter／topRight／middleLeft／middleCenter／middleRight／bottomLeft／bottomCenter／bottomRight。省略時は既存値を保持 |
+| `wrap_width` | 0～100000。省略時は既存値を保持。0は明示改行のみ。単位は表示倍率を掛ける前の組版幅 |
+
+基本文字サイズ、フォント、字間、行間、個別字間、色、フィルターは保持し、文字枠・配置・変形方式を
+更新する。指定した場合だけ折り返し幅も変更する。均等フィットの余白は9方向配置で振り分ける。
+`frame`も配置設定を保持し、短い行の左右寄せに反映する。
+
+ロックされた文字とロックされたグループの子は拒否する。回転済み・射影変形済みの文字は、
+変形を勝手に解除せず拒否する。空または組版幅0の文字も拒否する。
+**縁取り・影を領域内へ収める自動探索ではない**ため、`effects_fitted=false`を返す。
+`result.target_bounds`はmarginを差し引いた領域。調整後は必ず効果込み範囲とプレビューを確認する。
+
+### analyze_layout：効果込み描画範囲と保護領域を検査する
+
+```powershell
+$analysis = Invoke-ScreenDesignMaker @{
+  command = 'analyze_layout'
+  state_token = $stateToken; background_token = $backgroundToken
+  document = $document
+  layer_paths = @('/layers/0')
+  safe_margin = 24
+  analysis_padding = 128
+  max_edge = 2048
+  alpha_threshold = 1
+  protected_regions = @(
+    @{ left = -60; top = -400; right = 280; bottom = 420 }
+  )
+}
+if ($analysis.status -ne 'ok') { throw ($analysis | ConvertTo-Json -Depth 100) }
+$analysis.result.layers
+```
+
+保護矩形はCodexが背景画像を読み、人物・商品などについて判断して渡す。例の座標をそのまま使わない。
+
+- 文書直下のレイヤーを1つずつ通常レンダラーで透明画像へ描画し、指定アルファ以上の画素を囲む矩形を返す。
+  縁取り、影、ぼかし、不透明度、変形を反映する。背景画像は範囲に含めない。
+- グループは子孫の合成と親フィルターを含む1対象。子パスの指定は拒否するので、親の直下パスを指定する。
+  他のレイヤーによる遮蔽は含めない。背景用の大きい図形を避け、検査したいタイトルや装飾だけを指定する。
+- `layer_paths`省略時は直下の全対象。1要求32対象まで。重複パスは拒否する。
+- `protected_regions`は最大32個の矩形。`protected_region_indices`は描画外接矩形が交差した保護領域の
+  0始まり添字。**保守的な矩形同士の検査**なので、文字の隙間やグループ内の空白でも交差候補になり得る。
+- `safe_margin`はキャンバス四辺の内側余白（0～10000、既定0）。範囲を消す指定は拒否する。
+- `analysis_padding`はキャンバス外側にも描画する検査余白（0～4096、既定128）。
+  キャンバス端で切り落とされる効果も、この検査領域内なら取得できる。
+- `max_edge`は64～2048の整数、既定1280。拡大描画せず、検査領域の縦横比を維持する。
+  `alpha_threshold`は1～255の整数、既定1。大きくすると薄い影などを無視する。
+
+各対象は`bounds`、`outside_canvas`、`outside_safe_area`、`has_sampled_pixels`、
+`touches_analysis_edge`を返す。画素が見つからない場合、boundsと2種類のoutside判定はnull。
+非表示・透明・検査領域外・縮小で消えた細部を区別できないので、nullを「安全」と判定しない。
+`touches_analysis_edge=true`の場合、範囲が検査領域で切れている可能性がある。
+
+これは有限解像度の標本であり、厳密なベクター境界ではない。`document_x_per_pixel`／
+`document_y_per_pixel`を余裕の目安にする。薄い効果や小さい形状の取りこぼしもあり得るため、
+交差なしという結果だけで視覚確認を省略しない。検査領域の外に離れて存在する描画までは保証しない。
+
+### 作成例の拡充
+
+`get_creation_schema`の既存`example_document`は維持し、次を追加した。
+
+- `additional_example_document`：グラデーション帯と通常文字を含むグループの例。
+  帯は片端が透明になる設定で、背景の可読性調整にも応用できる。
+- `text_placement`：9方向配置、変形方式、フィット命令の方式、字間・行間の範囲、折り返し幅0の意味。
+  縦書き・各行フィットは未対応であることも明示する。
+
+例の必要レイヤーだけを最新Documentへ複写する。グループの子も中央原点の文書座標であり、
+グループ中心からの相対座標へ変換しない。色は引き続きDelphi TColor形式。
+
+### 追加命令を使った制作のコツ
+
+1. 最新スナップショットを取得し、背景と合成PNGを実際に読む。人物の顔だけでなく髪・手・身体も含め、
+   保護したい領域を文書座標へ変換する。矩形では大きすぎる場合は複数の矩形へ分ける。
+2. 作成例から必要な文字を追加し、内容・フォント・色・縁取り・影を設定する。
+   主要語ごとに分けると、左右の空き領域や強調色を使い分けやすい。
+3. 見出しの意味を保つ改行を先に決める。短い見出しには`wrap_width=0`を使い、
+   自動折り返しで語が意図せず分かれるのを防ぐ。長文では組版幅を指定して表示行を確認する。
+4. `fit_text`の`uniform`で候補領域へ収める。幅・高さを強く揃える必要があるときだけ`frame`を使う。
+   各行フィットが必要なら行ごとに別の文字レイヤーへ分けて調整する。短い行の過度な横伸びに注意する。
+5. `measure_text_layer`で実倍率と改行、フォント解決先を確認する。
+   同じ文字枠のままfontSizeだけを変えても、枠への再拡縮で見た目の大きさが変わらない場合がある。
+   大きさは文字枠とfit結果で調整し、基本サイズ・字間・行間へ表示倍率を焼き込まない。
+6. `analyze_layout`で対象だけを検査する。影は方向に偏って広がり、ぼかしは薄く外へ延びるので、
+   縁取り幅だけの余白では足りないことがある。交差候補があれば位置・余白・枠・影を調整して再検査する。
+7. `render_preview`を通常サイズと`max_edge=320`で取得し、実画像を確認する。
+   人物との離れ方、意味の読み順、文字の歪み、影、縮小時の可読性は数値検査だけでは決まらない。
+8. 完成案を元の2トークンで`replace_document`へ1回だけ適用する。適用後のスナップショットでも
+   文書・背景トークンと見た目を確認する。複数回のfitは未適用案の調整なので、適用全体は1件のUndoになる。
+
+9月3日の通常テキスト仕様書には将来案も含まれる。現在は均等拡縮と全体枠フィットを使い、
+縦書き・各行フィット・文字サイズ固定の通常レイアウトを対応済みと推測しない。

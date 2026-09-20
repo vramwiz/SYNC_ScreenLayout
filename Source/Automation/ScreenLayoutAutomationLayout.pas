@@ -14,7 +14,7 @@ implementation
 
 uses
   System.SysUtils, System.Types, Vcl.Graphics, ScreenLayoutLayerGeometry,
-  ScreenLayoutDocumentJson, ScreenLayoutFilters;
+  ScreenLayoutDocumentJson, ScreenLayoutFilters, ScreenLayoutPaintStyles;
 
 procedure AppendGeometry(Layer: TVectArtLayer; const Path: string;
   ParentVisible: Boolean; Entries: TJSONArray);
@@ -72,6 +72,36 @@ begin
   end;
 end;
 
+function AdditionalCreationExamples: TJSONValue;
+var
+  Document: TVectArtDocument;
+  Group: TScreenLayoutGroupLayer;
+  Band: TVectArtRectangleLayer;
+  Paint: TScreenLayoutPaintStyle;
+begin
+  Document := TVectArtDocument.Create;
+  try
+    Document.SetCanvasSize(1280, 720);
+    Group := TScreenLayoutGroupLayer.Create('見出しグループ');
+    Document.InsertLayer(1, Group);
+    Band := TVectArtRectangleLayer.Create('グラデーション帯',
+      TRectF.Create(-500, -150, 500, 150), clNavy);
+    Group.AddChild(Band);
+    Paint := TScreenLayoutPaintStyle.Solid(clNavy);
+    Paint.PrepareLinearGradient(clNavy);
+    Paint.Kind := slpkGradient;
+    Paint.GradientStartColor := clNavy;
+    Paint.GradientEndColor := clBlue;
+    Paint.GradientEndOpacity := 0;
+    Band.PaintStyle := Paint;
+    Group.AddChild(TScreenLayoutTextLayer.Create('グループ内見出し',
+      TRectF.Create(-460, -100, 460, 100), '短い見出し', 'Yu Gothic UI', 80, 0, clWhite));
+    Result := TJSONObject.ParseJSONValue(SerializeVectArtDocument(Document));
+  finally
+    Document.Free;
+  end;
+end;
+
 function ScreenLayoutAutomationCreationSchema: TJSONObject;
 var
   Examples: TVectArtDocument;
@@ -106,6 +136,14 @@ begin
       Result.AddPair('usage', 'Copy needed layers into the latest snapshot; preserve existing layers and canvas.');
       Result.AddPair('color_encoding', 'Delphi TColor integer: 0x00BBGGRR');
       Result.AddPair('example_document', TJSONObject.ParseJSONValue(SerializeVectArtDocument(Examples)));
+      Result.AddPair('additional_example_document', AdditionalCreationExamples);
+      Result.AddPair('text_placement', TJSONObject.ParseJSONValue(
+        '{"alignment":["topLeft","topCenter","topRight","middleLeft","middleCenter",' +
+        '"middleRight","bottomLeft","bottomCenter","bottomRight"],' +
+        '"transformMode":["uniformScale","frameFit"],"fit_mode":["uniform","frame"],' +
+        '"letterSpacingRatio":{"min":-0.5,"max":1},"lineSpacingRatio":{"min":-0.5,"max":3},' +
+        '"wrapWidth_zero":"explicit line breaks only",' +
+        '"vertical_text_supported":false,"per_line_fit_supported":false}'));
     except
       Result.Free;
       raise;

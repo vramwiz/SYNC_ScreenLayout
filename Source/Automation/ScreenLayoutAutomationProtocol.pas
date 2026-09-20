@@ -22,6 +22,7 @@ implementation
 uses
   System.Hash, System.JSON, System.SysUtils, Vcl.Graphics,
   ScreenLayoutAutomationVisuals, ScreenLayoutAutomationText, ScreenLayoutAutomationLayout,
+  ScreenLayoutAutomationTextPlacement, ScreenLayoutAutomationAnalysis,
   ScreenLayoutAutomationDocumentCommand, ScreenLayoutDocumentJson;
 
 const
@@ -135,6 +136,9 @@ begin
   Commands.Add('get_canvas_snapshot');
   Commands.Add('render_preview');
   Commands.Add('measure_text');
+  Commands.Add('measure_text_layer');
+  Commands.Add('fit_text');
+  Commands.Add('analyze_layout');
   Commands.Add('list_fonts');
   Commands.Add('get_layout_geometry');
   Commands.Add('get_creation_schema');
@@ -341,6 +345,46 @@ begin
   end;
 end;
 
+function HandlePlacement(const Command: string; Root: TJSONObject;
+  Document: TVectArtDocument; Canvas: TVectArtCanvasControl): string;
+var
+  Target: TVectArtDocument;
+  Payload: TJSONObject;
+  CurrentJson, CandidateJson, ErrorMessage: string;
+begin
+  Result := CheckVisualState(Command, Root, Document, Canvas, True);
+  if Result <> '' then Exit;
+  CurrentJson := SerializeVectArtDocument(Document);
+  CandidateJson := CurrentJson;
+  if Root.GetValue('document') <> nil then
+    if not ValidateIncomingDocument(Root, CandidateJson, ErrorMessage) then
+      Exit(ErrorResponse(Command, 'invalid_document', ErrorMessage));
+  Target := TVectArtDocument.Create;
+  Payload := nil;
+  try
+    if not TryDeserializeVectArtDocument(CandidateJson, Target, ErrorMessage) then
+      Exit(ErrorResponse(Command, 'invalid_document', ErrorMessage));
+    if SameText(Command, 'fit_text') then
+      Payload := FitAutomationText(Target, Root)
+    else if SameText(Command, 'measure_text_layer') then
+      Payload := MeasureAutomationTextLayer(Target, Root)
+    else
+      Payload := AnalyzeAutomationLayout(Target, Root);
+    CandidateJson := SerializeVectArtDocument(Target);
+    Payload.AddPair('state_token', StateToken(CurrentJson));
+    Payload.AddPair('background_token', Canvas.ReferenceBackgroundToken);
+    Payload.AddPair('candidate_state_token', StateToken(CandidateJson));
+    Payload.AddPair('applied', TJSONBool.Create(False));
+    if SameText(Command, 'fit_text') then
+      Payload.AddPair('document', TJSONObject.ParseJSONValue(CandidateJson));
+    Result := OkResponse(Command, TJSONPair.Create('result', Payload));
+    Payload := nil;
+  finally
+    Payload.Free;
+    Target.Free;
+  end;
+end;
+
 function HandleScreenLayoutAutomationRequest(const RequestText: string;
   Document: TVectArtDocument; EditHistory: TVectArtEditHistory;
   EditorState: TVectArtEditorState; Canvas: TVectArtCanvasControl): string;
@@ -378,6 +422,9 @@ begin
         Result := HandleVisual(Command, Root, Document, Canvas, True)
       else if SameText(Command, 'measure_text') then
         Result := OkResponse(Command, TJSONPair.Create('measurement', MeasureScreenLayoutAutomationText(Root)))
+      else if SameText(Command, 'measure_text_layer') or SameText(Command, 'fit_text') or
+        SameText(Command, 'analyze_layout') then
+        Result := HandlePlacement(Command, Root, Document, Canvas)
       else if SameText(Command, 'list_fonts') then
         Result := OkResponse(Command, TJSONPair.Create('fonts', ScreenLayoutAutomationFonts))
       else if SameText(Command, 'get_creation_schema') then

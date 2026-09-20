@@ -51,6 +51,9 @@ procedure RenderVectArtDocumentRange(Document: TVectArtDocument;
 // 単体レイヤーまたはグループ子孫を、通常描画と同じ処理でサムネイルへ収める。
 procedure RenderVectArtLayerThumbnail(Layer: TVectArtLayer;
   Target: TVectArtRenderBuffer; Width, Height: Integer);
+// 指定文書座標領域へ単体またはグループを通常品質で描画する。非表示レイヤーは透明。
+procedure RenderVectArtLayerRegion(Layer: TVectArtLayer; Target: TVectArtRenderBuffer;
+  Width, Height: Integer; const LogicalBounds: TRectF);
 // ストレートアルファRGBA8同士をSource-overで合成する。
 procedure CompositeVectArtRgba(const Source: TVectArtRenderBuffer;
   Destination: PVectArtRgbaPixel; Width, Height: Integer);
@@ -633,6 +636,23 @@ begin
   finally
     LayerBuffer.Free;
   end;
+end;
+
+procedure RenderVectArtLayerRegion(Layer: TVectArtLayer; Target: TVectArtRenderBuffer;
+  Width, Height: Integer; const LogicalBounds: TRectF);
+var
+  PatternScope: IInterface; // 指定領域の描画倍率でパターン画像を共有する。
+begin
+  if (Layer = nil) or (Target = nil) then
+    raise EArgumentException.Create('Layer and target are required.');
+  if (LogicalBounds.Width <= 0) or (LogicalBounds.Height <= 0) then
+    raise EArgumentException.Create('Logical bounds must be positive.');
+  Target.SetSize(Width, Height);
+  Target.Clear;
+  if not Layer.Visible then Exit;
+  PatternScope := BeginScreenLayoutPatternRender(Max(Width / LogicalBounds.Width,
+    Height / LogicalBounds.Height));
+  RenderVectArtLayerTree(Layer, Target, Width, Height, LogicalBounds, 0, 1, nil, clNone);
 end;
 
 function FitScreenLayoutThumbnailBounds(const ContentBounds: TRectF;
