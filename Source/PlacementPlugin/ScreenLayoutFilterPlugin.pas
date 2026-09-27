@@ -8,9 +8,9 @@ uses
 
 // AviUtl2へ渡すフィルターテーブルを返す。
 function GetScreenLayoutFilterTable: PFILTER_PLUGIN_TABLE;
-// 将来の共通UI初期化に備えたDLL初期化境界。現段階では状態を持たない。
+// AviUtl2がDLLをロードし終えた後に、Skiaランタイムとフィルター状態を初期化する。
 procedure InitializeScreenLayoutFilter;
-// 将来の共通UI解放に備えたDLL終了境界。現段階では状態を持たない。
+// InitializeScreenLayoutFilterで確保したフィルター状態とSkiaランタイムを解放する。
 procedure FinalizeScreenLayoutFilter;
 
 implementation

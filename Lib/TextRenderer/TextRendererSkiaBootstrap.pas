@@ -1,4 +1,4 @@
-﻿// EXE／DLLと同じ配布単位にあるSkiaランタイムを起動前に読み込む。
+﻿// EXE／DLLと同じ配布単位にあるSkiaランタイムのパスを解決する。
 unit TextRendererSkiaBootstrap;
 
 interface
@@ -11,9 +11,6 @@ implementation
 uses
   System.SysUtils,
   Winapi.Windows;
-
-var
-  BootstrapLibraryHandle: HMODULE;
 
 function ModuleDirectory: string;
 var
@@ -32,14 +29,6 @@ begin
     raise EPathTooLongException.Create('The plugin path is too long');
   SetString(Result, Buffer, PathLength);
   Result := ExtractFilePath(Result);
-end;
-
-procedure LoadBundledSkiaRuntime;
-begin
-  BootstrapLibraryHandle := LoadLibrary(PChar(BundledSkiaRuntimeFileName));
-  if BootstrapLibraryHandle = 0 then
-    raise EOSError.CreateFmt('Cannot load Skia runtime: %s (error %d)',
-      [BundledSkiaRuntimeFileName, GetLastError]);
 end;
 
 function BundledSkiaRuntimeFileName: string;
@@ -65,12 +54,5 @@ begin
   if FileExists(Candidate) then
     Result := Candidate;
 end;
-
-initialization
-  LoadBundledSkiaRuntime;
-
-finalization
-  if BootstrapLibraryHandle <> 0 then
-    FreeLibrary(BootstrapLibraryHandle);
 
 end.
