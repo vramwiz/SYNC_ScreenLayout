@@ -1,5 +1,13 @@
 # SYNC_ScreenLayout 開発ノート
 
+- AviUtl2用の参照背景取得を編集ボタン押下時の1回に切り替えた。同じカーソル位置で描画を依頼し、
+  シーン・起点シーン・フレーム・レイヤー・オブジェクトID・エフェクトIDが一致した入力だけを取得する。
+  通常の再生・シーク・出力から背景用のD3D11読み戻しを取り除いた。取得したRGBAはそのフレームの映像合成にも使う。
+  編集セクションを閉じた後に画面を開き、変更時だけホストの編集ハンドルを通じて配置データを反映する。
+- AviUtl2の編集画面下部へCodex指示メモと送信／停止ボタンを追加した。Aul2MIRAIと同様にCodex CLIの
+  app-serverをワーカーで使い、既存のレイアウト命令を現在の画面のVCLスレッドで実行する。
+  スナップショットとプレビューのPNGは画像入力として渡す。終了時にワーカーと子プロセスを回収する。
+
 - Codexのサムネイル制作支援へ`measure_text_layer`、`fit_text`、`analyze_layout`を追加した。
   通常文字の実組版・個別字間・文字枠倍率・反転・回転・射影変形を計測し、表示行のセル四隅を返す。
   フィットは均等／X・Y独立の2方式で、指定矩形・余白・9方向配置から未適用Documentを返す。
@@ -930,10 +938,9 @@
 - Delphi 37.0を使用し、対象プラットフォームはWin64とする。
 - DebugとReleaseの両構成を検証する。
 - コンパイル警告とエラーを確認し、原則として警告0、エラー0で完了とする。
-- フィルタープラグインの通常ビルドは、Debug／ReleaseそれぞれのPost-build eventで生成したDLLを
-  `C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\SYNC_ScreenLayout_Filter.auf2` として配置し、
-  `Lib\Skia\Win64\sk4d.dll` も同じディレクトリへコピーする。AviUtl2がプラグインを使用中で
-  上書きできない場合はビルドを失敗させ、旧版のまま成功扱いにしない。
+- プラグインのWin64 Debug／Releaseは `C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout` へ出力する。
+  ビルド前にこのフォルダーを作成し、Post-buildで `sk4d.dll` を同梱してDLLを `SYNC_ScreenLayout_Filter.aux2` として配置する。
+  AviUtl2がプラグインを使用中で上書きできない場合はビルドが失敗する。旧版の `.auf2` は移行時に走査対象から外す。
 - `Win32`、`Win64`、`.dcu`、`.rsm`、`.exe`、`.dll`などのビルド成果物はGitへ追加しない。
 - 一時的な内部テストも実行ファイル名を必ず `.exe` にし、拡張子なしの成果物は起動しない。
   起動前に対象の `.exe` が存在することを確認し、Windowsの「開くアプリを選択」を発生させない。

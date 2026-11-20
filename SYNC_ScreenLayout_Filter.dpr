@@ -5,6 +5,9 @@
 {$ALIGN 8}
 
 uses
+  System.SysUtils,
+  System.IOUtils,
+  Winapi.Windows,
   AviUtl2FilterTypes in 'Lib\AviUtl2\AviUtl2FilterTypes.pas',
   PluginFilterTable in 'Lib\AviUtl2\PluginFilterTable.pas',
   PluginFilterContextManager in 'Lib\AviUtl2\PluginFilterContextManager.pas',
@@ -21,6 +24,8 @@ uses
   ScreenLayoutAutomationText in 'Source\Automation\ScreenLayoutAutomationText.pas',
   ScreenLayoutAutomationLayout in 'Source\Automation\ScreenLayoutAutomationLayout.pas',
   ScreenLayoutAutomationProtocol in 'Source\Automation\ScreenLayoutAutomationProtocol.pas',
+  ScreenLayoutCodexJob in 'Source\Automation\ScreenLayoutCodexJob.pas',
+  ScreenLayoutCodexPanel in 'Source\Shell\ScreenLayoutCodexPanel.pas',
   ScreenLayoutAutomationPipeServer in 'Source\Automation\ScreenLayoutAutomationPipeServer.pas',
   ScreenLayoutAutomationDocumentCommand in 'Source\Automation\ScreenLayoutAutomationDocumentCommand.pas',
   TextRendererSkiaBootstrap in 'Lib\TextRenderer\TextRendererSkiaBootstrap.pas',
@@ -156,26 +161,100 @@ uses
   ScreenLayoutToolPalette in 'Source\ToolPalette\ScreenLayoutToolPalette.pas',
   WindowsImeController in 'Lib\InputMethod\WindowsImeController.pas';
 
+procedure ReportPluginFailure(const Stage, Detail: string);
+var
+  Diagnostic: string;
+  LogDirectory: string;
+  LogFileName: string;
+  LogId: TGUID;
+  FailureTime: TDateTime;
+  ModulePath: array[0..32767] of Char;
+begin
+  // 診断処理自体の失敗もDLL境界へ漏らさない。
+  try
+    FailureTime := Now;
+    ModulePath[0] := #0;
+    GetModuleFileName(HInstance, ModulePath, Length(ModulePath));
+    Diagnostic := '画面レイアウト プラグインの処理に失敗しました。'#13#10 +
+      '日時: ' + FormatDateTime('yyyy-mm-dd hh:nn:ss.zzz', FailureTime) + #13#10 +
+      '段階: ' + Stage + #13#10 +
+      'プラグイン: ' + string(ModulePath) + #13#10 +
+      'ホスト: ' + ParamStr(0) + #13#10#13#10 + Detail;
+    OutputDebugString(PChar(Diagnostic));
+    try
+      LogDirectory := TPath.Combine(TPath.GetTempPath, 'SYNC_ScreenLayout\Logs');
+      TDirectory.CreateDirectory(LogDirectory);
+      // 同じミリ秒や複数のホストからの出力も別ファイルにする。
+      if CreateGUID(LogId) <> 0 then
+        raise EInvalidOp.Create('診断ログの識別子を作成できませんでした。');
+      LogFileName := TPath.Combine(LogDirectory,
+        'error_' + FormatDateTime('yyyymmdd_hhnnss_zzz', FailureTime) +
+        '_' + IntToStr(GetCurrentProcessId) + '_' + GUIDToString(LogId) + '.log');
+      TFile.WriteAllText(LogFileName, Diagnostic + #13#10, TEncoding.UTF8);
+      Diagnostic := Diagnostic + #13#10#13#10 +
+        'ログフォルダ: ' + LogDirectory + #13#10 + '診断ログ: ' + LogFileName;
+    except
+      Diagnostic := Diagnostic + #13#10#13#10 +
+        '診断ログを保存できませんでした。この画面の内容を開発者へお知らせください。';
+    end;
+    MessageBox(0, PChar(Diagnostic), '画面レイアウト — 初期化・終了エラー',
+      MB_OK or MB_ICONERROR);
+  except
+    MessageBox(0, '画面レイアウトの処理に失敗し、詳細情報の作成にも失敗しました。',
+      '画面レイアウト', MB_OK or MB_ICONERROR);
+  end;
+end;
+
+function RequiredVersion: Cardinal; cdecl;
+begin
+  Result := SCREEN_LAYOUT_REQUIRED_HOST;
+end;
+
 function InitializePlugin(Version: Cardinal): Byte; cdecl;
 begin
-  InitializeScreenLayoutFilter;
-  Result := 1;
+  Result := 0;
+  if Version < RequiredVersion then
+    Exit;
+  try
+    InitializeScreenLayoutFilter;
+    Result := 1;
+  except
+    on E: Exception do
+      ReportPluginFailure('InitializePlugin', E.ClassName + ': ' + E.Message);
+    else
+      ReportPluginFailure('InitializePlugin', '不明な例外が発生しました。');
+  end;
 end;
 
 procedure UninitializePlugin; cdecl;
 begin
-  FinalizeScreenLayoutFilter;
+  try
+    FinalizeScreenLayoutFilter;
+  except
+    on E: Exception do
+      ReportPluginFailure('UninitializePlugin', E.ClassName + ': ' + E.Message);
+    else
+      ReportPluginFailure('UninitializePlugin', '不明な例外が発生しました。');
+  end;
 end;
 
-function GetFilterPluginTable: PFILTER_PLUGIN_TABLE; cdecl;
+procedure RegisterPlugin(Host: PHOST_APP_TABLE); cdecl;
 begin
-  Result := GetScreenLayoutFilterTable;
+  try
+    RegisterScreenLayoutFilter(Host);
+  except
+    on E: Exception do
+      ReportPluginFailure('RegisterPlugin', E.ClassName + ': ' + E.Message);
+    else
+      ReportPluginFailure('RegisterPlugin', '不明な例外が発生しました。');
+  end;
 end;
 
 exports
+  RequiredVersion name 'RequiredVersion',
   InitializePlugin name 'InitializePlugin',
   UninitializePlugin name 'UninitializePlugin',
-  GetFilterPluginTable name 'GetFilterPluginTable';
+  RegisterPlugin name 'RegisterPlugin';
 
 begin
 end.

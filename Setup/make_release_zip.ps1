@@ -8,8 +8,8 @@ $zipFile = Join-Path $PSScriptRoot "$packageName.zip"
 
 $packageFiles = @(
   @{
-    Source = Join-Path $pluginDir 'SYNC_ScreenLayout_Filter.auf2'
-    Destination = 'SYNC_ScreenLayout_Filter.auf2'
+    Source = Join-Path $pluginDir 'SYNC_ScreenLayout_Filter.aux2'
+    Destination = 'SYNC_ScreenLayout_Filter.aux2'
     Description = 'filter plugin'
   },
   @{

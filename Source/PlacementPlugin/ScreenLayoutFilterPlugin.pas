@@ -1,104 +1,42 @@
-﻿// AviUtl2へ「画面レイアウト」を登録し、編集ボタンとシリアライズ文字列項目だけを公開する。
+﻿// AviUtl2へ「画面レイアウト」を登録し、映像処理と編集要求を接続する。
 unit ScreenLayoutFilterPlugin;
 
 interface
 
 uses
-  System.SysUtils, AviUtl2FilterTypes;
+  AviUtl2FilterTypes;
 
-// AviUtl2へ渡すフィルターテーブルを返す。
-function GetScreenLayoutFilterTable: PFILTER_PLUGIN_TABLE;
+const
+  SCREEN_LAYOUT_REQUIRED_HOST = 2011000; // callback2とオブジェクト／エフェクトIDを利用する下限。
+
+// ホストの編集ハンドルを取得し、従来と同じ名前でフィルターを登録する。
+procedure RegisterScreenLayoutFilter(Host: PHOST_APP_TABLE);
 // AviUtl2がDLLをロードし終えた後に、Skiaランタイムとフィルター状態を初期化する。
 procedure InitializeScreenLayoutFilter;
-// InitializeScreenLayoutFilterで確保したフィルター状態とSkiaランタイムを解放する。
+// 編集要求、フィルター状態、Skiaランタイムを解放する。
 procedure FinalizeScreenLayoutFilter;
 
 implementation
 
 uses
   PluginFilterTable, ScreenLayoutEditorHost, ScreenLayoutFilterContext,
-  System.UITypes, TextRendererSkiaBootstrap, TextRendererSkiaRuntime,
-  Vcl.Dialogs;
+  System.SysUtils, System.UITypes, TextRendererSkiaBootstrap,
+  TextRendererSkiaRuntime, Vcl.Dialogs, Winapi.Windows;
 
 const
-  FILTER_EFFECT_NAME = '画面レイアウト';
-  LAYOUT_DATA_ITEM_NAME = '配置データ';
+  FILTER_EFFECT_NAME = '画面レイアウト'; // 既存プロジェクトのエフェクト識別名。
 
 var
   EditButton: TFILTER_ITEM_BUTTON;
   LayoutDataItem: TFILTER_ITEM_STRING;
   ScreenLayoutContexts: TScreenLayoutFilterContexts;
+  ScreenLayoutEditor: TScreenLayoutEditorHost;
   ScreenLayoutSkiaAcquired: Boolean;
 
-procedure EditButtonCallback(Edit: PEDIT_SECTION); cdecl;
-var
-  BackgroundHeight: Integer;
-  BackgroundPixels: TBytes;
-  BackgroundStatus: string;
-  BackgroundWidth: Integer;
-  CanvasHeight: Integer;
-  CanvasWidth: Integer;
-  Context: TScreenLayoutFilterContext;
-  CurrentData: string;
-  DataPointer: PAnsiChar;
-  ErrorMessage: string;
-  Obj: OBJECT_HANDLE;
-  ObjectLocation: TOBJECT_LAYER_FRAME;
-  UpdatedData: string;
-  Utf8Data: UTF8String;
+procedure EditButtonCallback(Edit: PEDIT_SECTION; Obj: OBJECT_HANDLE; Effect, Item: LPCWSTR); cdecl;
 begin
   try
-    if (Edit = nil) or not Assigned(Edit^.GetFocusObject) or
-      not Assigned(Edit^.GetObjectLayerFrame) or
-      not Assigned(Edit^.GetObjectItemValue) or
-      not Assigned(Edit^.SetObjectItemValue) then
-      raise EInvalidOp.Create('AviUtl2の編集APIを取得できませんでした。');
-    Obj := Edit^.GetFocusObject();
-    if Obj = nil then
-      raise EInvalidOp.Create('編集対象のオブジェクトを取得できませんでした。');
-
-    DataPointer := Edit^.GetObjectItemValue(Obj, FILTER_EFFECT_NAME,
-      LAYOUT_DATA_ITEM_NAME);
-    if DataPointer = nil then
-      CurrentData := ''
-    else
-      CurrentData := string(UTF8String(DataPointer));
-
-    BackgroundPixels := nil;
-    BackgroundWidth := 0;
-    BackgroundHeight := 0;
-    CanvasWidth := 0;
-    CanvasHeight := 0;
-    ObjectLocation := Edit^.GetObjectLayerFrame(Obj);
-    if ScreenLayoutContexts <> nil then
-    begin
-      Context := ScreenLayoutContexts.FindByObjectLocation(
-        ObjectLocation.Layer, ObjectLocation.StartFrame,
-        ObjectLocation.EndFrame);
-      if Context <> nil then
-      begin
-        Context.CopyBackground(BackgroundPixels, BackgroundWidth,
-          BackgroundHeight, BackgroundStatus);
-        Context.CopyOutputSize(CanvasWidth, CanvasHeight);
-      end;
-    end;
-    if (CanvasWidth <= 0) or (CanvasHeight <= 0) then
-    begin
-      // 映像コールバック前の編集では、取得済みの参照背景寸法を代替値にする。
-      CanvasWidth := BackgroundWidth;
-      CanvasHeight := BackgroundHeight;
-    end;
-
-    if not EditScreenLayout(CurrentData, BackgroundPixels,
-      BackgroundWidth, BackgroundHeight, CanvasWidth, CanvasHeight,
-      UpdatedData, ErrorMessage) then
-      raise EInvalidOp.Create('画面レイアウトを編集できませんでした。'#13#10 +
-        ErrorMessage);
-
-    Utf8Data := UTF8String(UpdatedData);
-    if not Edit^.SetObjectItemValue(Obj, FILTER_EFFECT_NAME,
-      LAYOUT_DATA_ITEM_NAME, PAnsiChar(Utf8Data)) then
-      raise EInvalidOp.Create('配置データをAviUtl2へ保存できませんでした。');
+    ScreenLayoutEditor.BeginEdit(Edit, Obj, Effect);
   except
     on E: Exception do
       MessageDlg(E.Message, mtError, [mbOK], 0);
@@ -107,24 +45,32 @@ end;
 
 function PassThroughVideo(Video: PFILTER_PROC_VIDEO): Byte; cdecl;
 var
+  CapturedInput: TBytes;
   Context: TScreenLayoutFilterContext;
   SerializedData: string;
 begin
   Result := 1;
   try
+    if ScreenLayoutEditor <> nil then
+      try
+        ScreenLayoutEditor.CaptureInput(Video, CapturedInput);
+      except
+        on E: Exception do
+        begin
+          CapturedInput := nil;
+          OutputDebugString(PChar('SYNC_ScreenLayout: ' + E.Message));
+        end;
+      end;
+
     // AviUtl2は呼び出し対象の現在値を項目レコードへ設定してから呼び出す。
-    if LayoutDataItem.Value = nil then
-      SerializedData := ''
-    else
-      SerializedData := string(LayoutDataItem.Value);
+    SerializedData := string(LayoutDataItem.Value);
     if ScreenLayoutContexts <> nil then
     begin
       Context := ScreenLayoutContexts.GetContext(Video);
       if Context <> nil then
       begin
         Context.UpdateSerializedData(SerializedData);
-        Context.CaptureBackground(Video);
-        Context.RenderVideo(Video);
+        Context.RenderVideo(Video, CapturedInput);
       end;
     end;
   except
@@ -154,6 +100,7 @@ end;
 
 procedure FinalizeScreenLayoutFilter;
 begin
+  FreeAndNil(ScreenLayoutEditor);
   FreeAndNil(ScreenLayoutContexts);
   if ScreenLayoutSkiaAcquired then
   begin
@@ -162,20 +109,23 @@ begin
   end;
 end;
 
-function GetScreenLayoutFilterTable: PFILTER_PLUGIN_TABLE;
+procedure RegisterScreenLayoutFilter(Host: PHOST_APP_TABLE);
+var
+  EditHandle: PEDIT_HANDLE;
 begin
-  if GTable.Name = nil then
-  begin
-    AddButton(EditButton, '編集', EditButtonCallback);
-    AddString(LayoutDataItem, LAYOUT_DATA_ITEM_NAME, '');
-    SetupPluginTable(FILTER_FLAG_VIDEO or FILTER_FLAG_FILTER,
-      FILTER_EFFECT_NAME,
-      'SYNC',
-      '文字や線を配置する画面レイアウトフィルター',
-      PassThroughVideo,
-      nil);
-  end;
-  Result := @GTable;
+  if (Host = nil) or not Assigned(Host^.CreateEditHandle) or not Assigned(Host^.RegisterFilterPlugin) then
+    raise EInvalidOp.Create('AviUtl2のプラグイン登録APIを取得できませんでした。');
+  EditHandle := Host^.CreateEditHandle();
+  if (EditHandle = nil) or not Assigned(EditHandle^.CallEditSectionParam) or
+    not Assigned(EditHandle^.GetEditState) then
+    raise EInvalidOp.Create('AviUtl2の編集APIを取得できませんでした。');
+
+  ScreenLayoutEditor := TScreenLayoutEditorHost.Create(EditHandle, ScreenLayoutContexts);
+  AddButton(EditButton, '編集', EditButtonCallback);
+  AddString(LayoutDataItem, SCREEN_LAYOUT_DATA_ITEM_NAME, '');
+  SetupPluginTable(FILTER_FLAG_VIDEO or FILTER_FLAG_FILTER,
+    FILTER_EFFECT_NAME, 'SYNC', '文字や線を配置する画面レイアウトフィルター', PassThroughVideo, nil);
+  Host^.RegisterFilterPlugin(@GTable);
 end;
 
 end.

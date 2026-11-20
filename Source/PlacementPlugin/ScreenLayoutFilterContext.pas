@@ -4,13 +4,12 @@ unit ScreenLayoutFilterContext;
 interface
 
 uses
-  AviUtl2FilterTypes, PluginFilterContextManager, ScreenLayoutFrameCapture,
+  AviUtl2FilterTypes, PluginFilterContextManager,
   System.SysUtils, Winapi.Windows, ScreenLayoutDocument, ScreenLayoutRenderer;
 
 type
   TScreenLayoutFilterContext = class(TPluginFilterContextItem)
   private
-    FFrameCapture: TScreenLayoutFrameCapture;
     FDocument: TVectArtDocument;
     FLastAttemptedData: string;
     FLastError: string;
@@ -24,15 +23,10 @@ type
   public
     constructor Create;
     destructor Destroy; override;
-    // 対象オブジェクト評価時のAviUtl2合成済み背景を更新する。
-    procedure CaptureBackground(Video: PFILTER_PROC_VIDEO);
-    // 設定画面が使用する最新背景を呼び出し側所有の配列で返す。
-    function CopyBackground(out Pixels: TBytes; out Width, Height: Integer;
-      out Status: string): Boolean;
     // 映像コールバックが最後に使用した有効な出力寸法をスレッド安全に返す。
     function CopyOutputSize(out Width, Height: Integer): Boolean;
-    // 共通レンダラーのRGBAを入力映像へ合成してAviUtl2へ返す。
-    function RenderVideo(Video: PFILTER_PROC_VIDEO): Boolean;
+    // RGBAを入力映像へ合成する。同じコールバックで取得済みなら入力を再利用する。
+    function RenderVideo(Video: PFILTER_PROC_VIDEO; const CapturedInput: TBytes = nil): Boolean;
     // 設定値が変わったときだけDocumentを更新し、解析失敗時は直前の正常状態を保つ。
     function UpdateSerializedData(const Value: string): Boolean;
     property Document: TVectArtDocument read FDocument;
@@ -52,7 +46,6 @@ begin
   inherited Create;
   InitializeCriticalSection(FOutputSizeLock);
   FDocument := TVectArtDocument.Create;
-  FFrameCapture := TScreenLayoutFrameCapture.Create;
   FOutputBuffer := TVectArtRenderBuffer.Create;
   FOverlayBuffer := TVectArtRenderBuffer.Create;
   FRenderedRevision := -1;
@@ -63,14 +56,14 @@ begin
   DeleteCriticalSection(FOutputSizeLock);
   FOverlayBuffer.Free;
   FOutputBuffer.Free;
-  FFrameCapture.Free;
   FDocument.Free;
   inherited Destroy;
 end;
 
-function TScreenLayoutFilterContext.RenderVideo(
-  Video: PFILTER_PROC_VIDEO): Boolean;
+function TScreenLayoutFilterContext.RenderVideo(Video: PFILTER_PROC_VIDEO;
+  const CapturedInput: TBytes): Boolean;
 var
+  ByteCount: NativeInt;
   Height: Integer;
   Width: Integer;
 begin
@@ -107,25 +100,16 @@ begin
     FRenderedRevision := FDocument.Revision;
   end;
   FOutputBuffer.SetSize(Width, Height);
-  if Assigned(Video^.GetImageData) then
+  ByteCount := NativeInt(Width) * Height * SizeOf(TPIXEL_RGBA);
+  if Length(CapturedInput) = ByteCount then
+    Move(CapturedInput[0], FOutputBuffer.Data^, ByteCount)
+  else if Assigned(Video^.GetImageData) then
     Video^.GetImageData(PPIXEL_RGBA(FOutputBuffer.Data))
   else
     FOutputBuffer.Clear;
   CompositeVectArtRgba(FOverlayBuffer, FOutputBuffer.Data, Width, Height);
   Video^.SetImageData(PPIXEL_RGBA(FOutputBuffer.Data), Width, Height);
   Result := True;
-end;
-
-procedure TScreenLayoutFilterContext.CaptureBackground(
-  Video: PFILTER_PROC_VIDEO);
-begin
-  FFrameCapture.Capture(Video);
-end;
-
-function TScreenLayoutFilterContext.CopyBackground(out Pixels: TBytes;
-  out Width, Height: Integer; out Status: string): Boolean;
-begin
-  Result := FFrameCapture.CopyRgba(Pixels, Width, Height, Status);
 end;
 
 function TScreenLayoutFilterContext.CopyOutputSize(out Width,

@@ -14,8 +14,6 @@ uses
     '..\Source\Persistence\ScreenLayoutDocumentJsonWriter.pas',
   ScreenLayoutPluginDocument in
     '..\Source\PlacementPlugin\ScreenLayoutPluginDocument.pas',
-  ScreenLayoutFrameCapture in
-    '..\Source\PlacementPlugin\ScreenLayoutFrameCapture.pas',
   ScreenLayoutFilterContext in
     '..\Source\PlacementPlugin\ScreenLayoutFilterContext.pas',
   PluginFilterContextManager in

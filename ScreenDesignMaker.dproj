@@ -82,6 +82,8 @@
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationText.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationLayout.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationProtocol.pas"/>
+        <DCCReference Include="Source\Automation\ScreenLayoutCodexJob.pas"/>
+        <DCCReference Include="Source\Shell\ScreenLayoutCodexPanel.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationPipeServer.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationDocumentCommand.pas"/>
         <DCCReference Include="Source\Editor\Creation\ScreenLayoutPlacementPreview.pas"/>

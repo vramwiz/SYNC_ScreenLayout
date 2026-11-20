@@ -20,6 +20,8 @@ uses
   ScreenLayoutAutomationText in 'Source\Automation\ScreenLayoutAutomationText.pas',
   ScreenLayoutAutomationLayout in 'Source\Automation\ScreenLayoutAutomationLayout.pas',
   ScreenLayoutAutomationProtocol in 'Source\Automation\ScreenLayoutAutomationProtocol.pas',
+  ScreenLayoutCodexJob in 'Source\Automation\ScreenLayoutCodexJob.pas',
+  ScreenLayoutCodexPanel in 'Source\Shell\ScreenLayoutCodexPanel.pas',
   ScreenLayoutAutomationPipeServer in 'Source\Automation\ScreenLayoutAutomationPipeServer.pas',
   ScreenLayoutAutomationDocumentCommand in 'Source\Automation\ScreenLayoutAutomationDocumentCommand.pas',
   ScreenLayoutPlacementPreview in 'Source\Editor\Creation\ScreenLayoutPlacementPreview.pas',

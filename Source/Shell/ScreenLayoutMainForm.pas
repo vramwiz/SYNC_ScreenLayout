@@ -22,7 +22,7 @@ uses
   ScreenLayoutTextContextMenu, ScreenLayoutPathContextMenu,
   ScreenLayoutTransformContextMenu,
   ScreenLayoutArrangementContextMenu,
-  PipeServerTThread, ScreenLayoutAutomationPipeServer;
+  PipeServerTThread, ScreenLayoutAutomationPipeServer, ScreenLayoutCodexPanel;
 
 type
   TMainForm = class(TForm)
@@ -72,6 +72,7 @@ type
     FViewMenu: TVectArtDarkPopupMenu;
     FLayoutEditing: Boolean;
     FAutomationPipeStarted: Boolean; // このFormが専用Pipeを所有している間だけTrue。
+    FCodexPanel: TScreenLayoutCodexPanel; // プラグインの対話UI。文書の破棄前に停止する。
     FLayoutFileName: string;
     FMenuGroup: TVectArtDarkMenuGroup;
     FLayerMenuItem: TPanel;
@@ -82,6 +83,7 @@ type
     procedure CanvasSettingsRequest(Sender: TObject);
     function CreateViewMenuItem(const Caption: string): TPanel;
     procedure DocumentChanged(Sender: TObject);
+    function ExecuteCodexCommand(const Request: string): string;
     procedure FinalizeSkiaRuntime;
     procedure FileOpenClick(Sender: TObject);
     procedure FileSaveClick(Sender: TObject);
@@ -115,6 +117,8 @@ type
     // 外部ホストによる文書初期化後、表示直前の使用色を取り込む。
     procedure DoShow; override;
   public
+    // プラグイン編集画面で、現在の文書へ指示を送る入力欄を表示する。
+    procedure EnableCodexPrompt;
     // 単独アプリだけがJSONの読込・保存メニューを生成するための初期化口。
     procedure EnableStandaloneFileActions;
     // 外部ホストが編集メニュー内のキャンバス設定項目を表示するか切り替える。
@@ -136,7 +140,7 @@ implementation
 uses
   System.IniFiles, System.IOUtils, System.Math, System.Types,
   TextRendererSkiaBootstrap, TextRendererSkiaRuntime,
-  ScreenLayoutCanvasSettingsDialog,
+  ScreenLayoutCanvasSettingsDialog, ScreenLayoutAutomationProtocol,
   ScreenLayoutDocumentJson, ScreenLayoutImageImport,
   ScreenLayoutKeyboardMovement, ScreenLayoutLayerFlipOperations,
   Vcl.Dialogs, Winapi.Dwmapi;
@@ -770,6 +774,7 @@ end;
 
 procedure TMainForm.FormDestroy(Sender: TObject);
 begin
+  FreeAndNil(FCodexPanel);
   if FAutomationPipeStarted then
   begin
     StopScreenLayoutAutomationPipeServer;
@@ -803,6 +808,18 @@ begin
   FreeAndNil(FEditorState);
   FreeAndNil(FDocument);
   FinalizeSkiaRuntime;
+end;
+
+procedure TMainForm.EnableCodexPrompt;
+begin
+  if FCodexPanel = nil then
+    FCodexPanel := TScreenLayoutCodexPanel.CreateForHost(pnlEditorHost, ExecuteCodexCommand);
+end;
+
+function TMainForm.ExecuteCodexCommand(const Request: string): string;
+begin
+  Result := HandleScreenLayoutAutomationRequest(Request, FDocument,
+    FEditHistory, FEditorState, FEditorFrame.CanvasControl);
 end;
 
 procedure TMainForm.WMAutomationPipe(var Message: TMessage);

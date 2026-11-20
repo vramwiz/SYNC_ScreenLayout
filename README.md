@@ -16,6 +16,25 @@ SYNC_ScreenLayoutは、AviUtl2で画面レイアウトを作成・編集する�
 ScreenDesignMakerでは「ファイル」メニューから専用version 15 Document JSONを読み書きできます。AviUtl2プラグインでは、ホストと受け渡す配置データを編集します。
 ScreenDesignMakerはPer-Monitor V2 DPI対応で、Windowsの表示倍率に合わせてVCLが再レイアウトし、文字を実解像度で描画します。
 
+### AviUtl2で参照背景を使う
+
+全画面の下位レイヤーを見ながら編集する場合は、「画面レイアウト」をフィルタオブジェクトに追加します。
+再生を止め、そのオブジェクトの区間内で「編集」を押すと、フィルター入力を1枚だけ取得して参照背景に表示します。
+素材に直接追加した場合は、その素材のフィルター入力を表示します。取得できない場合も背景なしで編集できます。
+
+### 編集画面からCodexへ指示する
+
+編集画面下部のメモに指示を入力して「送信」を押します。Codex CLIのログイン済み環境が必要です。
+CLIを自動検出できない場合は、環境変数 `CODEX_PIPE_EXE` にCLI版 `codex.exe` の絶対パスを指定します。
+指示とレイアウト、プレビューに必要な画像はCodexへ送られます。適用は編集画面に反映され、Undoできます。
+編集中の操作を止めるときは「停止」を押します。適用済みの変更は画面に残ります。
+
+### プラグインを更新する
+
+Win64 Debug／Releaseビルドは `C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout` に
+`SYNC_ScreenLayout_Filter.aux2` と `sk4d.dll` を配置します。対応するAviUtl2はv2.1.10以降です。
+旧版から手動更新する場合は、AviUtl2を終了して `SYNC_ScreenLayout_Filter.auf2` をプラグインの走査対象から外してから配置します。
+
 ## 基本操作
 
 - キャンバス移動: マウス中ボタンドラッグ

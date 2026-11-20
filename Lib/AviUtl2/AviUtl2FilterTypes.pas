@@ -8,10 +8,26 @@ interface
 type
   LPCWSTR = PWideChar;
   OBJECT_HANDLE = Pointer;
+  EFFECT_HANDLE = Pointer;
+
+  PEDIT_INFO = ^TEDIT_INFO;
+  TEDIT_INFO = record
+    Width, Height, Rate, Scale, SampleRate: Integer;
+    Frame, Layer, FrameMax, LayerMax: Integer;
+    DisplayFrameStart, DisplayLayerStart, DisplayFrameNum, DisplayLayerNum: Integer;
+    SelectRangeStart, SelectRangeEnd: Integer;
+    GridBpmTempo: Single;
+    GridBpmBeat: Integer;
+    GridBpmOffset: Single;
+    SceneID: Integer;
+    Background: Cardinal;
+  end;
 
   PEDIT_SECTION = ^TEDIT_SECTION;
   TFilterItemButtonCallback = procedure(Edit: PEDIT_SECTION); cdecl;
   TFILTER_ITEM_BUTTON_CALLBACK = TFilterItemButtonCallback;
+  TFilterItemButtonCallback2 = procedure(Edit: PEDIT_SECTION;
+    Obj: OBJECT_HANDLE; Effect, Item: LPCWSTR); cdecl;
   TOBJECT_LAYER_FRAME = record
     Layer: Integer;
     StartFrame: Integer;
@@ -27,9 +43,9 @@ type
 
   // AviUtl2が編集ボタンへ渡す編集API。未使用欄もSDKのレコード配置を保つため保持する。
   TEDIT_SECTION = record
-    Info: Pointer;
+    Info: PEDIT_INFO;
     CreateObjectFromAlias: Pointer;
-    FindObject: Pointer;
+    FindObject: function(Layer, Frame: Integer): OBJECT_HANDLE; cdecl;
     CountObjectEffect: Pointer;
     GetObjectLayerFrame: TGetObjectLayerFrameFunc;
     GetObjectAlias: Pointer;
@@ -48,12 +64,22 @@ type
     GetMediaInfo: Pointer;
     CreateObjectFromMediaFile: Pointer;
     CreateObject: Pointer;
-    SetCursorLayerFrame: Pointer;
+    SetCursorLayerFrame: procedure(Layer, Frame: Integer); cdecl;
     SetDisplayLayerFrame: Pointer;
     SetSelectRange: Pointer;
     SetGridBpm: Pointer;
     GetObjectName: Pointer;
     SetObjectName: Pointer;
+    // 使用しない関数ポインターも公式SDKと同じスロットに置く。
+    LayerNameThroughDeprecatedSetBpm: array[27..49] of Pointer;
+    FindEffect: function(Obj: OBJECT_HANDLE; Effect: LPCWSTR): EFFECT_HANDLE; cdecl;
+    GetEffectListThroughSetEffectLock: array[51..56] of Pointer;
+    GetEffectItemValue: function(Effect: EFFECT_HANDLE; Item: LPCWSTR): PAnsiChar; cdecl;
+    SetEffectItemValue: function(Effect: EFFECT_HANDLE; Item: LPCWSTR;
+      Value: PAnsiChar): Boolean; cdecl;
+    GetEffectTrackValueThroughSetObjectFlag: array[59..80] of Pointer;
+    GetObjectID: function(Obj: OBJECT_HANDLE): Int64; cdecl;
+    GetEffectID: function(Effect: EFFECT_HANDLE): Int64; cdecl;
   end;
 
   PSCENE_INFO = ^TSCENE_INFO;
@@ -63,6 +89,9 @@ type
     Rate: Integer;
     Scale: Integer;
     SampleRate: Integer;
+    ID: Integer;          // 描画対象シーン。
+    OriginID: Integer;    // 描画の起点となるシーン。
+    Flag: Integer;        // 描画種別。参照フレームのときはビット0が立つ。
   end;
 
   POBJECT_INFO = ^TOBJECT_INFO;
@@ -85,6 +114,8 @@ type
     Num: Integer;
     FrameS: Integer;
     FrameE: Integer;
+    EffectLayer: Integer; // エフェクトを所有するオブジェクトのレイヤー。
+    OriginFrame: Integer; // 描画を開始したシーン基準のフレーム。
   end;
 
   TPIXEL_RGBA = packed record
@@ -180,11 +211,12 @@ type
     Value: LPCWSTR;
   end;
 
-  // 選択中オブジェクトを編集するコールバック付きボタン。
+  // SDK順に旧コールバックと対象を特定できるコールバックを保持する。
   TFILTER_ITEM_BUTTON = record
     ItemType: LPCWSTR;
     Name: LPCWSTR;
     Callback: TFilterItemButtonCallback;
+    Callback2: TFilterItemButtonCallback2;
   end;
 
   PFILTER_PLUGIN_TABLE = ^TFILTER_PLUGIN_TABLE;
@@ -196,9 +228,31 @@ type
     Items: ^Pointer;
     Func_Proc_Video: TFuncProcVideo;
     Func_Proc_Audio: TFuncProcAudio;
+    Func_Create: Pointer;  // ユーザーデータ未使用のためnil。
+    Func_Destroy: Pointer; // ユーザーデータ未使用のためnil。
+  end;
+
+  TEditSectionParamCallback = procedure(Param: Pointer; Edit: PEDIT_SECTION); cdecl;
+  PEDIT_HANDLE = ^TEDIT_HANDLE;
+  TEDIT_HANDLE = record
+    CallEditSection: Pointer;
+    CallEditSectionParam: function(Param: Pointer; Callback: TEditSectionParamCallback): Boolean; cdecl;
+    GetEditInfoThroughEnumModuleInfo: array[2..5] of Pointer;
+    GetHostAppWindow: Pointer;
+    GetEditState: function: Integer; cdecl;
+  end;
+
+  PHOST_APP_TABLE = ^THOST_APP_TABLE;
+  THOST_APP_TABLE = record
+    SetPluginInformation, RegisterInputPlugin, RegisterOutputPlugin: Pointer;
+    RegisterFilterPlugin: procedure(Table: PFILTER_PLUGIN_TABLE); cdecl;
+    RegisterScriptModuleThroughRegisterWindowClient: array[4..7] of Pointer;
+    CreateEditHandle: function: PEDIT_HANDLE; cdecl;
   end;
 
 const
+  AVIUTL2_EDIT_STATE_EDIT = 0;
+  SCENE_FLAG_REFERENCE_FRAME = 1;
   FILTER_FLAG_VIDEO = 1;
   FILTER_FLAG_FILTER = 8;
 

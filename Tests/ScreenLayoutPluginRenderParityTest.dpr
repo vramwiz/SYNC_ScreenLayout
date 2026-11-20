@@ -20,8 +20,6 @@ uses
     '..\Source\Persistence\ScreenLayoutDocumentJsonReader.pas',
   ScreenLayoutDocumentJsonWriter in
     '..\Source\Persistence\ScreenLayoutDocumentJsonWriter.pas',
-  ScreenLayoutFrameCapture in
-    '..\Source\PlacementPlugin\ScreenLayoutFrameCapture.pas',
   ScreenLayoutFilterContext in
     '..\Source\PlacementPlugin\ScreenLayoutFilterContext.pas',
   ScreenLayoutRenderer in '..\Source\Rendering\ScreenLayoutRenderer.pas',
@@ -33,6 +31,7 @@ const
   OUTPUT_HEIGHT = 180;
 
 var
+  ImageReadCount: Integer;
   ReturnedHeight: Integer;
   ReturnedPixels: TBytes;
   ReturnedWidth: Integer;
@@ -59,6 +58,7 @@ end;
 
 procedure GetTestImage(Buffer: PPIXEL_RGBA); cdecl;
 begin
+  Inc(ImageReadCount);
   FillTestBackground(Buffer);
 end;
 
@@ -242,6 +242,7 @@ var
   ExpectedDocument: TVectArtDocument;
   FilterContext: TScreenLayoutFilterContext;
   I: Integer;
+  CapturedInput, OriginalInput: TBytes;
   ObjectInfo: TOBJECT_INFO;
   ReadError: string;
   Serialized: string;
@@ -332,7 +333,9 @@ begin
       Video.Object_ := @ObjectInfo;
       Video.GetImageData := GetTestImage;
       Video.SetImageData := SetReturnedImage;
+      ImageReadCount := 0;
       Check(FilterContext.RenderVideo(@Video), 'Plugin render failed');
+      Check(ImageReadCount = 1, 'Ordinary render must read the input once');
       Check((ReturnedWidth = OUTPUT_WIDTH) and
         (ReturnedHeight = OUTPUT_HEIGHT),
         'Plugin returned unexpected dimensions');
@@ -349,6 +352,15 @@ begin
       Check(CompareMem(ExpectedBuffer.Data, @ReturnedPixels[0],
         Length(ReturnedPixels)),
         'Plugin RGBA differs from the shared renderer output');
+      SetLength(CapturedInput, Length(ReturnedPixels));
+      FillTestBackground(PPIXEL_RGBA(CapturedInput));
+      OriginalInput := Copy(CapturedInput);
+      Check(FilterContext.RenderVideo(@Video, CapturedInput), 'Render with captured input failed');
+      Check(ImageReadCount = 1, 'The render read the same input twice');
+      Check(CompareMem(ExpectedBuffer.Data, @ReturnedPixels[0], Length(ReturnedPixels)),
+        'Render with captured input changed the output');
+      Check(CompareMem(@OriginalInput[0], @CapturedInput[0], Length(CapturedInput)),
+        'Rendering modified the captured background');
     finally
       FilterContext.Free;
     end;

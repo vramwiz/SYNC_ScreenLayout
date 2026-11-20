@@ -39,22 +39,24 @@
     <PropertyGroup Condition="'$(Base)'!=''">
         <DCC_UnitSearchPath>Source\Layers\List;Source\Layers\Operations;Source\Layers\Clipboard;Source\Core\Commands\Layer\Group;Source\Core\Commands\Layer\Transform;Lib\VerticalScrollBar;Lib\ColorPicker;Lib\InputMethod;Source\Core\Commands\Layer;Source\Core\Commands\Shape;Source\Core\Commands\Text;Source\ObjectProperties;Source\ObjectProperties\Color;Source\ObjectProperties\Filters;Source\ObjectProperties\Geometry;Source\Rendering\Paint;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <DCC_DcuOutput>$(MSBuildProjectDirectory)\$(Platform)\$(ProjectName)\$(Config)\DCU</DCC_DcuOutput>
+        <ScreenLayoutPluginDir Condition="'$(ScreenLayoutPluginDir)'==''">$(ProgramData)\aviutl2\Plugin\SYNC_ScreenLayout</ScreenLayoutPluginDir>
         <GenDll>true</GenDll>
         <SanitizedProjectName>SYNC_ScreenLayout_Filter</SanitizedProjectName>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
-        <Debugger_HostApplication>D:\aviutl2_v2.1.3a\aviutl2.exe</Debugger_HostApplication>
-        <PreBuildEvent><![CDATA[if not exist "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout" mkdir "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout"]]></PreBuildEvent>
-        <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
-        <PostBuildEvent><![CDATA[copy /Y "$(MSBuildProjectDirectory)\$(PROJECTNAME).dll" "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\$(PROJECTNAME).auf2"&&copy /Y "$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll" "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\sk4d.dll"]]></PostBuildEvent>
-        <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
+        <Debugger_HostApplication>D:\aviutl2_v2.1.16\aviutl2.exe</Debugger_HostApplication>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2_Win64)'!=''">
-        <Debugger_HostApplication>D:\aviutl2_v2.1.3a\aviutl2.exe</Debugger_HostApplication>
-        <PreBuildEvent><![CDATA[if not exist "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout" mkdir "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout"]]></PreBuildEvent>
+        <Debugger_HostApplication>D:\aviutl2_v2.1.16\aviutl2.exe</Debugger_HostApplication>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Platform)'=='Win64'">
+        <DCC_ExeOutput>$(ScreenLayoutPluginDir)\</DCC_ExeOutput>
+        <PreBuildEvent><![CDATA[if not exist "$(ScreenLayoutPluginDir)" mkdir "$(ScreenLayoutPluginDir)"]]></PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
-        <PostBuildEvent><![CDATA[copy /Y "$(MSBuildProjectDirectory)\$(PROJECTNAME).dll" "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\$(PROJECTNAME).auf2"&&copy /Y "$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll" "C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\sk4d.dll"]]></PostBuildEvent>
+        <PostBuildEvent><![CDATA[copy /Y "$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll" "$(ScreenLayoutPluginDir)\sk4d.dll" || exit /b 1
+copy /Y "$(ScreenLayoutPluginDir)\$(ProjectName).dll" "$(ScreenLayoutPluginDir)\$(ProjectName).aux2" && del /Q "$(ScreenLayoutPluginDir)\$(ProjectName).dll"]]></PostBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
+        <PostBuildEventExecuteWhen>Always</PostBuildEventExecuteWhen>
     </PropertyGroup>
     <ItemGroup>
         <DelphiCompile Include="$(MainSource)">
@@ -76,6 +78,8 @@
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationText.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationLayout.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationProtocol.pas"/>
+        <DCCReference Include="Source\Automation\ScreenLayoutCodexJob.pas"/>
+        <DCCReference Include="Source\Shell\ScreenLayoutCodexPanel.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationPipeServer.pas"/>
         <DCCReference Include="Source\Automation\ScreenLayoutAutomationDocumentCommand.pas"/>
         <DCCReference Include="Lib\TextRenderer\TextRendererSkiaBootstrap.pas"/>
@@ -260,20 +264,4 @@
     <Import Project="$(BDS)\Bin\CodeGear.Delphi.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Delphi.Targets')"/>
     <Import Project="$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj" Condition="Exists('$(APPDATA)\Embarcadero\$(BDSAPPDATABASEDIR)\$(PRODUCTVERSION)\UserTools.proj')"/>
     <Import Project="$(MSBuildProjectName).deployproj" Condition="Exists('$(MSBuildProjectName).deployproj')"/>
-    <PropertyGroup Condition="'$(Config)'=='Debug' And '$(Platform)'=='Win64'">
-        <PreBuildEvent>if not exist &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout&quot; mkdir &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout&quot;</PreBuildEvent>
-        <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
-        <PreLinkEvent/>
-        <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
-        <PostBuildEvent>copy /Y &quot;$(MSBuildProjectDirectory)\$(PROJECTNAME).dll&quot; &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\$(PROJECTNAME).auf2&quot;&amp;&amp;copy /Y &quot;$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll&quot; &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\sk4d.dll&quot;</PostBuildEvent>
-        <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
-    </PropertyGroup>
-    <PropertyGroup Condition="'$(Config)'=='Release' And '$(Platform)'=='Win64'">
-        <PreBuildEvent>if not exist &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout&quot; mkdir &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout&quot;</PreBuildEvent>
-        <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
-        <PreLinkEvent/>
-        <PreLinkEventIgnoreExitCode>False</PreLinkEventIgnoreExitCode>
-        <PostBuildEvent>copy /Y &quot;$(MSBuildProjectDirectory)\$(PROJECTNAME).dll&quot; &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\$(PROJECTNAME).auf2&quot;&amp;&amp;copy /Y &quot;$(MSBuildProjectDirectory)\Lib\Skia\Win64\sk4d.dll&quot; &quot;C:\ProgramData\aviutl2\Plugin\SYNC_ScreenLayout\sk4d.dll&quot;</PostBuildEvent>
-        <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
-    </PropertyGroup>
 </Project>

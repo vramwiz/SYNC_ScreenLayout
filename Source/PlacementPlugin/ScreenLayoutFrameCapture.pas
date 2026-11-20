@@ -1,386 +1,155 @@
-﻿// AviUtl2の合成済みフレームバッファを編集画面用に元の画素形式で保持する。
+﻿// 編集要求と描画コールバックを照合し、フィルター入力を一度だけUIへ渡す。
 unit ScreenLayoutFrameCapture;
 
 interface
 
 uses
-  AviUtl2FilterTypes, System.SysUtils, Winapi.Windows, Winapi.DXGIFormat;
+  AviUtl2FilterTypes, System.SyncObjs, System.SysUtils;
 
 type
+  TScreenLayoutCaptureTarget = record
+    SceneID: Integer;    // 編集対象のシーン。
+    Frame: Integer;      // クリック時のシーン基準フレーム。
+    ObjectLayer: Integer; // エフェクトを所有するオブジェクトのレイヤー。
+    ObjectID: Int64;     // 所有オブジェクトの起動中の固有ID。
+    EffectID: Int64;     // 対象エフェクトの起動中の固有ID。
+  end;
+
+  TScreenLayoutCapturedFrame = record
+    Width, Height: Integer; // フィルターへ渡された画像寸法。
+    Pixels: TBytes;         // 所有する密詰めRGBA。公開後は読み取り専用。
+  end;
+
   TScreenLayoutFrameCapture = class
   private
-    FDevice: IInterface;
-    FFormat: Integer;
-    FHeight: Integer;
-    FInitialized: Boolean;
-    FLock: TRTLCriticalSection;
-    FPixels: TBytes;
-    FStagingTexture: IInterface;
-    FStatus: string;
-    FWidth: Integer;
-    procedure ClearImage(const StatusText: string);
-    procedure ResetGpuResources;
+    FArmed: Integer;                     // 要求がない映像コールバックはロックを取らない。
+    FLock: TCriticalSection;             // 対象、要求ID、返信を保護する。
+    FReply: TScreenLayoutCapturedFrame;  // 受領までの完成済み画像。
+    FRequestID: NativeUInt;              // 0は待機中の要求なし。
+    FTarget: TScreenLayoutCaptureTarget; // 対象の識別情報。ホストのハンドルは保持しない。
+    function Claim(Video: PFILTER_PROC_VIDEO): NativeUInt;
   public
     constructor Create;
     destructor Destroy; override;
-    // 現在の合成済みフレームを元形式のCPU所有バッファへ複製する。
-    procedure Capture(Video: PFILTER_PROC_VIDEO);
-    // 保持中の画像をロック内で複製し、ロック外でRGBA8へ変換する。
-    function CopyRgba(out Pixels: TBytes; out Width, Height: Integer;
-      out Status: string): Boolean;
+    // 1件の取得要求を登録し、それ以前の要求と未受領画像を破棄する。
+    procedure Arm(const Target: TScreenLayoutCaptureTarget; RequestID: NativeUInt);
+    // 一致した映像コールバックだけが、重ね描き前の画像を所有バッファへ取得する。
+    // UIへ通知すべき要求IDを返し、取得済み画像は出力用の入力としても共有する。
+    function Capture(Video: PFILTER_PROC_VIDEO; out Pixels: TBytes): NativeUInt;
+    // 該当する要求を終了し、到着済みの画像があればUIへ所有権を渡す。
+    procedure Take(RequestID: NativeUInt; out Frame: TScreenLayoutCapturedFrame);
   end;
-
-// 元形式の密詰め画像を独立したRGBA8配列へ変換する。不正な入力ではFalseを返す。
-function ConvertScreenLayoutFramebufferToRgba(const RawPixels: TBytes;
-  Width, Height: Integer; TextureFormat: DXGI_FORMAT;
-  out Pixels: TBytes): Boolean;
 
 implementation
 
-uses
-  System.Math, Winapi.D3D11;
-
 const
-  MAX_CAPTURE_DIMENSION = 16384;
-
-type
-  TPixelWords = array[0..3] of Word;
-  PPixelWords = ^TPixelWords;
-
-function BytesPerPixel(Format: DXGI_FORMAT): Integer;
-begin
-  case Format of
-    DXGI_FORMAT_R8G8B8A8_UNORM,
-    DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
-    DXGI_FORMAT_B8G8R8A8_UNORM,
-    DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
-      Result := 4;
-    DXGI_FORMAT_R16G16B16A16_UNORM,
-    DXGI_FORMAT_R16G16B16A16_FLOAT:
-      Result := 8;
-  else
-    Result := 0;
-  end;
-end;
-
-function HalfToSingle(Value: Word): Single;
-var
-  Exponent: Integer;
-  Mantissa: Cardinal;
-  ResultBits: Cardinal;
-  SignBits: Cardinal;
-begin
-  SignBits := Cardinal(Value and $8000) shl 16;
-  Exponent := (Value shr 10) and $1F;
-  Mantissa := Value and $03FF;
-  if Exponent = 0 then
-  begin
-    if Mantissa = 0 then
-      ResultBits := SignBits
-    else
-    begin
-      Exponent := -14;
-      while (Mantissa and $0400) = 0 do
-      begin
-        Mantissa := Mantissa shl 1;
-        Dec(Exponent);
-      end;
-      Mantissa := Mantissa and $03FF;
-      ResultBits := SignBits or Cardinal(Exponent + 127) shl 23 or
-        Mantissa shl 13;
-    end;
-  end
-  else if Exponent = $1F then
-    ResultBits := SignBits or $7F800000 or Mantissa shl 13
-  else
-    ResultBits := SignBits or Cardinal(Exponent + 112) shl 23 or
-      Mantissa shl 13;
-  Result := PSingle(@ResultBits)^;
-end;
-
-function FloatToByte(Value: Single): Byte;
-begin
-  if IsNan(Value) or (Value <= 0) then
-    Exit(0);
-  if Value >= 1 then
-    Exit(255);
-  Result := Round(Value * 255);
-end;
-
-function ConvertScreenLayoutFramebufferToRgba(const RawPixels: TBytes;
-  Width, Height: Integer; TextureFormat: DXGI_FORMAT;
-  out Pixels: TBytes): Boolean;
-var
-  Destination, Source: PByte;
-  SourceWords: PPixelWords;
-  RowBytes: NativeInt;
-  I, X, Y, PixelSize: Integer;
-begin
-  Pixels := nil;
-  Result := False;
-  PixelSize := BytesPerPixel(TextureFormat);
-  if (Width <= 0) or (Height <= 0) or
-    (Width > MAX_CAPTURE_DIMENSION) or (Height > MAX_CAPTURE_DIMENSION) or
-    (PixelSize = 0) then
-    Exit;
-  RowBytes := NativeInt(Width) * PixelSize;
-  if Length(RawPixels) <> RowBytes * Height then
-    Exit;
-  SetLength(Pixels, NativeInt(Width) * Height * 4);
-  Destination := @Pixels[0];
-  for Y := 0 to Height - 1 do
-  begin
-    Source := @RawPixels[NativeInt(Y) * RowBytes];
-    case TextureFormat of
-      DXGI_FORMAT_R8G8B8A8_UNORM,
-      DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
-        Move(Source^, Destination^, NativeInt(Width) * 4);
-      DXGI_FORMAT_B8G8R8A8_UNORM,
-      DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
-        for X := 0 to Width - 1 do
-        begin
-          Destination[X * 4] := Source[X * 4 + 2];
-          Destination[X * 4 + 1] := Source[X * 4 + 1];
-          Destination[X * 4 + 2] := Source[X * 4];
-          Destination[X * 4 + 3] := Source[X * 4 + 3];
-        end;
-      DXGI_FORMAT_R16G16B16A16_UNORM,
-      DXGI_FORMAT_R16G16B16A16_FLOAT:
-        begin
-          SourceWords := PPixelWords(Source);
-          for X := 0 to Width - 1 do
-          begin
-            I := X * 4;
-            if TextureFormat = DXGI_FORMAT_R16G16B16A16_UNORM then
-            begin
-              Destination[I] := SourceWords[0] div 257;
-              Destination[I + 1] := SourceWords[1] div 257;
-              Destination[I + 2] := SourceWords[2] div 257;
-              Destination[I + 3] := SourceWords[3] div 257;
-            end
-            else
-            begin
-              Destination[I] := FloatToByte(HalfToSingle(SourceWords[0]));
-              Destination[I + 1] := FloatToByte(HalfToSingle(SourceWords[1]));
-              Destination[I + 2] := FloatToByte(HalfToSingle(SourceWords[2]));
-              Destination[I + 3] := Round(EnsureRange(
-                HalfToSingle(SourceWords[3]), 0.0, 1.0) * 255);
-            end;
-            Inc(SourceWords);
-          end;
-        end;
-    end;
-    Inc(Destination, NativeInt(Width) * 4);
-  end;
-  Result := True;
-end;
+  MAX_CAPTURE_DIMENSION = 16384; // 映像出力と同じ有効寸法の上限。
 
 constructor TScreenLayoutFrameCapture.Create;
 begin
   inherited Create;
-  InitializeCriticalSection(FLock);
-  FInitialized := True;
-  FStatus := 'No framebuffer has been captured.';
+  FLock := TCriticalSection.Create;
 end;
 
 destructor TScreenLayoutFrameCapture.Destroy;
 begin
-  if FInitialized then
-  begin
-    EnterCriticalSection(FLock);
-    try
-      ResetGpuResources;
-      FPixels := nil;
-    finally
-      LeaveCriticalSection(FLock);
-    end;
-    DeleteCriticalSection(FLock);
-  end;
+  FLock.Free;
   inherited Destroy;
 end;
 
-procedure TScreenLayoutFrameCapture.ResetGpuResources;
+procedure TScreenLayoutFrameCapture.Arm(const Target: TScreenLayoutCaptureTarget;
+  RequestID: NativeUInt);
 begin
-  FStagingTexture := nil;
-  FDevice := nil;
-end;
-
-procedure TScreenLayoutFrameCapture.ClearImage(const StatusText: string);
-begin
-  FPixels := nil;
-  FWidth := 0;
-  FHeight := 0;
-  FStatus := StatusText;
-end;
-
-procedure TScreenLayoutFrameCapture.Capture(Video: PFILTER_PROC_VIDEO);
-var
-  Context: ID3D11DeviceContext;
-  Destination: PByte;
-  Device: ID3D11Device;
-  TextureFormat: DXGI_FORMAT;
-  Height: Integer;
-  Mapped: D3D11_MAPPED_SUBRESOURCE;
-  RowBytes: NativeInt;
-  Source: PByte;
-  SourceDesc: D3D11_TEXTURE2D_DESC;
-  SourcePointer: Pointer;
-  SourceTexture: ID3D11Texture2D;
-  StagingDesc: D3D11_TEXTURE2D_DESC;
-  StagingTexture: ID3D11Texture2D;
-  Width: Integer;
-  Y: Integer;
-begin
-  if not FInitialized then
-    Exit;
-  EnterCriticalSection(FLock);
+  FLock.Acquire;
   try
-    try
-      if (Video = nil) or not Assigned(Video^.GetFramebufferTexture2D) then
-      begin
-        ClearImage('Framebuffer callback is unavailable.');
-        Exit;
-      end;
-      SourcePointer := Video^.GetFramebufferTexture2D();
-      if SourcePointer = nil then
-      begin
-        ClearImage('Framebuffer texture is unavailable.');
-        Exit;
-      end;
+    FReply := Default(TScreenLayoutCapturedFrame);
+    FRequestID := RequestID;
+    FTarget := Target;
+    TInterlocked.Exchange(FArmed, 1);
+  finally
+    FLock.Release;
+  end;
+end;
 
-      SourceTexture := ID3D11Texture2D(SourcePointer);
-      SourceTexture.GetDesc(SourceDesc);
-      Width := SourceDesc.Width;
-      Height := SourceDesc.Height;
-      TextureFormat := SourceDesc.Format;
-      if (Width <= 0) or (Height <= 0) or
-        (Width > MAX_CAPTURE_DIMENSION) or
-        (Height > MAX_CAPTURE_DIMENSION) then
-      begin
-        ClearImage(System.SysUtils.Format('Invalid framebuffer size: %d x %d.',
-          [Width, Height]));
-        Exit;
-      end;
-      if BytesPerPixel(TextureFormat) = 0 then
-      begin
-        ClearImage(System.SysUtils.Format(
-          'Unsupported framebuffer DXGI format: %d.',
-          [Ord(TextureFormat)]));
-        Exit;
-      end;
-      if SourceDesc.SampleDesc.Count <> 1 then
-      begin
-        ClearImage(System.SysUtils.Format(
-          'Unsupported framebuffer sample count: %d.',
-          [SourceDesc.SampleDesc.Count]));
-        Exit;
-      end;
+function TScreenLayoutFrameCapture.Claim(Video: PFILTER_PROC_VIDEO): NativeUInt;
+begin
+  Result := 0;
+  if (TInterlocked.CompareExchange(FArmed, 0, 0) = 0) or
+    (Video = nil) or (Video^.Scene = nil) or (Video^.Object_ = nil) then
+    Exit;
 
-      SourceTexture.GetDevice(Device);
-      if Device = nil then
-      begin
-        ClearImage('Framebuffer device is unavailable.');
-        Exit;
-      end;
-      if (FStagingTexture = nil) or
-        (Pointer(FDevice) <> Pointer(Device)) or
-        (FWidth <> Width) or (FHeight <> Height) or
-        (FFormat <> Ord(TextureFormat)) then
-      begin
-        ResetGpuResources;
-        StagingDesc := SourceDesc;
-        StagingDesc.MipLevels := 1;
-        StagingDesc.ArraySize := 1;
-        StagingDesc.Usage := D3D11_USAGE_STAGING;
-        StagingDesc.BindFlags := 0;
-        StagingDesc.CPUAccessFlags := D3D11_CPU_ACCESS_READ;
-        StagingDesc.MiscFlags := 0;
-        if Device.CreateTexture2D(StagingDesc, nil, StagingTexture) < 0 then
-        begin
-          ClearImage('Could not create the framebuffer staging texture.');
-          Exit;
-        end;
-        FStagingTexture := StagingTexture;
-        FDevice := Device;
-      end
-      else
-        StagingTexture := ID3D11Texture2D(FStagingTexture);
-
-      Device.GetImmediateContext(Context);
-      if Context = nil then
-      begin
-        ClearImage('D3D11 immediate context is unavailable.');
-        Exit;
-      end;
-      Context.CopyResource(StagingTexture, SourceTexture);
-      FillChar(Mapped, SizeOf(Mapped), 0);
-      if Context.Map(StagingTexture, 0, D3D11_MAP_READ, 0, Mapped) < 0 then
-      begin
-        ClearImage('Could not map the framebuffer staging texture.');
-        Exit;
-      end;
-      try
-        RowBytes := NativeInt(Width) * BytesPerPixel(TextureFormat);
-        if (Mapped.pData = nil) or (Mapped.RowPitch < RowBytes) then
-        begin
-          ClearImage('Invalid framebuffer row pitch or mapped data.');
-          Exit;
-        end;
-        SetLength(FPixels, RowBytes * Height);
-        Destination := @FPixels[0];
-        for Y := 0 to Height - 1 do
-        begin
-          Source := PByte(Mapped.pData) + NativeInt(Y) * Mapped.RowPitch;
-          Move(Source^, Destination^, RowBytes);
-          Inc(Destination, RowBytes);
-        end;
-      finally
-        Context.Unmap(StagingTexture, 0);
-      end;
-      FWidth := Width;
-      FHeight := Height;
-      FFormat := Ord(TextureFormat);
-      FStatus := System.SysUtils.Format(
-        'Framebuffer: %d x %d, DXGI format %d.',
-        [Width, Height, Ord(TextureFormat)]);
-    except
-      on E: Exception do
-        ClearImage('Framebuffer capture failed: ' + E.Message);
+  FLock.Acquire;
+  try
+    if (FArmed <> 0) and (Video^.Scene^.ID = FTarget.SceneID) and
+      (Video^.Scene^.OriginID = FTarget.SceneID) and
+      ((Video^.Scene^.Flag and SCENE_FLAG_REFERENCE_FRAME) = 0) and
+      (Video^.Object_^.OriginFrame = FTarget.Frame) and
+      (Video^.Object_^.EffectLayer = FTarget.ObjectLayer) and
+      (Video^.Object_^.ID = FTarget.ObjectID) and
+      (Video^.Object_^.EffectID = FTarget.EffectID) then
+    begin
+      TInterlocked.Exchange(FArmed, 0);
+      Result := FRequestID;
     end;
   finally
-    LeaveCriticalSection(FLock);
+    FLock.Release;
   end;
 end;
 
-function TScreenLayoutFrameCapture.CopyRgba(out Pixels: TBytes;
-  out Width, Height: Integer; out Status: string): Boolean;
+function TScreenLayoutFrameCapture.Capture(Video: PFILTER_PROC_VIDEO;
+  out Pixels: TBytes): NativeUInt;
 var
-  RawPixels: TBytes;
-  TextureFormat: DXGI_FORMAT;
+  Frame: TScreenLayoutCapturedFrame;
+  Height, Width: Integer;
+  RequestID: NativeUInt;
 begin
+  Result := 0;
   Pixels := nil;
-  Width := 0;
-  Height := 0;
-  Status := '';
-  if not FInitialized then
-    Exit(False);
-  EnterCriticalSection(FLock);
-  try
-    Status := FStatus;
-    RawPixels := Copy(FPixels);
-    Width := FWidth;
-    Height := FHeight;
-    TextureFormat := DXGI_FORMAT(FFormat);
-  finally
-    LeaveCriticalSection(FLock);
-  end;
-  // 再生側の次フレーム保存を、編集用の色変換で待たせない。
-  Result := ConvertScreenLayoutFramebufferToRgba(RawPixels, Width, Height,
-    TextureFormat, Pixels);
-  if not Result then
+  RequestID := Claim(Video);
+  if RequestID = 0 then
+    Exit;
+
+  Width := Video^.Object_^.Width;
+  Height := Video^.Object_^.Height;
+  if Assigned(Video^.GetImageData) and (Width > 0) and (Height > 0) and
+    (Width <= MAX_CAPTURE_DIMENSION) and (Height <= MAX_CAPTURE_DIMENSION) then
   begin
-    Width := 0;
-    Height := 0;
+    SetLength(Pixels, NativeInt(Width) * Height * SizeOf(TPIXEL_RGBA));
+    Video^.GetImageData(PPIXEL_RGBA(Pixels));
+    Frame.Width := Width;
+    Frame.Height := Height;
+    Frame.Pixels := Pixels;
+  end
+  else
+    Frame := Default(TScreenLayoutCapturedFrame);
+
+  FLock.Acquire;
+  try
+    // 取得中に要求が失効しても、現在の映像の合成には取得済みの入力を使える。
+    if FRequestID = RequestID then
+    begin
+      FReply := Frame;
+      Result := RequestID;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TScreenLayoutFrameCapture.Take(RequestID: NativeUInt; out Frame: TScreenLayoutCapturedFrame);
+begin
+  Frame := Default(TScreenLayoutCapturedFrame);
+  FLock.Acquire;
+  try
+    if (RequestID <> 0) and (FRequestID = RequestID) then
+    begin
+      TInterlocked.Exchange(FArmed, 0);
+      FRequestID := 0;
+      Frame := FReply;
+      FReply := Default(TScreenLayoutCapturedFrame);
+    end;
+  finally
+    FLock.Release;
   end;
 end;
 

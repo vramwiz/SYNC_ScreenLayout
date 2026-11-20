@@ -15,7 +15,7 @@ procedure SetupPluginTable(Flag: Integer; Name, Label_, Information: PWideChar;
 procedure AddFile(var Item: TFILTER_ITEM_FILE; Name, Value,
   FileFilter: PWideChar);
 procedure AddButton(var Item: TFILTER_ITEM_BUTTON; Name: PWideChar;
-  Callback: TFILTER_ITEM_BUTTON_CALLBACK);
+  Callback: TFilterItemButtonCallback2);
 procedure AddString(var Item: TFILTER_ITEM_STRING; Name, Value: PWideChar);
 procedure AddColor(var Item: TFILTER_ITEM_COLOR; Name: PWideChar;
   Color: TColor; Alpha: Byte = 255);
@@ -102,11 +102,12 @@ begin
 end;
 
 procedure AddButton(var Item: TFILTER_ITEM_BUTTON; Name: PWideChar;
-  Callback: TFILTER_ITEM_BUTTON_CALLBACK);
+  Callback: TFilterItemButtonCallback2);
 begin
   Item.ItemType := 'button';
   Item.Name := Name;
-  Item.Callback := Callback;
+  Item.Callback := nil;
+  Item.Callback2 := Callback;
   RegisterItem(@Item);
 end;
 

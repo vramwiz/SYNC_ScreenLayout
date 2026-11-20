@@ -3,175 +3,154 @@ program ScreenLayoutFrameCaptureTest;
 {$APPTYPE CONSOLE}
 
 uses
-  System.SysUtils, Winapi.DXGIFormat, Winapi.D3D11, Winapi.D3DCommon,
+  System.SysUtils,
   AviUtl2FilterTypes in '..\Lib\AviUtl2\AviUtl2FilterTypes.pas',
   ScreenLayoutFrameCapture in '..\Source\PlacementPlugin\ScreenLayoutFrameCapture.pas';
 
-procedure Check(Value: Boolean; const MessageText: string);
+var
+  Capture: TScreenLayoutFrameCapture;
+  Reads: Integer;
+  Target: TScreenLayoutCaptureTarget;
+  ReplaceRequestDuringRead: Boolean;
+
+procedure Check(Condition: Boolean; const Detail: string);
 begin
-  if not Value then
-    raise Exception.Create(MessageText);
+  if not Condition then
+    raise Exception.Create(Detail);
 end;
 
-procedure TestConversion;
-const
-  Formats: array[0..5] of DXGI_FORMAT = (
-    DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
-    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
-    DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT);
-var
-  Raw, Pixels: TBytes;
-  F, P, C, Size: Integer;
-  W: Word;
+procedure ReadInput(Buffer: PPIXEL_RGBA); cdecl;
 begin
-  for F := 0 to High(Formats) do
+  Inc(Reads);
+  Buffer^.R := 16;
+  Buffer^.G := 192;
+  Buffer^.B := 32;
+  Buffer^.A := 255;
+  Inc(Buffer);
+  Buffer^.R := 220;
+  Buffer^.G := 24;
+  Buffer^.B := 80;
+  Buffer^.A := 128;
+  if ReplaceRequestDuringRead then
   begin
-    Size := 4;
-    if F >= 4 then Size := 8;
-    SetLength(Raw, 4 * Size);
-    for P := 0 to 3 do
-      for C := 0 to 3 do
-        if Size = 4 then
-          Raw[P * Size + C] := P * 40 + C * 10
-        else
-        begin
-          if F = 4 then W := (P * 40 + C * 10) * 257
-          else if (P + C) mod 2 = 0 then W := $3C00 else W := $0000;
-          Move(W, Raw[P * Size + C * 2], 2);
-        end;
-    Check(ConvertScreenLayoutFramebufferToRgba(Raw, 2, 2, Formats[F], Pixels), 'convert');
-    Check(Length(Pixels) = 16, 'size');
-    for P := 0 to 3 do
-      for C := 0 to 3 do
-      begin
-        if F = 5 then
-        begin
-          if (P + C) mod 2 = 0 then W := 255 else W := 0;
-        end
-        else if (F in [2, 3]) and (C in [0, 2]) then W := P * 40 + (2 - C) * 10
-        else W := P * 40 + C * 10;
-        Check(Pixels[P * 4 + C] = W, 'pixel order / alpha');
-      end;
-    W := Raw[0];
-    Pixels[0] := Pixels[0] xor $FF;
-    Check(Raw[0] = W, 'independent output');
-  end;
-  Raw := TBytes.Create($00, $BC, $00, $40, $00, $38, $00, $38);
-  Check(ConvertScreenLayoutFramebufferToRgba(Raw, 1, 1,
-    DXGI_FORMAT_R16G16B16A16_FLOAT, Pixels), 'float');
-  Check((Pixels[0] = 0) and (Pixels[1] = 255) and
-    (Pixels[2] = 128) and (Pixels[3] = 128), 'float clamp / alpha');
-  Check(not ConvertScreenLayoutFramebufferToRgba(Raw, 0, 1, Formats[0], Pixels), 'zero');
-  Check(not ConvertScreenLayoutFramebufferToRgba(Raw, -1, 1, Formats[0], Pixels), 'negative');
-  Check(not ConvertScreenLayoutFramebufferToRgba(Raw, 16385, 1, Formats[0], Pixels), 'oversize');
-  Check(not ConvertScreenLayoutFramebufferToRgba(Raw, 2, 2, Formats[0], Pixels), 'short');
-  Check(not ConvertScreenLayoutFramebufferToRgba(Raw, 1, 1, DXGI_FORMAT_UNKNOWN, Pixels), 'format');
-  Check(Pixels = nil, 'invalid output');
-end;
-
-var
-  TestTexture: ID3D11Texture2D;
-  FramebufferRequested: Boolean;
-
-function GetTestTexture: Pointer; cdecl;
-begin
-  FramebufferRequested := True;
-  Result := Pointer(TestTexture);
-end;
-
-procedure TestGpuCapture;
-const
-  Formats: array[0..5] of DXGI_FORMAT = (
-    DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
-    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
-    DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT);
-var
-  Device: ID3D11Device;
-  Context: ID3D11DeviceContext;
-  Level: D3D_FEATURE_LEVEL;
-  Desc: D3D11_TEXTURE2D_DESC;
-  Data: D3D11_SUBRESOURCE_DATA;
-  Video: TFILTER_PROC_VIDEO;
-  Capture: TScreenLayoutFrameCapture;
-  Raw, Pixels, Expected: TBytes;
-  F, N, Size, Width, Height: Integer;
-  Status: string;
-begin
-  Check(D3D11CreateDevice(nil, D3D_DRIVER_TYPE_WARP, 0, 0, nil, 0,
-    D3D11_SDK_VERSION, Device, Level, Context) >= 0, 'WARP device');
-  Capture := TScreenLayoutFrameCapture.Create;
-  try
-    FillChar(Video, SizeOf(Video), 0);
-    Video.GetFramebufferTexture2D := GetTestTexture;
-    for F := 0 to High(Formats) do
-    begin
-      Size := 4;
-      if F >= 4 then Size := 8;
-      FillChar(Desc, SizeOf(Desc), 0);
-      Desc.Width := 3;
-      Desc.Height := 2;
-      Desc.MipLevels := 1;
-      Desc.ArraySize := 1;
-      Desc.Format := Formats[F];
-      Desc.SampleDesc.Count := 1;
-      Desc.Usage := D3D11_USAGE_DEFAULT;
-      Desc.BindFlags := D3D11_BIND_SHADER_RESOURCE;
-      SetLength(Raw, 6 * Size);
-      for N := 0 to High(Raw) do Raw[N] := N mod 60;
-      FillChar(Data, SizeOf(Data), 0);
-      Data.pSysMem := @Raw[0];
-      Data.SysMemPitch := 3 * Size;
-      TestTexture := nil;
-      Check(Device.CreateTexture2D(Desc, @Data, TestTexture) >= 0, 'texture');
-      Check(ConvertScreenLayoutFramebufferToRgba(Raw, 3, 2, Formats[F], Expected), 'expected');
-      for N := 0 to 1 do
-      begin
-        FramebufferRequested := False;
-        Capture.Capture(@Video);
-        Check(FramebufferRequested, 'capture framebuffer');
-        Check(Capture.CopyRgba(Pixels, Width, Height, Status), 'capture: ' + Status);
-        Check((Width = 3) and (Height = 2), 'capture dimensions');
-        Check(CompareMem(@Pixels[0], @Expected[0], Length(Expected)), 'GPU roundtrip');
-      end;
-
-    end;
-    Capture.Capture(nil);
-    Check(not Capture.CopyRgba(Pixels, Width, Height, Status), 'clear old frame');
-  finally
-    Capture.Free;
-    TestTexture := nil;
+    ReplaceRequestDuringRead := False;
+    Capture.Arm(Target, 6);
   end;
 end;
 
-procedure TestUnavailable;
+procedure RunCaptureTests;
 var
-  Capture: TScreenLayoutFrameCapture;
+  Frame: TScreenLayoutCapturedFrame;
+  Obj: TOBJECT_INFO;
   Pixels: TBytes;
-  Width, Height: Integer;
-  Status: string;
+  Scene: TSCENE_INFO;
+  Video: TFILTER_PROC_VIDEO;
 begin
-  Capture := TScreenLayoutFrameCapture.Create;
-  try
-    Check(not Capture.CopyRgba(Pixels, Width, Height, Status), 'initial');
-    Capture.Capture(nil);
-    Check(not Capture.CopyRgba(Pixels, Width, Height, Status), 'unavailable');
-    Check((Width = 0) and (Height = 0) and (Pixels = nil) and (Status <> ''), 'cleared');
-  finally
-    Capture.Free;
-  end;
+  Target.SceneID := 3;
+  Target.Frame := 15;
+  Target.ObjectLayer := 2;
+  Target.ObjectID := 24;
+  Target.EffectID := 84;
+  Scene := Default(TSCENE_INFO);
+  Scene.ID := Target.SceneID;
+  Scene.OriginID := Target.SceneID;
+  Obj := Default(TOBJECT_INFO);
+  Obj.Width := 1;
+  Obj.Height := 2;
+  Obj.Layer := 1;
+  Obj.EffectLayer := Target.ObjectLayer;
+  Obj.OriginFrame := Target.Frame;
+  Obj.ID := Target.ObjectID;
+  Obj.EffectID := Target.EffectID;
+  Video := Default(TFILTER_PROC_VIDEO);
+  Video.Scene := @Scene;
+  Video.Object_ := @Obj;
+  Video.GetImageData := ReadInput;
+
+  Check((Capture.Capture(@Video, Pixels) = 0) and (Reads = 0),
+    'An ordinary frame must not read a background');
+  Capture.Arm(Target, 1);
+  Inc(Scene.ID);
+  Check(Capture.Capture(@Video, Pixels) = 0, 'Wrong scene accepted');
+  Dec(Scene.ID);
+  Inc(Scene.OriginID);
+  Check(Capture.Capture(@Video, Pixels) = 0, 'Wrong origin scene accepted');
+  Dec(Scene.OriginID);
+  Scene.Flag := SCENE_FLAG_REFERENCE_FRAME;
+  Check(Capture.Capture(@Video, Pixels) = 0, 'Reference frame accepted');
+  Scene.Flag := 0;
+  Inc(Obj.OriginFrame);
+  Check(Capture.Capture(@Video, Pixels) = 0, 'Wrong frame accepted');
+  Dec(Obj.OriginFrame);
+  Inc(Obj.EffectLayer);
+  Check(Capture.Capture(@Video, Pixels) = 0, 'Wrong owner layer accepted');
+  Dec(Obj.EffectLayer);
+  Inc(Obj.ID);
+  Check(Capture.Capture(@Video, Pixels) = 0, 'Wrong object accepted');
+  Dec(Obj.ID);
+  Inc(Obj.EffectID);
+  Check(Capture.Capture(@Video, Pixels) = 0, 'Wrong effect accepted');
+  Dec(Obj.EffectID);
+  Check(Reads = 0, 'Unrelated frames must not read a background');
+  Check(Capture.Capture(@Video, Pixels) = 1, 'Matching frame was not captured');
+  Check((Length(Pixels) = 8) and (Pixels[0] = 16) and (Pixels[4] = 220),
+    'Acquired pixels were not returned for compositing');
+  Check((Capture.Capture(@Video, Pixels) = 0) and (Reads = 1),
+    'A request must read one image only');
+  Capture.Take(1, Frame);
+  Check((Frame.Width = 1) and (Frame.Height = 2) and (Length(Frame.Pixels) = 8),
+    'Captured dimensions or buffer are invalid');
+  Check((Frame.Pixels[0] = 16) and (Frame.Pixels[1] = 192) and
+    (Frame.Pixels[2] = 32) and (Frame.Pixels[3] = 255) and
+    (Frame.Pixels[4] = 220) and (Frame.Pixels[5] = 24) and
+    (Frame.Pixels[6] = 80) and (Frame.Pixels[7] = 128), 'RGBA order changed');
+
+  Capture.Arm(Target, 2);
+  Capture.Take(1, Frame);
+  Check(Length(Frame.Pixels) = 0, 'An old request was delivered again');
+  Capture.Take(2, Frame);
+  Check((Capture.Capture(@Video, Pixels) = 0) and (Reads = 1),
+    'A cancelled request must not read a background');
+
+  Capture.Arm(Target, 3);
+  Obj.Width := 0;
+  Check((Capture.Capture(@Video, Pixels) = 3) and (Reads = 1),
+    'Invalid dimensions must complete without an image');
+  Capture.Take(3, Frame);
+  Check(Length(Frame.Pixels) = 0, 'Invalid dimensions returned stale pixels');
+  Obj.Width := 1;
+
+  Capture.Arm(Target, 4);
+  Video.GetImageData := nil;
+  Check((Capture.Capture(@Video, Pixels) = 4) and (Reads = 1),
+    'Missing API must complete without an image');
+  Capture.Take(4, Frame);
+  Check(Length(Frame.Pixels) = 0, 'Missing API returned stale pixels');
+  Video.GetImageData := ReadInput;
+
+  Capture.Arm(Target, 5);
+  ReplaceRequestDuringRead := True;
+  Check((Capture.Capture(@Video, Pixels) = 0) and (Length(Pixels) = 8),
+    'Superseded image must only be available to the current render');
+  Check(Capture.Capture(@Video, Pixels) = 6, 'New request was lost');
+  Capture.Take(6, Frame);
+  Check((Reads = 3) and (Length(Frame.Pixels) = 8), 'Same-frame retry failed');
 end;
 
 begin
+  Capture := TScreenLayoutFrameCapture.Create;
   try
-    TestConversion;
-    TestGpuCapture;
-    TestUnavailable;
-    Writeln('PASS');
-  except
-    on E: Exception do
-    begin
-      Writeln(E.Message);
-      Halt(1);
+    try
+      RunCaptureTests;
+      Writeln('PASS: one-shot input capture, target matching, cancellation and retry');
+    except
+      on E: Exception do
+      begin
+        Writeln(E.ClassName, ': ', E.Message);
+        ExitCode := 1;
+      end;
     end;
+  finally
+    Capture.Free;
   end;
 end.
